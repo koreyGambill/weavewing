@@ -5,7 +5,7 @@ import * as Path from "node:path";
 import { ConcurrencyGroup, type Context, definePipeline } from "@sparkwing/sdk";
 
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
-import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
+import { APPLE_SIGNING_SECRETS, assertCleanBundle, assertMacSigningNotes, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, draftMacSigning, expectedAssets, macHost, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
 
 import { smokeCi, verifiedCi } from "../lib/release-ci.ts";
 
@@ -69,7 +69,7 @@ async function assertInput(ctx: Context, co: Checkout) {
   }
   releaseNotes(co.root, input(ctx).version, commit);
   if (platforms.includes("mac") && ctx.args.stage !== "promote")
-    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "moonborn", macPreflight(co.nodeVersion)]);
+    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", macHost(await ctx.variable("WEAVEWING_MAC_HOST")), macPreflight(co.nodeVersion)]);
   if (ctx.args.stage !== "promote" && (platforms.includes("linux") || platforms.includes("win")))
     await logged(ctx, co, "host-preflight", ["bash", "-c", 'set -eu; hint="Install prerequisites: sudo apt-get install build-essential pkg-config libsecret-1-dev imagemagick patchelf zip"; for tool in cc make pkg-config convert patchelf zip; do command -v "$tool" >/dev/null || { echo "$hint" >&2; exit 1; }; done; pkg-config --exists libsecret-1 || { echo "$hint" >&2; exit 1; }']);
   if (ctx.args.stage !== "promote" && platforms.includes("win"))
@@ -92,7 +92,7 @@ export const releasePipeline = definePipeline({
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
     { name: "draft-evidence", type: "string", description: "Required for promote: absolute evidence directory of the draft run" },
   ],
-  secrets: ["WEAVEWING_RELEASE_GH_TOKEN", "APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map((name) => ({ name, optional: true })),
+  secrets: [...["WEAVEWING_RELEASE_GH_TOKEN", ...APPLE_SIGNING_SECRETS].map((name) => ({ name, optional: true })), { name: "WEAVEWING_MAC_HOST", optional: true, variable: true }],
   plan(p, run) {
     const version = run.args.version ?? "";
     const { platforms, channel } = releaseInputs(version || (run.args.channel === "test" ? "0.0.0-nightly.20000101.0" : "0.0.0"), run.args.platforms || "linux,win,mac", run.args.channel);
@@ -117,7 +117,9 @@ export const releasePipeline = definePipeline({
         const download = Path.join(co.evidence, "promote-assets");
         FS.mkdirSync(download, { recursive: true });
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", download, "--clobber");
-        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit, channel);
+        const appleSigningConfigured = (await Promise.all(APPLE_SIGNING_SECRETS.map((name) => ctx.secret(name)))).some(Boolean);
+        const signing = verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit, channel, { appleSigningConfigured });
+        assertMacSigningNotes(release.body ?? "", signing);
         await assertNoTag(ctx, co);
         await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", ...releaseFlags(channel, "promote"));
         const ref = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`));
@@ -135,7 +137,7 @@ export const releasePipeline = definePipeline({
     const preflight = p.job("preflight", async (ctx) => {
       const co = checkout(ctx);
       const result = await assertInput(ctx, co);
-      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts"]);
+      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-mac-signing.test.ts", ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts"]);
       FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, buildOnly, run: ctx.run.id }, null, 2));
       return result;
     }).inline().cores(0.25);
@@ -206,10 +208,13 @@ export const releasePipeline = definePipeline({
     const mac = p.job("mac", async (ctx) => {
       const co = checkout(ctx);
       const { commit } = (await ctx.output(preflight))!;
-      await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
+      const host = macHost(await ctx.variable("WEAVEWING_MAC_HOST"));
+      const secrets = Object.fromEntries(await Promise.all(APPLE_SIGNING_SECRETS.map(async (key) => [key, (await ctx.secret(key)) ?? ""])));
+      // Node would print the secret payload it pipes to ssh while these are set.
+      await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence, "--host", host], { ...secrets, NODE_DEBUG: "", NODE_DEBUG_NATIVE: "", NODE_OPTIONS: "" });
       return { platform: "mac" };
     }).inline().cores(1).needs(preflight, ...ciDeps).skipIf(() => !platforms.includes("mac"))
-      .concurrency(new ConcurrencyGroup("weavewing-release-moonborn", { capacity: 1 }));
+      .concurrency(new ConcurrencyGroup("weavewing-release-mac-host", { capacity: 1 }));
 
     p.job("publish-draft", async (ctx) => {
       const co = checkout(ctx);
@@ -237,14 +242,16 @@ export const releasePipeline = definePipeline({
       FS.copyFileSync(Path.join(co.evidence, "launcher/t3/package.json"), Path.join(dir, "release-metadata.json"));
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
-      const generated = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
+      // The draft's Mac assets may come from this run or an earlier draft; their bytes select the signing.
+      const mac = draftMacSigning(dir, names);
+      const generated = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"], macSigning: mac });
       const smokeNotice = "Smoke-tested build: full test suites run only before stable releases.";
       const notes = ci || buildOnly || generated.includes(smokeNotice) ? generated : `${smokeNotice}\n\n${generated}`;
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
       const ciEvidence = buildOnly ? undefined : ci ? await ctx.output(ci) : smokeCi(co, ctx.run.id, channel);
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : ci ? "passed" : `smoke: ${channel} channel`, ciEvidence, tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : ci ? "passed" : `smoke: ${channel} channel`, ciEvidence, macSigning: mac ?? "no macOS assets", tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
@@ -252,7 +259,7 @@ export const releasePipeline = definePipeline({
       await assertInput(ctx, co);
       if (release) {
         if (release.target_commitish !== commit) throw new Error("Existing draft has a different target commit. Delete it before rebuilding.");
-        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, ...releaseFlags(channel, "draft"), ...(ctx.args["notes-file"] ? ["--notes-file", notesFile] : []));
+        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, ...releaseFlags(channel, "draft"), "--notes-file", notesFile);
         for (const asset of release.assets.filter((asset) => ![...names, "SHA256SUMS"].includes(asset.name)))
           await gh(ctx, co, "api", "--method", "DELETE", `repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`);
       } else {

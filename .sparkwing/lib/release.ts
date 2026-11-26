@@ -1,5 +1,6 @@
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
+import * as OS from "node:os";
 import * as Path from "node:path";
 
 import { git } from "./checkout.ts";
@@ -11,8 +12,22 @@ const identity: { RELEASE_REPOSITORY: string; RELEASE_TAG_PREFIX: string } = FS.
   : { RELEASE_REPOSITORY: "koreyGambill/weavewing", RELEASE_TAG_PREFIX: "weavewing-v" };
 export const RELEASE_REPOSITORY = identity.RELEASE_REPOSITORY;
 export const TAG_PREFIX = identity.RELEASE_TAG_PREFIX;
+/** The packaged macOS app's CFBundleIdentifier. Must equal MACOS_BUNDLE_ID in packages/shared/src/releaseIdentity.ts. */
+export const MACOS_BUNDLE_ID = "dev.wingstack.weavewing.desktop";
 export const PLATFORMS = ["linux", "win", "mac"] as const;
 export type Platform = (typeof PLATFORMS)[number];
+/** Optional Sparkwing secrets for Developer ID signing; the Mac build requires all of them or none. */
+export const APPLE_SIGNING_SECRETS = ["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"] as const;
+/** How the release's macOS app is signed: notarized Developer ID, or ad hoc without a certificate. */
+export type MacSigning = "developer-id" | "ad-hoc";
+
+/** The Mac build host's SSH destination, from the WEAVEWING_MAC_HOST Sparkwing variable. */
+export function macHost(value: string | undefined): string {
+  if (!value)
+    throw new Error("Set the Mac build host: sparkwing secrets set --secret WEAVEWING_MAC_HOST --variable --value <ssh destination>");
+  if (!/^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(value)) throw new Error("WEAVEWING_MAC_HOST must be an SSH host alias or user@host");
+  return value;
+}
 
 export function assertTagAbsent(tag: string, refs: readonly { ref: string }[]) {
   if (refs.some((entry) => entry.ref === `refs/tags/${tag}`))
@@ -35,6 +50,7 @@ need cargo 'rustup toolchain install 1.100.0 --profile minimal --component rustf
 need tar 'xcode-select --install'
 need xcrun 'xcode-select --install'
 xcrun --find notarytool || { echo 'Install: xcode-select --install' >&2; exit 1; }
+xcrun --find stapler || { echo 'Install: xcode-select --install' >&2; exit 1; }
 vpPath=$(env sh -c 'command -v vp')
 node="$(dirname "$(dirname "$vpPath")")/js_runtime/node/${nodeVersion}/bin/node"
 test -x "$node" || { echo "Missing $node. Install: vp env install ${nodeVersion}" >&2; exit 1; }
@@ -42,7 +58,7 @@ test "$("$node" --version)" = 'v${nodeVersion}' || { echo 'Install: vp env insta
 echo "Managed Node: $node"
 test "$(uname -m)" = arm64 || { echo 'An arm64 Mac is required' >&2; exit 1; }
 available=$(df -k "$HOME" | tail -1 | awk '{print $4}')
-test "$available" -gt 31457280 || { echo 'Free at least 30 GiB on moonborn before building' >&2; exit 1; }`;
+test "$available" -gt 31457280 || { echo 'Free at least 30 GiB on the Mac build host before building' >&2; exit 1; }`;
 }
 
 export function macStartup(runId: string) {
@@ -50,9 +66,22 @@ export function macStartup(runId: string) {
   return `set -eu
 umask 077
 mkdir -p "$HOME/weavewing-release"
+# A held signing lock means a signer may outlive its build marker, so nothing is swept until the lock is cleared.
+sweep=1
+if test -e "$HOME/weavewing-release/signing.lock"; then
+  sweep=0
+  echo "warning: $HOME/weavewing-release/signing.lock is held; leaving earlier runs in place" >&2
+fi
 for old in "$HOME"/weavewing-release/run-*; do
+  test "$sweep" = 1 || continue
   test -d "$old" || continue
   test "$old" != "$HOME/weavewing-release/${runId}" || continue
+  # Remove a run only when its build marker names a process that has exited; it may hold credentials otherwise.
+  pid=$(cat "$old/build.pid" 2>/dev/null || true)
+  case "$pid" in
+    ''|*[!0-9]*) echo "warning: $old has no build PID marker; remove it by hand once no Weavewing build uses it" >&2; continue ;;
+  esac
+  ! kill -0 "$pid" 2>/dev/null || continue
   hdiutil info | awk -v dir="$old/" '$1 == "image-path" && index($3, dir) == 1 { mounted = 1 } mounted && $1 ~ /^\/dev\// && $NF ~ /^\/Volumes\// { print $1; mounted = 0 }' | while read -r dev; do hdiutil detach "$dev" -force >/dev/null 2>&1 || true; done
   if test -f "$old/signing.keychain-db"; then security delete-keychain "$old/signing.keychain-db" || echo "warning: could not delete $old/signing.keychain-db" >&2; fi
   rm -rf "$old" || echo "warning: could not remove $old" >&2
@@ -133,7 +162,8 @@ export function verifyChecksums(dir: string, names: readonly string[], checksums
     if (parsed.get(asset.name) !== asset.sha256) throw new Error(`Checksum mismatch: ${asset.name}`);
 }
 
-export function verifyPromotionAssets(download: string, names: readonly string[], evidence: string, tag: string, commit: string, channel: ReleaseChannel = "stable") {
+/** Verifies a draft's uploaded assets against its evidence and returns the recorded signing of its Mac assets. */
+export function verifyPromotionAssets(download: string, names: readonly string[], evidence: string, tag: string, commit: string, channel: ReleaseChannel = "stable", options: { appleSigningConfigured?: boolean; receipts?: string } = {}) {
   const release = JSON.parse(FS.readFileSync(Path.join(evidence, "release.json"), "utf8"));
   const ciVerified = release.ci === "passed" || (channel !== "stable" && release.ci === `smoke: ${channel} channel`);
   if (release.repository !== RELEASE_REPOSITORY || release.tag !== tag || release.target !== commit || (release.channel ?? "stable") !== channel || !ciVerified || release.draft !== true)
@@ -144,6 +174,10 @@ export function verifyPromotionAssets(download: string, names: readonly string[]
   verifyChecksums(download, names, checksums);
   if (FS.readFileSync(Path.join(download, "SHA256SUMS"), "utf8") !== checksums)
     throw new Error("Uploaded SHA256SUMS differs from local draft evidence");
+  const mac = draftMacSigning(download, names, options.receipts);
+  if (channel === "stable" && options.appleSigningConfigured && mac !== "developer-id")
+    throw new Error("Apple signing is configured, but this draft's macOS assets are not a proven Developer ID build. Rebuild the draft with mac before promoting.");
+  return mac;
 }
 
 export function assertUpdaterConfig(file: string) {
@@ -155,6 +189,56 @@ export function assertUpdaterConfig(file: string) {
       throw new Error(`Packaged updater must use github ${RELEASE_REPOSITORY}: ${file}`);
   }
   return { provider: "github", owner, repo };
+}
+
+const MAC_SIGNED_ASSET = /^(?:Weavewing-.+-arm64\.(?:dmg|zip)|t3-.+-darwin-arm64\.tar\.gz)$/;
+const MAC_SIGNING_RECEIPTS = Path.join(OS.homedir(), "evidence/t3code/sparkwing/mac-signing");
+
+/** The Mac assets whose bytes carry the app or CLI signature. */
+export function macSignedAssets(version: string): string[] {
+  return [`Weavewing-${version}-arm64.dmg`, `Weavewing-${version}-arm64.zip`, `t3-${version}-darwin-arm64.tar.gz`].sort();
+}
+
+/** Name and SHA-256 of each signed Mac asset among `names` in `dir`, sorted by name. */
+export function macAssetDigests(dir: string, names: readonly string[]) {
+  return names.filter((name) => MAC_SIGNED_ASSET.test(name)).sort()
+    .map((name) => ({ name, sha256: Crypto.createHash("sha256").update(FS.readFileSync(Path.join(dir, name))).digest("hex") }));
+}
+
+const receiptFile = (receipts: string, digests: ReturnType<typeof macAssetDigests>) =>
+  Path.join(receipts, `${Crypto.createHash("sha256").update(JSON.stringify(["mac-signing/v1", digests])).digest("hex")}.json`);
+
+/**
+ * Checks that a Mac build's proof covers the exact assets beside it and stores its signing under their hashes,
+ * so a later draft carrying the same bytes, and only those bytes, inherits it.
+ */
+export function recordMacSigning(proofFile: string, assets: string, version: string, receipts = MAC_SIGNING_RECEIPTS): MacSigning {
+  const proof = JSON.parse(FS.readFileSync(proofFile, "utf8"));
+  const digests = macAssetDigests(assets, macSignedAssets(version));
+  if (digests.length !== 3 || JSON.stringify(proof.assets) !== JSON.stringify(digests))
+    throw new Error("mac-proof.json does not cover the macOS assets copied from the build");
+  if (proof.signed && proof.developerId?.failures?.length !== 0) throw new Error("mac-proof.json records an unproven Developer ID build");
+  const signing: MacSigning = proof.signed ? "developer-id" : "ad-hoc";
+  FS.mkdirSync(receipts, { recursive: true, mode: 0o700 });
+  const file = receiptFile(receipts, digests);
+  FS.writeFileSync(`${file}.tmp`, JSON.stringify({ signing, assets: digests }, null, 2), { mode: 0o600 });
+  FS.renameSync(`${file}.tmp`, file);
+  return signing;
+}
+
+/** The recorded signing of the Mac assets among `names` in `dir`, or undefined when there are none. */
+export function draftMacSigning(dir: string, names: readonly string[], receipts = MAC_SIGNING_RECEIPTS): MacSigning | undefined {
+  const digests = macAssetDigests(dir, names);
+  if (!digests.length) return undefined;
+  let receipt: { signing?: unknown; assets?: unknown } | undefined;
+  try {
+    receipt = JSON.parse(FS.readFileSync(receiptFile(receipts, digests), "utf8"));
+  } catch {
+    // A missing or damaged receipt leaves the assets unproven.
+  }
+  if (!receipt || JSON.stringify(receipt.assets) !== JSON.stringify(digests) || (receipt.signing !== "developer-id" && receipt.signing !== "ad-hoc"))
+    throw new Error("No Mac build receipt matches these macOS assets; rebuild the draft with mac");
+  return receipt.signing;
 }
 
 /** Only build inputs cross the release boundary; provider and telemetry credentials stay outside. */
@@ -227,6 +311,60 @@ export interface NotesSource {
   previousTag?: string;
   compareFrom?: string;
   changes: readonly string[];
+  macSigning?: MacSigning;
+}
+
+const SIGNING_START = "<!-- weavewing:macos-signing -->";
+const SIGNING_END = "<!-- /weavewing:macos-signing -->";
+// Signing statements that belong only inside the generated section.
+const SIGNING_CLAIMS = ["Unsigned mac builds don't auto-update", "All desktop builds in this release are unsigned", "signed with a Developer ID", "Developer ID signed and notarized"];
+
+/** The generated notes section that states desktop signing, with macOS install steps when the draft has Mac assets. */
+export function macSigningSection(signing: MacSigning | undefined): string {
+  const body = signing === "developer-id"
+    ? `- macOS arm64: open the DMG and move Weavewing to Applications. This build is signed with a Developer ID, notarized by Apple, and updates itself. If you run an earlier unsigned Weavewing build, install this one by hand once, because macOS will not update an ad-hoc signed app to a differently signed one. macOS will then ask again for permissions it granted the earlier build, such as folder access, camera, microphone or screen recording.
+
+Linux and Windows builds in this release are unsigned. The macOS build is Developer ID signed and notarized.`
+    : signing === "ad-hoc"
+      ? `- macOS arm64: open the DMG and move Weavewing to Applications. On macOS 15, try opening the app once. After it is blocked, use **System Settings → Privacy & Security → Open Anyway**, or run \`xattr -dr com.apple.quarantine /Applications/Weavewing.app\`. Unsigned mac builds don't auto-update. A managed Mac may block the override.
+
+All desktop builds in this release are unsigned (macOS uses ad-hoc signing).`
+      : "Linux and Windows builds in this release are unsigned.";
+  return `${SIGNING_START}\n${body}\n${SIGNING_END}`;
+}
+
+/** Splits notes around their one ordered signing marker pair, or returns undefined when they have no markers. */
+function splitSigningSection(notes: string) {
+  const starts = notes.split(SIGNING_START).length - 1;
+  const ends = notes.split(SIGNING_END).length - 1;
+  if (!starts && !ends) return undefined;
+  const from = notes.indexOf(SIGNING_START);
+  const end = notes.indexOf(SIGNING_END);
+  const to = end + SIGNING_END.length;
+  if (starts !== 1 || ends !== 1 || end < from)
+    throw new Error(`Release notes need exactly one ${SIGNING_START} ... ${SIGNING_END} pair in that order; remove the stray markers`);
+  return { before: notes.slice(0, from), section: notes.slice(from, to), after: notes.slice(to) };
+}
+
+function assertNoSigningClaims(outside: string) {
+  const claim = SIGNING_CLAIMS.find((text) => outside.includes(text));
+  if (claim) throw new Error(`Release notes say "${claim}" outside the generated signing section; remove that text`);
+}
+
+/** Replaces the notes' generated signing section, or appends one, keeping the rest of an edited body. */
+export function withMacSigningSection(notes: string, signing: MacSigning | undefined): string {
+  const parts = splitSigningSection(notes);
+  assertNoSigningClaims(parts ? parts.before + parts.after : notes);
+  return parts ? `${parts.before}${macSigningSection(signing)}${parts.after}` : `${notes.trimEnd()}\n\n${macSigningSection(signing)}\n`;
+}
+
+/** Refuses notes without exactly one generated signing section describing the draft's Mac assets. */
+export function assertMacSigningNotes(notes: string, signing: MacSigning | undefined) {
+  const parts = splitSigningSection(notes);
+  if (parts === undefined) throw new Error("The draft notes lack the generated macOS signing section; rerun the draft");
+  assertNoSigningClaims(parts.before + parts.after);
+  if (parts.section !== macSigningSection(signing))
+    throw new Error("The draft notes' macOS signing section does not match its macOS assets; rerun the draft to refresh it");
 }
 
 export function renderReleaseNotes(source: NotesSource): string {
@@ -247,19 +385,19 @@ Download the assets for your platform from this release. Verify them against SHA
 
 - Linux x64: make the AppImage executable, or install the deb with \`sudo apt install ./Weavewing-${source.version}-amd64.deb\`.
 - Windows x64: run the NSIS installer. For SmartScreen, choose **More info → Run anyway**.
-- macOS arm64: open the DMG and move Weavewing to Applications. On macOS 15, try opening the app once. After it is blocked, use **System Settings → Privacy & Security → Open Anyway**, or run \`xattr -dr com.apple.quarantine /Applications/Weavewing.app\`. Unsigned mac builds don't auto-update. A managed Mac may block the override.
 - CLI: unpack the matching \`t3-${source.version}-<platform>-<arch>\` archive and keep its runtime files together.
 
-All desktop builds in this release are unsigned (macOS uses ad-hoc signing).
+${macSigningSection(source.macSigning)}
+
 Weavewing and T3 Code share the default \`~/.t3\` home. Use separate homes if running both.
 T3 Connect is unavailable in these builds. Provider subscriptions and direct remote connections work as usual.
 For managed machines, see [managed policy](https://github.com/${RELEASE_REPOSITORY}/blob/main/docs/user/managed-policy.md).
 `;
 }
 
-export function releaseNotes(root: string, version: string, commit: string, options: { draftBody?: string | null; notesFile?: string } = {}): string {
-  if (options.notesFile) return FS.readFileSync(options.notesFile, "utf8");
-  if (options.draftBody != null) return options.draftBody;
+export function releaseNotes(root: string, version: string, commit: string, options: { draftBody?: string | null; notesFile?: string; macSigning?: MacSigning } = {}): string {
+  if (options.notesFile) return withMacSigningSection(FS.readFileSync(options.notesFile, "utf8"), options.macSigning);
+  if (options.draftBody != null) return withMacSigningSection(options.draftBody, options.macSigning);
   const previousTag = git(root, "tag", "--merged", commit, "--sort=-version:refname", "--list", `${TAG_PREFIX}*`)
     .split("\n").find((tag) => tag && tag !== `${TAG_PREFIX}${version}`);
   const upstreamCommit = git(root, "merge-base", commit, "refs/remotes/upstream/main");
@@ -268,5 +406,5 @@ export function releaseNotes(root: string, version: string, commit: string, opti
   const forkPoint = firstForkCommit ? git(root, "rev-parse", `${firstForkCommit}^1`) : upstreamCommit;
   const range = `${previousTag ?? forkPoint}..${commit}`;
   const changes = git(root, "log", "--first-parent", ...(!previousTag ? ["--merges", "--max-count=40"] : []), "--format=%s", range).split("\n").filter(Boolean);
-  return renderReleaseNotes({ version, commit, upstreamCommit, upstreamVersion, previousTag, compareFrom: forkPoint, changes });
+  return renderReleaseNotes({ version, commit, upstreamCommit, upstreamVersion, previousTag, compareFrom: forkPoint, changes, macSigning: options.macSigning });
 }

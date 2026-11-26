@@ -2,8 +2,12 @@
 
 The manual Sparkwing `release` pipeline builds Linux x64 AppImage/deb, Windows
 x64 NSIS, macOS arm64 DMG/zip, and the matching CLI archives. Linux and Windows
-build here. macOS builds on `ssh moonborn`, alongside local source bundling
-and packaging after preflight and any required full CI pass. Keep that Mac awake and reachable.
+build here. macOS builds over SSH on the Mac named by the Sparkwing variable
+`WEAVEWING_MAC_HOST`, alongside local source bundling and packaging after
+preflight and any required full CI pass. Keep that Mac awake and reachable.
+Set the variable once to an SSH host alias or `user@host` with key login, for example
+`sparkwing secrets set --secret WEAVEWING_MAC_HOST --variable --value mac-builder`.
+Runs that include mac fail before building when it is unset.
 Linux and Windows packaging share mutable source assets and run in sequence;
 Windows also embeds the Linux CLI archive as its WSL runtime.
 
@@ -86,7 +90,8 @@ The default platform set is `linux,win,mac`. `--platforms linux,win` rebuilds a
 subset for a draft. Windows always builds the Linux CLI archive for its embedded
 WSL runtime. Promote requires all three platforms. `--notes-file <absolute-path>`
 replaces the notes. Draft reruns preserve existing notes unless this flag is given.
-Edit the draft notes before promoting if needed. First-release generated notes list
+Edit the draft notes before promoting if needed, but leave the section between the
+`<!-- weavewing:macos-signing -->` markers to the pipeline. First-release generated notes list
 at most 40 first-parent merge subjects since the fork point and link to the full comparison.
 
 Artifacts, checksums, notes, source provenance and command logs live below
@@ -105,17 +110,89 @@ GitHub operations use the existing `gh` login. The optional Sparkwing secret
 on `koreyGambill/weavewing`. Tokens are passed through process environment,
 never command arguments or evidence.
 
-All desktop builds ship unsigned. macOS uses ad-hoc signing. Release notes
-include the operating system overrides and explain that unsigned mac builds
-don't auto-update on either channel. Managed policy may block the override.
+Linux and Windows builds ship unsigned. Without Apple secrets, macOS uses
+ad-hoc signing, and the release notes include the operating system overrides
+and explain that unsigned mac builds don't auto-update on either channel.
+Managed policy may block the override.
 
-For Apple signing, configure all six optional Sparkwing secrets together:
-`APPLE_CSC_LINK` (base64 p12), `APPLE_CSC_KEY_PASSWORD`, `APPLE_API_KEY` (p8 text),
-`APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, and `APPLE_TEAM_ID`. The Mac job streams
-them over SSH stdin into a temporary keychain and calls the build's signing and
-notarytool paths. It removes the keychain and remote build directory afterwards.
-Partial signing configuration fails before building. Validate this path with a
-plan run before publishing a signed release.
+With all six Apple secrets configured, the Mac job signs the app and the CLI
+archive with the Developer ID Application identity and notarizes both. Partial
+configuration fails before building. The job streams the secrets over SSH stdin
+to the Mac build process, which deletes the `.p12` file once it is imported into
+a temporary keychain. It takes the lock `~/weavewing-release/signing.lock` so two
+signing builds on the Mac cannot interleave, and adds the keychain to the user
+keychain search list for the build. Afterwards, also on failure or on SIGINT,
+SIGTERM or SIGHUP, the process restores the previous search list and deletes the
+keychain and the App Store Connect key file. If the SSH connection drops during
+the build, the controller leaves the run directory alone and says so. The next
+run's startup removes a run directory only when its `build.pid` names a process
+that has exited, and reports one without a valid marker for you to remove by hand.
+
+If a build reports that the signing lock is held, it names the owner's PID and
+start time. Confirm with `ps -p <pid>` on the Mac that no Weavewing build is
+running, then clear the lock with the `rm -rf` command the error prints.
+
+The Mac job fails unless all of these pass, and records them under `developerId`
+in `mac-proof.json`:
+
+- `spctl --assess` accepts the app with source `Notarized Developer ID`.
+- `xcrun stapler validate` finds a stapled ticket on the `.app` inside the DMG.
+  The CLI executable cannot carry a stapled ticket, so macOS checks its
+  notarization online when it first runs.
+- `codesign -dv` shows the hardened runtime flag and a `TeamIdentifier` equal to
+  `APPLE_TEAM_ID`, for both the app and the CLI executable in its archive.
+
+Every successful Mac build records the SHA-256 of its DMG, zip and CLI archive
+with its signing result in a `mac-signing` directory beside the full CI receipts. Drafts and
+promotion look up the signing of the Mac assets they actually carry by those
+hashes, so a rerun that reuses the draft's Mac assets keeps their result, and
+Mac assets without a matching record stop the run. Each draft run rewrites the
+notes section between the `<!-- weavewing:macos-signing -->` markers from that
+result and keeps the rest of an edited body. A signed section tells people on an
+earlier unsigned build to install this one by hand once, because macOS will not
+update an ad-hoc signed app to a differently signed one, and warns that macOS
+asks again for permissions it granted the earlier build. Without Mac assets,
+the section omits macOS. Draft runs refuse notes, including a `--notes-file`,
+with stray or duplicate markers or with signing statements outside the section;
+remove that text and rerun. While any Apple secret is configured, promote refuses
+a stable draft whose Mac assets are not a recorded Developer ID build, and every
+promotion refuses notes without exactly one section matching the assets.
+
+### Set up Apple signing
+
+Each step fills the named Sparkwing secrets. Store every value without a
+trailing newline, for example
+`printf '%s' "$value" | sparkwing secrets set --secret APPLE_TEAM_ID`, or
+`sparkwing secrets set --secret APPLE_API_KEY --file AuthKey_<key id>.p8` for a
+file.
+
+1. Enroll in the Apple Developer Program with the account that will own
+   Weavewing. The Account Holder performs the certificate and API access steps
+   below.
+2. `APPLE_TEAM_ID`: in the developer account, open **Membership details** and
+   copy the 10-character Team ID.
+3. On a Mac, open **Keychain Access → Certificate Assistant → Request a
+   Certificate From a Certificate Authority** and save the request to disk.
+4. In **Certificates, Identifiers & Profiles → Certificates**, add a
+   **Developer ID Application** certificate (G2 Sub-CA) from that request.
+   Download it and open it to install it in the login keychain.
+5. `APPLE_CSC_KEY_PASSWORD` and `APPLE_CSC_LINK`: in Keychain Access, under
+   **My Certificates**, export only the
+   `Developer ID Application: <name> (<Team ID>)` item, with its private key,
+   as a `.p12` file protected by a strong password. That password is
+   `APPLE_CSC_KEY_PASSWORD`. Store
+   `base64 -i DeveloperID.p12 | tr -d '\n'` as `APPLE_CSC_LINK`, then delete the
+   `.p12` file. The build refuses a file that holds more or fewer than one
+   Developer ID Application identity, or one from another team.
+6. In App Store Connect, open **Users and Access → Integrations → App Store
+   Connect API**. If needed, request API access as the Account Holder. Under
+   **Team Keys**, generate a key with the **Developer** role.
+7. `APPLE_API_ISSUER`: the Issuer ID shown above the key list.
+   `APPLE_API_KEY_ID`: the new key's Key ID. `APPLE_API_KEY`: the full text of
+   the downloaded `AuthKey_<key id>.p8`. Apple offers that download once.
+8. Run a build-only plan that includes mac. Confirm that `mac-proof.json`
+   holds an empty `developerId.failures` list and that `notes.md` describes a
+   signed macOS build before drafting a signed release.
 
 ## Rollback
 

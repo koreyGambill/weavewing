@@ -13,7 +13,7 @@
     "mobile-android-apk.yml": { "disposition": "github-only", "notes": "upstream-only Play mirror" },
     "mobile-showcase-screenshots.yml": { "disposition": "later", "notes": "simulator or KVM emulator" },
     "release.yml": { "disposition": "pipeline", "pipeline": "release", "notes": "Manual draft/plan/promote for desktop and CLI only. npm t3, Vercel web, marketing, AUR, Discord, mobile and nightly feed pointers remain upstream-only." },
-    "release-desktop.yml": { "disposition": "pipeline", "pipeline": "release", "notes": "Linux x64 AppImage/deb, cross-built Windows x64 NSIS with native payload check, ssh moonborn macOS arm64 DMG/zip and matching CLI archives. All unsigned; optional Apple signing hooks. Linux/Windows arm64 and macOS x64 are omitted." },
+    "release-desktop.yml": { "disposition": "pipeline", "pipeline": "release", "notes": "Linux x64 AppImage/deb, cross-built Windows x64 NSIS with native payload check, macOS arm64 DMG/zip built over SSH on the configured Mac host and matching CLI archives. Linux and Windows unsigned; macOS Developer ID signed and notarized when the Apple secrets are set. Linux/Windows arm64 and macOS x64 are omitted." },
     "publish-aur.yml": { "disposition": "github-only", "notes": "upstream-only AUR key" },
     "desktop-macos-preview.yml": { "disposition": "later", "notes": "macOS signing, PR-shaped" },
     "desktop-macos-preview-publish.yml": { "disposition": "later", "notes": "macOS signing, PR-shaped" },

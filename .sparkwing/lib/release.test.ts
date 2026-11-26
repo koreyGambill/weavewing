@@ -27,9 +27,9 @@ test("packaged updater config must name the fork even when its bundle contains t
   }
 });
 
-test("notes identify source and changes and explain unsigned installs", () => {
+test("notes identify source and changes and explain the macOS install for its signing", () => {
   const source = { version: "1.0.0", commit: "abcdef", upstreamCommit: "123456", upstreamVersion: "v0.1.9", changes: ["Merge branch 't3-release'", "fix(server): preserve history"] };
-  const first = renderReleaseNotes(source);
+  const first = renderReleaseNotes({ ...source, macSigning: "ad-hoc" });
   assert.match(first, /First Weavewing release/);
   assert.match(first, /Includes upstream T3 Code through `123456` \(`v0.1.9`\)/);
   assert.match(first, /- Merge branch 't3-release'/);
@@ -37,7 +37,42 @@ test("notes identify source and changes and explain unsigned installs", () => {
   assert.match(first, /xattr -dr com\.apple\.quarantine \/Applications\/Weavewing\.app/);
   assert.match(first, /Unsigned mac builds don't auto-update/);
   assert.match(first, /More info → Run anyway/);
+  assert.match(first, /All desktop builds in this release are unsigned/);
+  const signed = renderReleaseNotes({ ...source, macSigning: "developer-id" });
+  assert.doesNotMatch(signed, /Unsigned mac builds|xattr|Open Anyway|All desktop builds in this release are unsigned/);
+  assert.match(signed, /signed with a Developer ID, notarized by Apple, and updates itself/);
+  assert.match(signed, /earlier unsigned Weavewing build, install this one by hand once, because macOS will not update an ad-hoc signed app/);
+  assert.match(signed, /ask again for permissions it granted the earlier build/);
+  assert.match(signed, /Linux and Windows builds in this release are unsigned/);
   assert.match(renderReleaseNotes({ ...source, previousTag: "weavewing-v0.9.0" }), /Changes since weavewing-v0\.9\.0/);
+  const noMac = renderReleaseNotes({ ...source, macSigning: undefined });
+  assert.doesNotMatch(noMac, /macOS|DMG|xattr/);
+  assert.match(noMac, /Linux and Windows builds in this release are unsigned/);
+});
+
+test("draft reruns replace only the generated signing section, so edited notes keep their text without stale macOS claims", () => {
+  const unsigned = `Hand-written intro.\n\n${Release.macSigningSection("ad-hoc")}\n\nHand-written outro.\n`;
+  const signed = Release.withMacSigningSection(unsigned, "developer-id");
+  assert.equal(signed, `Hand-written intro.\n\n${Release.macSigningSection("developer-id")}\n\nHand-written outro.\n`);
+  assert.doesNotMatch(signed, /Unsigned mac builds/);
+  assert.equal(Release.withMacSigningSection(signed, "ad-hoc"), unsigned);
+  assert.doesNotMatch(Release.withMacSigningSection(signed, undefined), /macOS arm64/);
+  assert.equal(Release.withMacSigningSection("Edited without a section", "developer-id"), `Edited without a section\n\n${Release.macSigningSection("developer-id")}\n`);
+  const start = "<!-- weavewing:macos-signing -->";
+  const end = "<!-- /weavewing:macos-signing -->";
+  const malformed = [`${unsigned}${Release.macSigningSection("ad-hoc")}`, `${start} unterminated`, `stray ${end}`, `${end}\n${start}`, `${end}${start}`, `${unsigned}${end}`];
+  for (const notes of malformed) {
+    assert.throws(() => Release.withMacSigningSection(notes, "ad-hoc"), /exactly one .* pair in that order/);
+    assert.throws(() => Release.assertMacSigningNotes(notes, "ad-hoc"), /exactly one .* pair in that order/);
+  }
+  for (const claim of ["Unsigned mac builds don't auto-update.", "All desktop builds in this release are unsigned.", "The macOS build is Developer ID signed and notarized."]) {
+    assert.throws(() => Release.withMacSigningSection(`${claim}\n`, "developer-id"), /outside the generated signing section; remove that text/);
+    assert.throws(() => Release.withMacSigningSection(`${unsigned}${claim}\n`, "developer-id"), /outside the generated signing section/);
+  }
+  Release.assertMacSigningNotes(signed, "developer-id");
+  assert.throws(() => Release.assertMacSigningNotes(`${signed}All desktop builds in this release are unsigned.\n`, "developer-id"), /outside the generated signing section/);
+  assert.throws(() => Release.assertMacSigningNotes(unsigned, "developer-id"), /does not match/);
+  assert.throws(() => Release.assertMacSigningNotes("No section", undefined), /lack the generated macOS signing section/);
 });
 
 test("releaseNotes caps first-release merges and preserves edited draft notes", () => {
@@ -59,7 +94,8 @@ test("releaseNotes caps first-release merges and preserves edited draft notes", 
     git("update-ref", "refs/remotes/upstream/main", upstream);
     head = git("commit-tree", tree, "-p", head, "-p", upstream, "-m", "Merge feature upstream");
     const first = Release.releaseNotes(root, "1.0.0", head);
-    assert.equal(Release.releaseNotes(root, "1.0.0", head, { draftBody: "Human-edited notes" }), "Human-edited notes");
+    const edited = `Human-edited notes\n\n${Release.macSigningSection("ad-hoc")}`;
+    assert.equal(Release.releaseNotes(root, "1.0.0", head, { draftBody: edited, macSigning: "ad-hoc" }), edited);
     assert.equal((first.match(/^- Merge feature /gm) ?? []).length, 40);
     assert.doesNotMatch(first, /internal setup|nightly/);
     assert.match(first, /`v0\.1\.9`/);
@@ -67,10 +103,10 @@ test("releaseNotes caps first-release merges and preserves edited draft notes", 
     git("tag", "--no-sign", "weavewing-v1.0.0", head);
     const next = git("commit-tree", tree, "-p", head, "-m", "fix: preserve history");
     assert.match(Release.releaseNotes(root, "1.0.1", next), /Changes since weavewing-v1\.0\.0:\n\n- fix: preserve history/);
-    assert.equal(Release.releaseNotes(root, "1.0.1", next, { draftBody: "Human-edited notes" }), "Human-edited notes");
+    assert.equal(Release.releaseNotes(root, "1.0.1", next, { draftBody: edited, macSigning: "developer-id" }), `Human-edited notes\n\n${Release.macSigningSection("developer-id")}`);
     const notes = Path.join(root, "notes.md");
     FS.writeFileSync(notes, "Explicit replacement");
-    assert.equal(Release.releaseNotes(root, "1.0.1", next, { draftBody: "Keep", notesFile: notes }), "Explicit replacement");
+    assert.equal(Release.releaseNotes(root, "1.0.1", next, { draftBody: "Keep", notesFile: notes }), `Explicit replacement\n\n${Release.macSigningSection(undefined)}\n`);
   } finally {
     FS.rmSync(root, { recursive: true });
   }
@@ -143,17 +179,39 @@ test("Mac preflight refuses missing managed Node with an install hint", () => {
   }
 });
 
-test("Mac job startup removes cancelled run directories and preserves unrelated files", () => {
+test("Mac job startup removes only runs whose build process has exited and reports runs without a marker", () => {
   const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-cleanup-"));
   try {
     const base = Path.join(home, "weavewing-release");
-    FS.mkdirSync(Path.join(base, "run-cancelled"), { recursive: true });
-    FS.writeFileSync(Path.join(base, "run-cancelled/certificate.p12"), "old signing material");
+    const run = (name: string, marker?: string) => {
+      FS.mkdirSync(Path.join(base, name), { recursive: true });
+      FS.writeFileSync(Path.join(base, name, "AuthKey.p8"), "old signing material");
+      if (marker !== undefined) FS.writeFileSync(Path.join(base, name, "build.pid"), marker);
+      const old = new Date(Date.UTC(2026, 0, 1));
+      FS.utimesSync(Path.join(base, name), old, old);
+    };
+    run("run-killed", String(CP.spawnSync("true").pid));
+    run("run-building", String(process.pid));
+    run("run-unmarked");
+    run("run-empty-marker", "");
+    run("run-bad-marker", "12; rm -rf /");
     FS.mkdirSync(Path.join(base, "keep"));
-    CP.execFileSync("/bin/sh", ["-c", Release.macStartup("run-current")], { env: { HOME: home, PATH: "/usr/bin:/bin" } });
-    assert.equal(FS.existsSync(Path.join(base, "run-cancelled")), false);
+    const result = CP.spawnSync("/bin/sh", ["-c", Release.macStartup("run-current")], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+    assert.equal(result.status, 0);
+    assert.equal(FS.existsSync(Path.join(base, "run-killed")), false);
+    for (const name of ["run-building", "run-unmarked", "run-empty-marker", "run-bad-marker"])
+      assert.equal(FS.existsSync(Path.join(base, name, "AuthKey.p8")), true, `${name} may still hold credentials`);
+    for (const name of ["run-unmarked", "run-empty-marker", "run-bad-marker"])
+      assert.match(result.stderr, new RegExp(`${Path.join(base, name)} has no build PID marker; remove it by hand`));
+    assert.doesNotMatch(result.stderr, /run-building/);
     assert.equal(FS.existsSync(Path.join(base, "run-current/source")), true);
     assert.equal(FS.existsSync(Path.join(base, "keep")), true);
+    run("run-killed-under-lock", String(CP.spawnSync("true").pid));
+    FS.mkdirSync(Path.join(base, "signing.lock"));
+    const locked = CP.spawnSync("/bin/sh", ["-c", Release.macStartup("run-next")], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+    assert.equal(locked.status, 0);
+    assert.equal(FS.existsSync(Path.join(base, "run-killed-under-lock/AuthKey.p8")), true, "a signer may outlive its build marker while the lock is held");
+    assert.match(locked.stderr, /signing\.lock is held; leaving earlier runs in place/);
   } finally {
     FS.rmSync(home, { recursive: true });
   }
@@ -207,9 +265,83 @@ test("promotion enforces channel CI policy and commit-bound checksums", () => {
       writeEvidence("test", ci);
       assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "test"), /CI-verified/);
     }
+    writeEvidence("stable", "passed");
+    assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "stable", { appleSigningConfigured: true }), /not a proven Developer ID build/);
   } finally {
     FS.rmSync(root, { recursive: true });
   }
+});
+
+test("stable promotion with Apple signing configured needs a Developer ID receipt for the uploaded Mac bytes", () => {
+  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-promote-mac-"));
+  try {
+    const receipts = Path.join(root, "receipts");
+    const names = Release.macSignedAssets("1.0.0");
+    const draft = (name: string, bytes: string, signed: boolean, channel = "stable") => {
+      const evidence = macBuild(root, name, bytes, signed, "1.0.0");
+      Release.recordMacSigning(Path.join(evidence, "mac-proof.json"), Path.join(evidence, "assets"), "1.0.0", receipts);
+      FS.writeFileSync(Path.join(evidence, "assets/SHA256SUMS"), Release.assetInventory(Path.join(evidence, "assets"), names).map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
+      FS.writeFileSync(Path.join(evidence, "release.json"), JSON.stringify({ repository: "koreyGambill/weavewing", tag: "weavewing-v1.0.0", target: "abc123", channel, ci: "passed", draft: true }));
+      return evidence;
+    };
+    const promote = (evidence: string, options: { appleSigningConfigured?: boolean }, channel: "stable" | "test" = "stable") =>
+      Release.verifyPromotionAssets(Path.join(evidence, "assets"), names, evidence, "weavewing-v1.0.0", "abc123", channel, { ...options, receipts });
+    const adHoc = draft("ad-hoc", "ad-hoc", false);
+    assert.throws(() => promote(adHoc, { appleSigningConfigured: true }), /not a proven Developer ID build/);
+    assert.equal(promote(adHoc, {}), "ad-hoc");
+    assert.equal(promote(draft("ad-hoc-test", "ad-hoc test", false, "test"), { appleSigningConfigured: true }, "test"), "ad-hoc");
+    assert.equal(promote(draft("signed", "signed", true), { appleSigningConfigured: true }), "developer-id");
+    const unrecorded = draft("unrecorded", "unrecorded", true);
+    FS.rmSync(receipts, { recursive: true });
+    assert.throws(() => promote(unrecorded, {}), /No Mac build receipt/);
+  } finally {
+    FS.rmSync(root, { recursive: true });
+  }
+});
+
+function macBuild(root: string, name: string, bytes: string, signed: boolean, version = "0.1.0") {
+  const dir = Path.join(root, name);
+  FS.mkdirSync(Path.join(dir, "assets"), { recursive: true });
+  for (const asset of Release.macSignedAssets(version)) FS.writeFileSync(Path.join(dir, "assets", asset), `${bytes} ${asset}`);
+  const proof = { signed, ...(signed ? { developerId: { failures: [] } } : {}), assets: Release.macAssetDigests(Path.join(dir, "assets"), Release.macSignedAssets(version)) };
+  FS.writeFileSync(Path.join(dir, "mac-proof.json"), JSON.stringify(proof));
+  return dir;
+}
+
+test("a draft's macOS signing comes from a receipt for its exact Mac asset bytes, wherever those assets were built", () => {
+  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-receipts-"));
+  try {
+    const receipts = Path.join(root, "receipts");
+    const names = Release.expectedAssets("0.1.0", ["linux", "mac"]);
+    const signed = macBuild(root, "signed-run", "signed", true);
+    assert.equal(Release.recordMacSigning(Path.join(signed, "mac-proof.json"), Path.join(signed, "assets"), "0.1.0", receipts), "developer-id");
+    for (const name of FS.readdirSync(receipts)) assert.equal(FS.statSync(Path.join(receipts, name)).mode & 0o777, 0o600);
+    // A Linux-only rerun carries the signed Mac assets forward from the draft.
+    assert.equal(Release.draftMacSigning(Path.join(signed, "assets"), names, receipts), "developer-id");
+    // Reused evidence whose Mac assets were replaced with an ad-hoc build keeps the old proof but not its result.
+    const adHoc = macBuild(root, "ad-hoc-run", "ad-hoc", false);
+    FS.copyFileSync(Path.join(signed, "mac-proof.json"), Path.join(adHoc, "mac-proof.json"));
+    assert.throws(() => Release.draftMacSigning(Path.join(adHoc, "assets"), names, receipts), /No Mac build receipt/);
+    assert.throws(() => Release.recordMacSigning(Path.join(adHoc, "mac-proof.json"), Path.join(adHoc, "assets"), "0.1.0", receipts), /does not cover/);
+    const proven = macBuild(root, "ad-hoc-proven", "ad-hoc", false);
+    assert.equal(Release.recordMacSigning(Path.join(proven, "mac-proof.json"), Path.join(proven, "assets"), "0.1.0", receipts), "ad-hoc");
+    assert.equal(Release.draftMacSigning(Path.join(adHoc, "assets"), names, receipts), "ad-hoc");
+    assert.equal(Release.draftMacSigning(Path.join(adHoc, "assets"), Release.expectedAssets("0.1.0", ["linux"]), receipts), undefined);
+    const unproven = macBuild(root, "unproven", "unproven", true);
+    FS.writeFileSync(Path.join(unproven, "mac-proof.json"), JSON.stringify({ signed: true, developerId: { failures: ["no ticket"] }, assets: Release.macAssetDigests(Path.join(unproven, "assets"), names) }));
+    assert.throws(() => Release.recordMacSigning(Path.join(unproven, "mac-proof.json"), Path.join(unproven, "assets"), "0.1.0", receipts), /unproven Developer ID/);
+    FS.rmSync(Path.join(unproven, "mac-proof.json"));
+    assert.throws(() => Release.recordMacSigning(Path.join(unproven, "mac-proof.json"), Path.join(unproven, "assets"), "0.1.0", receipts), /ENOENT/);
+  } finally {
+    FS.rmSync(root, { recursive: true });
+  }
+});
+
+test("the Mac build host comes from configuration and must be a plain SSH destination", () => {
+  assert.throws(() => Release.macHost(undefined), /WEAVEWING_MAC_HOST --variable/);
+  assert.throws(() => Release.macHost(""), /WEAVEWING_MAC_HOST --variable/);
+  for (const value of ["-oProxyCommand=sh", "host name", "host;rm", "@mac-builder", "builder@", "a@b@c", "builder@-oProxyCommand=sh"]) assert.throws(() => Release.macHost(value), /SSH host/);
+  assert.equal(Release.macHost("builder@mac-builder.local"), "builder@mac-builder.local");
 });
 
 test("bundle boundary rejects baked analytics, OTLP endpoints and wrapped tracing defaults", () => {
