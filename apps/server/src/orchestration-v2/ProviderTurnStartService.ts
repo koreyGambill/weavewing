@@ -550,25 +550,29 @@ export const layer: Layer.Layer<
           isPendingForRun(handoff, true),
       );
       // A rewind's summary waits for the user's own next message; scheduled, merge-back and
-      // fresh-context turns leave it pending. A provider switch carries it in its history instead.
-      const rewindSummary =
+      // fresh-context turns leave it pending. It goes only into the conversation that rewind
+      // continued: its provider thread, or its native conversation resumed under another account.
+      // The newest such summary wins. A provider switch carries it in its history instead.
+      const userWrote =
         message?.createdBy === "user" &&
         (message.origin === undefined || message.origin.kind === "user") &&
-        run.freshContext !== true
-          ? projection.contextHandoffs.find(
-              (handoff) =>
-                handoff.strategy === "checkpoint_summary" &&
-                handoff.status === "ready" &&
-                handoff.delivery === undefined &&
-                !archivedRunIds?.has(handoff.targetRunId),
-            )
-          : undefined;
-      const rewindContinuationNativeId =
-        rewindSummary === undefined
-          ? undefined
-          : projection.providerThreads.find(
-              (thread) => thread.id === rewindSummary.toProviderThreadId,
-            )?.nativeThreadRef?.nativeId;
+        run.freshContext !== true;
+      const rewindSummaryFor = (target: OrchestrationV2ProviderThread) => {
+        if (!userWrote) return undefined;
+        const nativeId = target.nativeThreadRef?.nativeId;
+        return projection.contextHandoffs.findLast(
+          (handoff) =>
+            handoff.strategy === "checkpoint_summary" &&
+            handoff.status === "ready" &&
+            handoff.delivery === undefined &&
+            !archivedRunIds?.has(handoff.targetRunId) &&
+            (handoff.toProviderThreadId === target.id ||
+              (nativeId != null &&
+                projection.providerThreads.find(
+                  (thread) => thread.id === handoff.toProviderThreadId,
+                )?.nativeThreadRef?.nativeId === nativeId)),
+        );
+      };
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "fork" &&
@@ -1272,7 +1276,10 @@ export const layer: Layer.Layer<
                 item.runId === null
                   ? rewind === undefined
                   : // A summary still waiting for this message goes inline instead.
-                    !(item.type === "handoff" && item.contextHandoffId === rewindSummary?.id) &&
+                    !(
+                      item.type === "handoff" &&
+                      item.contextHandoffId === rewindSummaryFor(providerThread)?.id
+                    ) &&
                     !archivedRunIds?.has(item.runId) &&
                     projection.runs.some(
                       (source) =>
@@ -2076,17 +2083,9 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
-          // Only into the conversation the rewind continued: its provider thread, or its native
-          // conversation resumed under another account.
-          const runningNativeId = runningProviderThread.nativeThreadRef?.nativeId;
-          const rewindSummaryContext =
-            rewindSummary === undefined ||
-            compact ||
-            goalCommand ||
-            (runningProviderThread.id !== rewindSummary.toProviderThreadId &&
-              (runningNativeId == null || runningNativeId !== rewindContinuationNativeId))
-              ? ""
-              : rewindSummary.summaryText;
+          const rewindSummary =
+            compact || goalCommand ? undefined : rewindSummaryFor(runningProviderThread);
+          const rewindSummaryContext = rewindSummary?.summaryText ?? "";
           const refresh = explicitRefresh ?? automaticRefresh;
           const newestContext =
             refresh === undefined || compact || goalCommand

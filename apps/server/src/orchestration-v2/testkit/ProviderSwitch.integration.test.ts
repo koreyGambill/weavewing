@@ -6027,6 +6027,7 @@ describe("orchestration v2 provider switching", () => {
         | "holdFirstTurn"
         | "releaseFirstTurn"
         | "heldRunningToolCall"
+        | "responseByRunOrdinal"
       >,
       body: (input: {
         readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
@@ -6369,6 +6370,47 @@ describe("orchestration v2 provider switching", () => {
           assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
           assert.isTrue(yield* pendingSummary());
         }),
+      ),
+    );
+
+    it.live("sends a newer summary when an older one waits on a conversation /clear left", () =>
+      withRewindSummaryHarness(
+        "rewind-summary-newer",
+        {
+          responseByRunOrdinal: {
+            1: "Prefix reply",
+            2: "Later reply",
+            3: SUMMARY,
+            4: "Fresh reply",
+            6: "Second summary: the fresh plan lives in plan.md.",
+          },
+        },
+        ({ capturedTurns, workspaceFile }) =>
+          Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            const threads = yield* ThreadManagementService.ThreadManagementService;
+            yield* rewindAfterPrefix(workspaceFile);
+            yield* sendTo(root, "start over", { freshContext: true });
+            yield* sendTo(root, "keep going fresh");
+            const fresh = yield* orchestrator.getThreadProjection(root);
+            const freshRun = fresh.runs.find((run) => run.ordinal === 4)!;
+            const [freshReply] = fresh.turnItems.flatMap((item) =>
+              item.type === "assistant_message" && item.runId === freshRun.id ? [item] : [],
+            );
+            yield* threads.rewindWithSummary({
+              threadId: root,
+              runId: freshRun.id,
+              replyMessageId: freshReply!.messageId,
+              createdBy: "user",
+              creationSource: "web",
+            });
+
+            yield* sendTo(root, "after the second rewind");
+            const next = (yield* Ref.get(capturedTurns)).at(-1)!;
+            assert.include(next.text, "Second summary: the fresh plan lives in plan.md.");
+            assert.notInclude(next.text, SUMMARY);
+            assert.include(next.text, "after the second rewind");
+          }),
       ),
     );
 
