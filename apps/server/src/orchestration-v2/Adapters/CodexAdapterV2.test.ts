@@ -13177,11 +13177,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     );
 
     it.effect.each([
-      { target: "before-rewind", reverted: "native-c" },
-      { target: "rewound-turn", reverted: "native-c" },
+      { target: "before-rewind", reverted: "native-c", app: "abc", native: "ca", limit: 2, to: 0 },
+      { target: "rewound-turn", reverted: "native-c", app: "abc", native: "c", limit: 1, to: 1 },
+      // B and D were both rewound away, so Codex holds A, C and E, and A must survive.
+      {
+        target: "first-of-two",
+        reverted: "native-c",
+        app: "abcde",
+        native: "eca",
+        limit: 3,
+        to: 1,
+      },
     ] as const)(
       "restores a checkpoint from $target without reverting a turn a rewind already removed",
-      ({ target, reverted }) =>
+      ({ target, reverted, app, native, limit, to }) =>
         Effect.gen(function* () {
           // A, then B rewound and reverted, then its continuation C: Codex now holds A and C.
           const { harness } = yield* runRewind({
@@ -13196,16 +13205,18 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 {
                   threadId: rewindThread,
                   cursor: null,
-                  limit: target === "before-rewind" ? 2 : 1,
+                  limit,
                   sortDirection: "desc",
                   itemsView: "summary",
                 },
                 {
-                  data: [
-                    { id: "native-c", items: [], status: "completed", error: null },
-                    { id: "native-a", items: [], status: "completed", error: null },
-                  ].slice(0, target === "before-rewind" ? 2 : 1),
-                  nextCursor: target === "before-rewind" ? null : "more",
+                  data: [...native].map((id) => ({
+                    id: `native-${id}`,
+                    items: [],
+                    status: "completed",
+                    error: null,
+                  })),
+                  nextCursor: target === "rewound-turn" ? "more" : null,
                 },
               ),
               ...exchange(
@@ -13226,14 +13237,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               providerThreadId: harness.providerThread.id,
               now,
             });
-          const turns = [turn("a", 1), turn("b", 2), turn("c", 3)];
+          const turns = [...app].map((id, index) => turn(id, index + 1));
           const snapshot = yield* harness.runtime.rollbackThread({
             providerThread: harness.providerThread,
             target: {
               type: "provider_turn",
               checkpointId: CheckpointId.make(`checkpoint-${target}`),
               appRunOrdinal: 1,
-              providerTurn: target === "before-rewind" ? turns[0]! : turns[1]!,
+              providerTurn: turns[to]!,
             },
             providerThreadTurns: turns,
           });

@@ -7013,8 +7013,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               if (current !== input.context) {
                 return false;
               }
-              // A confirmed rewind keeps its own copy of the input it resends.
-              input.context.rewind = undefined;
               if (input.stalledRetry !== undefined) {
                 // Checked under the permit so item/started cannot clear the retry mid-finalize.
                 const retries = yield* Ref.get(providerRetries);
@@ -7025,6 +7023,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   return false;
                 input.context.latestProviderFailure ??= input.stalledRetry.failure;
               }
+              // A confirmed rewind keeps its own copy of the input it resends.
+              input.context.rewind = undefined;
               input.context.fileChangeKindsByItem.clear();
               const providerRetry = yield* Ref.modify(providerRetries, (current) => {
                 const retry = current.get(input.context.providerTurnId);
@@ -9360,12 +9360,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 };
               }
               // A turn a context rewind already removed counts in Weavewing but not in Codex, so the
-              // revert also stops at the target's own native turn.
-              const keptNativeTurnId = nativeConversationHeadRef?.nativeId;
+              // revert also stops at the native turn of the target or of any turn before it.
+              const target = threadInput.target;
+              const keptNativeTurnIds = new Set(
+                target.type === "provider_turn"
+                  ? threadInput.providerThreadTurns
+                      .filter((turn) => turn.ordinal <= target.providerTurn.ordinal)
+                      .map((turn) => turn.nativeTurnRef?.nativeId)
+                  : [],
+              );
               const { response } = yield* revertNativeTurns(
                 threadInput.providerThread,
                 numTurns,
-                (nativeTurnId) => nativeTurnId !== keptNativeTurnId,
+                (nativeTurnId) => !keptNativeTurnIds.has(nativeTurnId),
               );
               return {
                 providerThread: {
