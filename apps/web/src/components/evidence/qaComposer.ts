@@ -1,3 +1,4 @@
+import { qaCardTitle, qaKey, qaRef, type QaChange } from "@t3tools/client-runtime/qa-card";
 import type {
   EvidenceLanding,
   ScopedThreadRef,
@@ -9,7 +10,6 @@ import {
 } from "@t3tools/shared/composerContextReferences";
 
 import { useComposerDraftStore, useComposerWaitingItems } from "../../composerDraftStore";
-import { qaCardTitle, qaKey, qaRef, type QaChange } from "./qaCard.logic";
 
 /** The Discuss reference for one QA change, labelled `QA3 · discuss · <title>`. */
 export function qaDiscussRecord(

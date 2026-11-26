@@ -7,6 +7,10 @@
       "types": "./src/projectPicker.logic.ts",
       "default": "./src/projectPicker.logic.ts"
     },
+    "./qa-card": {
+      "types": "./src/qaCard.logic.ts",
+      "default": "./src/qaCard.logic.ts"
+    },
     "./thread-glyphs": {
       "types": "./src/threadGlyphs.ts",
       "default": "./src/threadGlyphs.ts"

@@ -1,5 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
+import {
+  qaCardOutcome,
+  qaCardStatus,
+  qaCardTitle,
+  qaKey,
+  qaRef,
+  type QaCardStatus,
+  type QaChange,
+} from "@t3tools/client-runtime/qa-card";
 import type { EvidenceChangeQa, EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpRightIcon } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
@@ -19,15 +28,6 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CaptureTile } from "./CaptureTile";
 import { CHECKS, checkLabel, reviewDisplay } from "./evidence.logic";
-import {
-  qaCardOutcome,
-  qaCardStatus,
-  qaCardTitle,
-  qaKey,
-  qaRef,
-  type QaCardStatus,
-  type QaChange,
-} from "./qaCard.logic";
 import { qaDiscussRecord, toggleQaDiscuss, useQaInComposer } from "./qaComposer";
 
 const HELP = {
