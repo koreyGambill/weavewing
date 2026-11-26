@@ -1058,6 +1058,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
               : "Long press to copy."
         }
         accessibilityState={canExpand ? { expanded } : undefined}
+        {...outgoing?.accessibilityProps}
         onPress={() => {
           if (notifiedSubagentThreadId !== undefined) {
             openLinkedThread({

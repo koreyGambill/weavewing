@@ -10,14 +10,22 @@ import {
   type TurnOrigin,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { describe, expect, it } from "vite-plus/test";
+import { buildMessageRows } from "@t3tools/client-runtime/state/message-reactions";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { ThreadFeedMessage } from "../../lib/threadActivity";
 import {
   createMessageReactionReader,
   incomingMessageCard,
+  senderCardRowLabel,
   threadCardReachable,
 } from "./messageCards";
+
+vi.mock("@t3tools/client-runtime/state/message-reactions", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@t3tools/client-runtime/state/message-reactions")>();
+  return { ...actual, buildMessageRows: vi.fn(actual.buildMessageRows) };
+});
 
 const now = DateTime.makeUnsafe("2026-11-11T00:00:00.000Z");
 const threadId = ThreadId.make("recipient");
@@ -141,28 +149,44 @@ describe("incomingMessageCard", () => {
 
 describe("threadCardReachable", () => {
   it.each([
-    [{ connected: true, shellKnown: true, lookup: "pending" }, true],
-    [{ connected: true, shellKnown: false, lookup: "pending" }, true],
-    [{ connected: true, shellKnown: false, lookup: "found" }, true],
-    [{ connected: true, shellKnown: false, lookup: "failed" }, true],
-    [{ connected: true, shellKnown: false, lookup: "missing" }, false],
-    [{ connected: false, shellKnown: true, lookup: "found" }, false],
+    [{ phase: "connected", shellKnown: true, lookupFound: false }, true],
+    [{ phase: "connected", shellKnown: false, lookupFound: true }, true],
+    [{ phase: "connected", shellKnown: false, lookupFound: false }, false],
+    [{ phase: "offline", shellKnown: true, lookupFound: true }, false],
+    [{ phase: "reconnecting", shellKnown: true, lookupFound: false }, false],
+    [{ phase: "available", shellKnown: true, lookupFound: false }, false],
+    [{ phase: null, shellKnown: false, lookupFound: false }, false],
   ] as const)("opens %o: %s", (input, reachable) => {
     expect(threadCardReachable(input)).toBe(reachable);
+  });
+});
+
+describe("senderCardRowLabel", () => {
+  it.each([
+    ["Reply from child thread", true, false, "Reply"],
+    ["Failure report from child thread", true, false, "Failure report"],
+    ["Message from thread", true, true, "Message from thread"],
+    ["Wake", false, false, "Wake"],
+    ["Weavewing · idle compaction", false, false, "Weavewing · idle compaction"],
+  ])("shows %s (named %s, wide %s) as %s", (label, named, wide, shown) => {
+    expect(senderCardRowLabel(label, named, wide)).toBe(shown);
   });
 });
 
 describe("createMessageReactionReader", () => {
   it("maps each incoming message to its reaction and keeps it while text streams", () => {
     const read = createMessageReactionReader();
+    const runs = [run];
+    const nodes: [] = [];
     const incoming = projected(userItem(sender), 0);
-    const streaming = projected(assistantItem("Working", true), 1);
-    const before = read([run], [], [incoming, streaming]);
+    const before = read(runs, nodes, [incoming, projected(assistantItem("Working", true), 1)]);
     expect(before.size).toBe(0);
-    const streamed = read([run], [], [incoming, projected(assistantItem("Working on", true), 1)]);
+    const derivations = vi.mocked(buildMessageRows).mock.calls.length;
+    const streamed = read(runs, nodes, [incoming, projected(assistantItem("Working on", true), 1)]);
     expect(streamed).toBe(before);
+    expect(vi.mocked(buildMessageRows).mock.calls.length).toBe(derivations);
 
-    const settled = read([run], [], [incoming, projected(assistantItem("[react 1:ack]"), 1)]);
+    const settled = read(runs, nodes, [incoming, projected(assistantItem("[react 1:ack]"), 1)]);
     expect(settled.get(MessageId.make("incoming"))).toMatchObject({
       kind: "ack",
       label: "Handled",
