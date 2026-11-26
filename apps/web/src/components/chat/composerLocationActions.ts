@@ -9,8 +9,11 @@ export interface ComposerLocationActions {
   readonly chooseXwingEnvironment?: ((anchor: HTMLElement) => void) | undefined;
   /** Opens the dialog that creates an Xwing environment and moves the thread into it. */
   readonly newEnvironment?: (() => void) | undefined;
-  /** Opens the dialog that moves the thread into a new worktree on a new branch. */
-  readonly handoffWorktree?: (() => void) | undefined;
+  /**
+   * Opens the dialog that moves the thread into a new worktree on a new branch, returning focus
+   * to `returnFocus` when it closes.
+   */
+  readonly handoffWorktree?: ((returnFocus: HTMLElement | null) => void) | undefined;
 }
 
 export const ComposerLocationActionsContext = createContext<ComposerLocationActions>({});

@@ -706,7 +706,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       activeWorktreePath === null &&
       worktreeProvider === "t3" &&
       canHandoffWorktree
-        ? () => openHandoffWorktree(threadRef)
+        ? (returnFocus: HTMLElement | null) => openHandoffWorktree(threadRef, returnFocus)
         : undefined,
   };
   const items: ReadonlyArray<ComposerRowItem> = [

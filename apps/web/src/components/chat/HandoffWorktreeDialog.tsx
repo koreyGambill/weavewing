@@ -1,9 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
-import type { ScopedThreadRef } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useProject, useThreadShell } from "../../state/entities";
@@ -23,22 +22,32 @@ import {
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import {
+  handoffBranchNameProblem,
+  handoffFailureMessage,
+  handoffSuccessToast,
+} from "./handoffWorktree.logic";
+import {
   closeHandoffWorktree as close,
   handoffWorktreeDialogAtom,
+  type HandoffWorktreeDialogRequest,
 } from "./handoffWorktreeDialogState";
 
 export function HandoffWorktreeDialogHost() {
-  const threadRef = useAtomValue(handoffWorktreeDialogAtom);
-  return threadRef ? (
-    <HandoffWorktreeDialog
-      key={`${threadRef.environmentId}:${threadRef.threadId}`}
-      threadRef={threadRef}
-    />
+  const { request, open } = useAtomValue(handoffWorktreeDialogAtom);
+  return request ? (
+    <HandoffWorktreeDialog key={request.sequence} request={request} open={open} />
   ) : null;
 }
 
 /** Names the new branch for a thread moving into its own worktree, the one choice a handoff needs. */
-function HandoffWorktreeDialog({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+function HandoffWorktreeDialog({
+  request,
+  open,
+}: {
+  readonly request: HandoffWorktreeDialogRequest;
+  readonly open: boolean;
+}) {
+  const { threadRef } = request;
   const thread = useThreadShell(threadRef);
   const project = useProject(
     thread ? scopeProjectRef(threadRef.environmentId, thread.projectId) : null,
@@ -47,42 +56,46 @@ function HandoffWorktreeDialog({ threadRef }: { readonly threadRef: ScopedThread
   const projectDefault = resolveProjectSettings(settings, project?.id ?? null, project ?? undefined)
     .settings.newWorktreesStartFromOrigin;
   const [branch, setBranch] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
   const [startFromOrigin, setStartFromOrigin] = useState(projectDefault);
   const [runSetupScript, setRunSetupScript] = useState(true);
   const [pending, setPending] = useState(false);
+  const branchInput = useRef<HTMLInputElement>(null);
+  const problemId = useId();
   const canHandoff = useAtomValue(handoffThreadToWorktree.permissionAtom(threadRef.environmentId));
-  const handoff = useAtomCommand(handoffThreadToWorktree, "Hand off to a worktree");
+  // The dialog shows the server's refusal itself, beside the field it concerns.
+  const handoff = useAtomCommand(handoffThreadToWorktree, {
+    label: "Hand off to a worktree",
+    reportFailure: false,
+  });
   const busy = thread !== null && threadRuntimeIsActive(thread.runtime);
+  const refuse = (message: string) => {
+    setProblem(message);
+    branchInput.current?.focus();
+  };
   const submit = async () => {
-    if (!thread || !canHandoff || pending || busy || branch.trim() === "") return;
+    if (!thread || !canHandoff || pending || busy) return;
+    const name = branch.trim();
+    const invalid = handoffBranchNameProblem(name);
+    if (invalid !== null) return refuse(invalid);
     setPending(true);
     const result = await handoff({
       environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        branch: branch.trim(),
-        startFromOrigin,
-        runSetupScript,
-      },
+      input: { threadId: threadRef.threadId, branch: name, startFromOrigin, runSetupScript },
     });
     setPending(false);
-    if (result._tag === "Success") {
-      toastManager.add({
-        type: "success",
-        title: "Handed off to a worktree",
-        description: result.value.worktreePath,
-      });
-      close();
-    }
+    if (result._tag === "Failure") return refuse(handoffFailureMessage(result.cause));
+    toastManager.add(handoffSuccessToast(result.value, { startFromOrigin }));
+    close();
   };
   return (
     <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !pending) close();
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !pending) close();
       }}
     >
-      <DialogPopup>
+      <DialogPopup finalFocus={() => request.returnFocus}>
         <form
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
@@ -102,14 +115,26 @@ function HandoffWorktreeDialog({ threadRef }: { readonly threadRef: ScopedThread
               <label className="flex flex-col gap-1.5 text-sm">
                 New branch
                 <Input
+                  ref={branchInput}
                   autoFocus
                   value={branch}
-                  disabled={pending}
+                  // Read-only rather than disabled, so a refusal can return focus here at once.
+                  readOnly={pending}
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(event) => setBranch(event.target.value)}
+                  aria-invalid={problem !== null}
+                  aria-describedby={problem === null ? undefined : problemId}
+                  onChange={(event) => {
+                    setBranch(event.target.value);
+                    setProblem(null);
+                  }}
                 />
               </label>
+              {problem === null ? null : (
+                <p id={problemId} role="alert" className="text-sm text-destructive-foreground">
+                  {problem}
+                </p>
+              )}
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={startFromOrigin}
@@ -142,10 +167,7 @@ function HandoffWorktreeDialog({ threadRef }: { readonly threadRef: ScopedThread
             <Button type="button" variant="outline" disabled={pending} onClick={close}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={!thread || !canHandoff || busy || pending || branch.trim() === ""}
-            >
+            <Button type="submit" disabled={!thread || !canHandoff || busy || pending}>
               {pending ? "Handing off…" : "Hand off"}
             </Button>
           </DialogFooter>

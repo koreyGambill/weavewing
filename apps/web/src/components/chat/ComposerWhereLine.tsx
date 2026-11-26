@@ -280,7 +280,7 @@ function ComposerLocationMenu(props: {
           </MenuItem>
         ) : null}
         {handoffWorktree ? (
-          <MenuItem onClick={handoffWorktree}>
+          <MenuItem onClick={() => handoffWorktree(trigger)}>
             <FolderGit2Icon />
             Hand off to a worktree…
           </MenuItem>

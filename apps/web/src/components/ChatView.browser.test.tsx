@@ -17,6 +17,7 @@ import {
   ScheduledTaskId,
   ThreadId,
   WS_METHODS,
+  WorktreeMcpFailure,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
@@ -1295,8 +1296,7 @@ it("hands a thread off to a new worktree from the location menu", async () => {
   await using _row = await renderRowAtWidth("row-handoff", null, 1280);
   const location = page.getByRole("button", { name: /^Location:/ });
   await expect.element(location).toBeVisible();
-  (await location.element()).focus();
-  await userEvent.keyboard("{Enter}");
+  await openLocationMenuByKeyboard(location);
   await page.getByRole("menuitem", { name: /Hand off to a worktree/ }).click();
   const dialog = page.getByRole("dialog", { name: "Hand off to a worktree" });
   await expect.element(dialog).toBeVisible();
@@ -1312,12 +1312,99 @@ it("hands a thread off to a new worktree from the location menu", async () => {
   ]);
 });
 
+// The thread moves focus to its composer as it opens, which can land after the location takes
+// focus; Enter in an empty composer does nothing, so retry until the menu opens.
+async function openLocationMenuByKeyboard(location: ReturnType<typeof page.getByRole>) {
+  await vi.waitFor(
+    async () => {
+      if (document.querySelector('[role="menu"]') === null) {
+        (await location.element()).focus();
+        await userEvent.keyboard("{Enter}");
+      }
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    },
+    { timeout: 10_000, interval: 500 },
+  );
+}
+
+async function openHandoffDialog(name: string) {
+  const row = await renderRowAtWidth(name, null, 1280);
+  const location = page.getByRole("button", { name: /^Location:/ });
+  await expect.element(location).toBeVisible();
+  await openLocationMenuByKeyboard(location);
+  await page.getByRole("menuitem", { name: /Hand off to a worktree/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Hand off to a worktree" });
+  await expect.element(dialog).toBeVisible();
+  return { row, location, dialog, field: dialog.getByRole("textbox", { name: "New branch" }) };
+}
+
+it("shows the server's refusal beside the branch name and keeps the dialog open", async () => {
+  const refusal = "Branch 'main' already exists. Choose a different branch name.";
+  const handoffs: unknown[] = [];
+  using _handoff = answerRpc(WS_METHODS.threadsHandoffToWorktree, (input: unknown) => {
+    handoffs.push(input);
+    return Effect.fail(new WorktreeMcpFailure({ code: "invalid_request", message: refusal }));
+  });
+  const { row, dialog, field } = await openHandoffDialog("row-handoff-refused");
+  await using _row = row;
+  await field.fill("main");
+  await dialog.getByRole("button", { name: "Hand off" }).click();
+  await expect.element(dialog.getByRole("alert")).toHaveTextContent(refusal);
+  expect(handoffs).toHaveLength(1);
+  await expect.element(dialog).toBeVisible();
+  await expect.element(field).toHaveValue("main");
+  await expect.element(field).toHaveFocus();
+  await expect.element(field).toHaveAttribute("aria-invalid", "true");
+  // The dialog's state is app-wide, so close it before the next test renders.
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
+});
+
+it("refuses a branch name Git would reject without asking the server", async () => {
+  const handoffs: unknown[] = [];
+  using _handoff = answerRpc(WS_METHODS.threadsHandoffToWorktree, (input: unknown) => {
+    handoffs.push(input);
+    return Effect.never;
+  });
+  const { row, dialog, field } = await openHandoffDialog("row-handoff-invalid");
+  await using _row = row;
+  await field.fill("-retry count");
+  await dialog.getByRole("button", { name: "Hand off" }).click();
+  await expect
+    .element(dialog.getByRole("alert"))
+    .toHaveTextContent("A branch name cannot contain spaces.");
+  await expect.element(field).toHaveFocus();
+  await field.fill("-retry");
+  await expect.element(dialog.getByRole("alert")).not.toBeInTheDocument();
+  await dialog.getByRole("button", { name: "Hand off" }).click();
+  await expect
+    .element(dialog.getByRole("alert"))
+    .toHaveTextContent("A branch name cannot start with a dash.");
+  expect(handoffs).toEqual([]);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
+});
+
+it("returns focus to the location when the handoff dialog closes", async () => {
+  const { row, location, dialog } = await openHandoffDialog("row-handoff-focus");
+  await using _row = row;
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect.element(location).toHaveFocus();
+
+  await userEvent.keyboard("{Enter}");
+  await page.getByRole("menuitem", { name: /Hand off to a worktree/ }).click();
+  await expect.element(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect.element(location).toHaveFocus();
+});
+
 it("opens the location menu from the keyboard and returns focus on Escape", async () => {
   await using _row = await renderRowAtWidth("row-location", "/w/render", 1280);
   const location = page.getByRole("button", { name: /^Location:/ });
   await expect.element(location).toBeVisible();
-  (await location.element()).focus();
-  await userEvent.keyboard("{Enter}");
+  await openLocationMenuByKeyboard(location);
   const menu = page.getByRole("menu");
   const changeFolder = menu.getByRole("menuitem", { name: /Change folder/ });
   await expect.element(changeFolder).toBeVisible();
