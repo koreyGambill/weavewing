@@ -144,7 +144,7 @@ export type ToolsFooterState =
   | {
       readonly kind: "changed";
       readonly onCount: number;
-      /** Undefined when a partial connector selection makes the sum unknowable. */
+      /** Undefined when a left-out server might be a connector, which makes the sum unknowable. */
       readonly estimatedTokens: number | undefined;
       readonly serversLeftOut: number;
     };
@@ -163,15 +163,15 @@ export function toolsFooterState(input: {
   if (sameToolOverrides(input.saved, input.staged)) return { kind: "unchanged" };
   const on = input.rows.filter((row) => isRowOn(row, input.staged));
   const connectorsOn = input.staged.claudeAiConnectors;
-  // The connectors' estimate covers all of them, so a sum is honest only when every left-out
-  // server is known to be an ordinary one.
-  const partialConnectors =
-    connectorsOn &&
-    input.staged.omittedMcpServers.some((name) => !input.ordinaryServerNames.includes(name));
+  // A left-out server the inventory cannot place might be a connector, which no estimate covers
+  // on its own, so a sum is honest only when every left-out server is known to be ordinary.
+  const unknownLeftOut = input.staged.omittedMcpServers.some(
+    (name) => !input.ordinaryServerNames.includes(name),
+  );
   return {
     kind: "changed",
     onCount: on.length + (connectorsOn ? 1 : 0),
-    estimatedTokens: partialConnectors
+    estimatedTokens: unknownLeftOut
       ? undefined
       : on.reduce((sum, row) => sum + row.estimatedTokens, 0) +
         (connectorsOn ? CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS : 0),

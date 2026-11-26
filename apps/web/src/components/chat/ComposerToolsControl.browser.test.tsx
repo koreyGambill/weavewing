@@ -223,6 +223,27 @@ it.each([
     .toBeVisible();
 });
 
+it("gives no token sum for an unplaced left-out server with connectors left to Claude Code", async () => {
+  setup(true, AsyncResult.success({ servers: [fixtureInventory.servers[0]] }));
+  await using screen = await renderControl(
+    {
+      ...idleThread,
+      toolOverrides: {
+        enabledBuiltinTools: [],
+        claudeAiConnectors: false,
+        omittedMcpServers: ["claude.ai Fixture Mail"],
+      },
+    },
+    { ...provider, claudeAiConnectors: "inherit" },
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  const dialog = dialogOf();
+  await userEvent.click(dialog.getByRole("switch").first());
+  await expect
+    .element(dialog.getByText("1 switched on, 1 MCP server off", { exact: true }))
+    .toBeVisible();
+});
+
 it("disables Reload session without permission to operate the thread", async () => {
   setup(false);
   await using screen = await renderControl();

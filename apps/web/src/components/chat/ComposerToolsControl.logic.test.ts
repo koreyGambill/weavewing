@@ -124,6 +124,17 @@ describe("toolsFooterState", () => {
         staged: { ...partial, enabledBuiltinTools: ["Artifact"] },
       }),
     ).toMatchObject({ estimatedTokens: undefined });
+    // Connectors left to Claude Code do not make an unplaced left-out server safe to sum.
+    expect(
+      toolsFooterState({
+        ...base,
+        staged: {
+          ...EMPTY_TOOL_OVERRIDES,
+          enabledBuiltinTools: ["Artifact"],
+          omittedMcpServers: ["claude.ai Fixture Mail"],
+        },
+      }),
+    ).toEqual({ kind: "changed", onCount: 1, estimatedTokens: undefined, serversLeftOut: 1 });
     const ordinaryLeftOut = { ...wakeupAndConnectors, omittedMcpServers: ["fixture-notes"] };
     expect(toolsFooterState({ ...base, staged: ordinaryLeftOut })).toMatchObject({
       estimatedTokens: 4_900,
