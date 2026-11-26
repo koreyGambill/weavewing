@@ -1,5 +1,27 @@
-import type { ScheduledTask, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import type {
+  ScheduledTaskId,
+  ScheduledTaskSummary,
+  ThreadId,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import type { ThreadPullRequestBadge } from "@t3tools/client-runtime/thread-pull-requests";
+
+import { resolveDisplayedThreadPr } from "../ThreadStatusIndicators";
+
+/**
+ * The open pull request found for the thread's branch, for a thread whose shell links none. The
+ * row's branch picker can show a ref the thread has not recorded yet, such as while a checkout
+ * is in flight; until the two agree, the branch's pull request may belong to the other ref.
+ */
+export function resolveComposerRowBranchPullRequest(input: {
+  readonly threadBranch: string | null;
+  /** The ref the row's branch picker shows; undefined while no picker shows one. */
+  readonly pickerBranch: string | null | undefined;
+  readonly gitStatus: Pick<VcsStatusResult, "refName" | "pr"> | null;
+}) {
+  if (input.pickerBranch !== undefined && input.pickerBranch !== input.threadBranch) return null;
+  return resolveDisplayedThreadPr({ threadBranch: input.threadBranch, gitStatus: input.gitStatus });
+}
 
 /** What the pull request chip reads: `#42`, and how many more the thread links. */
 export interface ComposerRowPullRequestText {
@@ -30,32 +52,36 @@ export interface ComposerRowAutomation {
   readonly title: string;
   /** `started` for the automation that created the thread, `targets` for one that sends to it. */
   readonly relation: "started" | "targets";
+  /** False while the automation is paused. */
+  readonly enabled: boolean;
 }
 
-const UNTITLED_AUTOMATION = "Automation";
-
 /**
- * The automations tied to a thread: the one that started it first, then each task that sends to
- * it, once each. `tasks` is null while the environment's list is unavailable.
+ * The automations tied to a thread that still exist: the one that started it first, then each
+ * task that sends to it, once each. `tasks` is null until the environment's list arrives, and a
+ * starter that list does not hold has been deleted, so neither offers a chip that opens nothing.
  */
 export function resolveThreadAutomations(input: {
   readonly threadId: ThreadId;
   readonly startedByTaskId: ScheduledTaskId | null | undefined;
-  readonly tasks: ReadonlyArray<Pick<ScheduledTask, "id" | "title" | "threadId">> | null;
+  readonly tasks: ReadonlyArray<
+    Pick<ScheduledTaskSummary, "id" | "title" | "threadId" | "enabled">
+  > | null;
 }): ReadonlyArray<ComposerRowAutomation> {
   const { threadId, startedByTaskId, tasks } = input;
-  const started: ReadonlyArray<ComposerRowAutomation> = startedByTaskId
-    ? [
-        {
-          id: startedByTaskId,
-          title: tasks?.find((task) => task.id === startedByTaskId)?.title ?? UNTITLED_AUTOMATION,
-          relation: "started",
-        },
-      ]
+  if (tasks === null) return [];
+  const starter = startedByTaskId ? tasks.find((task) => task.id === startedByTaskId) : undefined;
+  const started: ReadonlyArray<ComposerRowAutomation> = starter
+    ? [{ id: starter.id, title: starter.title, relation: "started", enabled: starter.enabled }]
     : [];
-  const targeting = (tasks ?? [])
+  const targeting = tasks
     .filter((task) => task.threadId === threadId && task.id !== startedByTaskId)
-    .map((task) => ({ id: task.id, title: task.title, relation: "targets" as const }));
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      relation: "targets" as const,
+      enabled: task.enabled,
+    }));
   return [...started, ...targeting];
 }
 
@@ -81,10 +107,14 @@ export function summarizeComposerRowAutomations(
     description:
       more > 0
         ? `Automations: ${automations.map((automation) => automation.title).join(", ")}`
-        : `Automation: ${first.title}, ${automationRelationLabel(first.relation).toLowerCase()}`,
+        : `Automation: ${first.title}, ${automationRelationLabel(first).toLowerCase()}`,
   };
 }
 
-export function automationRelationLabel(relation: ComposerRowAutomation["relation"]): string {
-  return relation === "started" ? "Started this thread" : "Sends here";
+/** How an automation relates to the thread, and whether it is paused. */
+export function automationRelationLabel(
+  automation: Pick<ComposerRowAutomation, "relation" | "enabled">,
+): string {
+  const relation = automation.relation === "started" ? "Started this thread" : "Sends here";
+  return automation.enabled ? relation : `${relation} · paused`;
 }

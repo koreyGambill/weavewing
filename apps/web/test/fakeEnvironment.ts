@@ -719,6 +719,18 @@ export function answerRpc(method: string, handler: (input: never) => unknown): D
   };
 }
 
+/** Answers a streaming RPC with the values the test emits, until disposed. */
+export function answerStream<A>(
+  method: string,
+): Disposable & { readonly emit: (value: A) => Promise<void> } {
+  const queue = Effect.runSync(Queue.unbounded<A>());
+  const answer = answerRpc(method, () => Stream.fromQueue(queue));
+  return {
+    emit: (value) => Effect.runPromise(Queue.offer(queue, value)).then(() => undefined),
+    [Symbol.dispose]: () => answer[Symbol.dispose](),
+  };
+}
+
 export async function emitTerminalMetadata(event: TerminalMetadataStreamEvent): Promise<void> {
   if (terminalMetadataSubscriber === null) throw new Error("No terminal metadata subscription");
   await Effect.runPromise(Queue.offer(terminalMetadataSubscriber, event));

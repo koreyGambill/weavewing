@@ -38,6 +38,7 @@ import {
   type ScheduledTaskWebhookDeliveryOutcome,
   type ScheduledTaskWebhookFilter,
   type ScheduledTaskListResult,
+  type ScheduledTaskSummaryListResult,
   type ScheduledTaskMutationResult,
   type ScheduledTaskRunNowInput,
   type ScheduledTaskRunNowResult,
@@ -304,11 +305,34 @@ interface WebhookDeliveryRow {
   readonly error: string | null;
 }
 
+function sameSummaries(
+  left: ScheduledTaskSummaryListResult,
+  right: ScheduledTaskSummaryListResult,
+): boolean {
+  return (
+    left.tasks.length === right.tasks.length &&
+    left.tasks.every((task, index) => {
+      const other = right.tasks[index]!;
+      return (
+        task.id === other.id &&
+        task.title === other.title &&
+        task.threadId === other.threadId &&
+        task.enabled === other.enabled
+      );
+    })
+  );
+}
+
 export class ScheduledTaskService extends Context.Service<
   ScheduledTaskService,
   {
     readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;
     readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
+    /** Each task's id, title, target thread and enabled state; emits only when one changes. */
+    readonly subscribeSummaries: () => Stream.Stream<
+      ScheduledTaskSummaryListResult,
+      ScheduledTaskError
+    >;
     readonly upsert: (
       input: ScheduledTaskUpsertInput,
     ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
@@ -2189,6 +2213,41 @@ export const layer = Layer.effect(
         }),
       );
 
+    // Reads no prompt, schedule or run state, so a large task list stays cheap to resend.
+    const listSummaries = () =>
+      sql<{
+        readonly task_id: string;
+        readonly title: string;
+        readonly thread_id: string | null;
+        readonly enabled: number;
+      }>`
+        SELECT task_id, title, thread_id, enabled FROM scheduled_tasks
+        ORDER BY created_at DESC, task_id ASC
+      `.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.map((rows): ScheduledTaskSummaryListResult => ({
+          tasks: rows.map((row) => ({
+            id: ScheduledTaskId.make(row.task_id),
+            title: row.title,
+            threadId: row.thread_id === null ? null : ThreadId.make(row.thread_id),
+            enabled: row.enabled === 1,
+          })),
+        })),
+        Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
+      );
+
+    const subscribeSummaries: ScheduledTaskService["Service"]["subscribeSummaries"] = () =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          // Subscribe before reading to buffer concurrent changes.
+          const subscription = yield* PubSub.subscribe(changesPubSub);
+          return Stream.concat(
+            Stream.fromEffect(listSummaries()),
+            Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => listSummaries())),
+          ).pipe(Stream.changesWith(sameSummaries));
+        }),
+      );
+
     const readDestinationThread = (threadId: ThreadId, taskId: ScheduledTaskId) =>
       threadManagement
         .getThreadShell(threadId)
@@ -3617,6 +3676,7 @@ export const layer = Layer.effect(
     return ScheduledTaskService.of({
       list,
       subscribeList,
+      subscribeSummaries,
       upsert,
       setEnabled,
       setThreadEnabled,

@@ -1,5 +1,9 @@
 import { createMemoryHistory } from "@tanstack/react-router";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import {
   EnvironmentId,
   MessageId,
@@ -7,6 +11,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type OrchestrationV2Subagent,
+  type VcsStatusResult,
   ORCHESTRATION_V2_WS_METHODS,
   RunId,
   ScheduledTaskId,
@@ -36,6 +41,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { getRouter } from "~/router";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { composerRowPickerBranchAtom } from "~/components/chat/composerRowPickerBranch";
 import { serverEnvironment } from "~/state/server";
 import { environmentThreadDetails } from "~/state/threads";
 import {
@@ -43,6 +49,7 @@ import {
   PROJECT_ID,
   answerAssetUrls,
   answerRpc,
+  answerStream,
   assistantItem,
   dispatchedCommands,
   emitThreadEvent,
@@ -1084,9 +1091,13 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
 
 async function renderRowAtWidth(
   name: string,
-  worktreePath: string,
+  worktreePath: string | null,
   width: number,
   shell?: FakeThread["shell"],
+  checkout: {
+    readonly refName: string;
+    readonly pr: VcsStatusResult["pr"];
+  } = { refName: "feature/row-under-the-composer-sweep", pr: null },
 ) {
   await import("~/index.css");
   const stack = new AsyncDisposableStack();
@@ -1096,7 +1107,7 @@ async function renderRowAtWidth(
   const thread = {
     ...threadWithHistory(name, 1),
     olderSettled: true as const,
-    worktreePath,
+    ...(worktreePath === null ? {} : { worktreePath }),
     ...(shell ? { shell } : {}),
   };
   stack.use(
@@ -1107,11 +1118,14 @@ async function renderRowAtWidth(
           isRepo: true,
           hasPrimaryRemote: true,
           isDefaultRef: true,
-          refName: "feature/row-under-the-composer-sweep",
+          refName: checkout.refName,
           hasWorkingTreeChanges: false,
           workingTree: { files: [], insertions: 0, deletions: 0 },
         },
-        remote: null,
+        remote:
+          checkout.pr === null
+            ? null
+            : { hasUpstream: true, aheadCount: 0, behindCount: 0, pr: checkout.pr },
       },
     }),
   );
@@ -1154,17 +1168,17 @@ const inRow = (id: string) =>
   document.querySelector(`[data-composer-row-item="${id}"]:not([data-in-menu])`) !== null;
 
 it("returns the chips and the branch from the thread menu when the row widens again", async () => {
-  using _tasks = answerRpc(WS_METHODS.scheduledTasksSubscribe, () =>
+  using _tasks = answerRpc(WS_METHODS.scheduledTasksSubscribeSummaries, () =>
     Stream.concat(
       Stream.make({
-        tasks: [{ id: "nightly-task", title: "Nightly sweep", threadId: null }],
+        tasks: [{ id: "nightly-task", title: "Nightly sweep", threadId: null, enabled: true }],
       }),
       Stream.never,
     ),
   );
   // An earlier test's environment may still hold the stream, so subscribe again for this answer.
   appAtomRegistry.refresh(
-    serverEnvironment.scheduledTasksLive({ environmentId: ENVIRONMENT_ID, input: {} }),
+    serverEnvironment.scheduledTaskSummariesLive({ environmentId: ENVIRONMENT_ID, input: {} }),
   );
   await using _row = await renderRowAtWidth("row-chips", "/w/render", 1280, {
     automationTaskId: ScheduledTaskId.make("nightly-task"),
@@ -1213,6 +1227,55 @@ it("returns the chips and the branch from the thread menu when the row widens ag
   await vi.waitFor(() => expect(["branch", "pull-request", "automation"].every(inRow)).toBe(true), {
     timeout: 3000,
   });
+});
+
+it("drops the automation chip when the automation that started the thread is deleted", async () => {
+  const nightly = { id: "nightly-task", title: "Nightly sweep", threadId: null, enabled: true };
+  using summaries = answerStream(WS_METHODS.scheduledTasksSubscribeSummaries);
+  appAtomRegistry.refresh(
+    serverEnvironment.scheduledTaskSummariesLive({ environmentId: ENVIRONMENT_ID, input: {} }),
+  );
+  await using _row = await renderRowAtWidth("row-deleted-origin", "/w/render", 1280, {
+    automationTaskId: ScheduledTaskId.make("nightly-task"),
+  });
+  await summaries.emit({ tasks: [nightly] });
+  const chip = page.getByRole("button", { name: /^Automation: Nightly sweep/ });
+  await expect.element(chip).toBeVisible();
+  // The server's list after the task is deleted no longer holds it.
+  await act(() => summaries.emit({ tasks: [] }));
+  await expect.element(chip).not.toBeInTheDocument();
+  expect(document.querySelector('[data-composer-row-item="automation"]')).toBeNull();
+});
+
+it("hides the branch's pull request while the branch picker shows another ref", async () => {
+  const pr = {
+    number: 7,
+    title: "Show the retry count",
+    url: "https://github.com/acme/render/pull/7",
+    baseRef: "main",
+    headRef: "feature/row-pr",
+    state: "open" as const,
+  };
+  await using _row = await renderRowAtWidth(
+    "row-branch-pr",
+    // Its own checkout, so no earlier test's cached status for "/w/render" answers first.
+    "/w/render-branch-pr",
+    1280,
+    { branch: "feature/row-pr" },
+    { refName: "feature/row-pr", pr },
+  );
+  const chip = page.getByRole("link", { name: /#7/ });
+  await expect.element(chip).toBeVisible();
+  const pickerBranch = composerRowPickerBranchAtom(
+    scopedThreadKey(scopeThreadRef(ENVIRONMENT_ID, ThreadId.make("row-branch-pr"))),
+  );
+  // The row's picker reports the ref it shows.
+  expect(appAtomRegistry.get(pickerBranch)).toBe("feature/row-pr");
+  // A checkout to another ref is in flight: the picker shows it before the thread records it.
+  await act(() => appAtomRegistry.set(pickerBranch, "feature/next"));
+  await expect.element(chip).not.toBeInTheDocument();
+  await act(() => appAtomRegistry.set(pickerBranch, "feature/row-pr"));
+  await expect.element(chip).toBeVisible();
 });
 
 it("opens the location menu from the keyboard and returns focus on Escape", async () => {

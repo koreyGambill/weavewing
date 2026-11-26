@@ -193,6 +193,15 @@ it("guards a thread's tool changes and MCP server listing on the client too", ()
   ).toEqual([AuthOrchestrationOperateScope]);
 });
 
+it("serves automation summaries to readers and guards them on the client too", () => {
+  expect(requiredScopeForRpcMethod(WS_METHODS.scheduledTasksSubscribeSummaries)).toBe(
+    requiredScopeForRpcMethod(WS_METHODS.scheduledTasksSubscribe),
+  );
+  expect(clientRpcRequiredScopes(WS_METHODS.scheduledTasksSubscribeSummaries, {})).toEqual([
+    AuthOrchestrationReadScope,
+  ]);
+});
+
 it("requires operate permission for host retry while preserving read-only listing", () => {
   expect(requiredScopeForDeviceList({})).toBe(AuthOrchestrationReadScope);
   expect(requiredScopeForDeviceList({ retryHostId: "remote-host" })).toBe(

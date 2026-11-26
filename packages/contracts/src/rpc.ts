@@ -496,6 +496,7 @@ import {
   ScheduledTaskError,
   ScheduledTaskListInput,
   ScheduledTaskListResult,
+  ScheduledTaskSummaryListResult,
   ScheduledTaskRunNowInput,
   ScheduledTaskRotateWebhookTokenInput,
   ScheduledTaskListWebhookDeliveriesInput,
@@ -786,6 +787,7 @@ export const WS_METHODS = {
   serverGetThreadCost: "server.getThreadCost",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
+  scheduledTasksSubscribeSummaries: "scheduledTasks.subscribeSummaries",
   statusSourcesSubscribe: "statusSources.subscribe",
   statusSourcesUpsert: "statusSources.upsert",
   statusSourcesDelete: "statusSources.delete",
@@ -2761,6 +2763,17 @@ const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe
   stream: true,
 });
 
+// Re-emits only when a task's summary changes, so prompt edits and runs send nothing.
+const WsScheduledTasksSubscribeSummariesRpc = Rpc.make(
+  WS_METHODS.scheduledTasksSubscribeSummaries,
+  {
+    payload: ScheduledTaskListInput,
+    success: ScheduledTaskSummaryListResult,
+    error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+
 const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
   payload: ScheduledTaskUpsertInput,
   success: ScheduledTaskMutationResult,
@@ -2931,6 +2944,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMessageFollowUpsListRpc,
   WsMessageFollowUpsUpdateRpc,
   WsScheduledTasksSubscribeRpc,
+  WsScheduledTasksSubscribeSummariesRpc,
   WsStatusSourcesSubscribeRpc,
   WsStatusSourcesUpsertRpc,
   WsStatusSourcesDeleteRpc,

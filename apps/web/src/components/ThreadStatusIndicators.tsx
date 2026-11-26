@@ -217,10 +217,14 @@ export function resolveThreadPullRequestBadgePresentation({
   const terminology = changeRequestTerminologyForUrl(url);
   if (badge?.kind === "stack") {
     const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
+    const stack = `${badge.layers} ${terminology.plural}, ${aggregate.label.toLowerCase()}`;
     return {
       Icon: PullRequestGlyph.stack,
       toneClassName: aggregate.toneClassName,
-      label: `Stack of ${badge.layers} ${terminology.plural}, ${aggregate.label.toLowerCase()}`,
+      label:
+        number === undefined
+          ? `Stack of ${stack}`
+          : `${terminology.shortLabel} #${number} in a stack of ${stack}`,
       text: badge.layers,
     };
   }
@@ -339,7 +343,11 @@ function PullRequestBadge({
         <span
           className={cn("contents font-normal text-xs tabular-nums", presentation.toneClassName)}
         >
-          <presentation.Icon aria-hidden className="size-3 shrink-0" />
+          {/* The tone sits on the glyph too, so a host control's own icon color cannot replace it. */}
+          <presentation.Icon
+            aria-hidden
+            className={cn("size-3 shrink-0", presentation.toneClassName)}
+          />
           <span className={cn("text-secondary-label", numberCollapse)}>{presentation.text}</span>
         </span>
       </TooltipTrigger>

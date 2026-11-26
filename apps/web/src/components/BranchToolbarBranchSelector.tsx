@@ -1,6 +1,10 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -44,6 +48,8 @@ import { parsePullRequestReference } from "@t3tools/client-runtime/pull-request-
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { useComposerRowItemPlacement } from "./chat/ComposerRow";
+import { composerRowPickerBranchAtom } from "./chat/composerRowPickerBranch";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
   type BranchHold,
   deriveLocalBranchNameFromRemoteRef,
@@ -336,6 +342,14 @@ export function BranchToolbarBranchSelector({
     branchHoldCurrent ? branchHold.branch : canonicalActiveBranch,
     (_currentBranch: string | null, optimisticBranch: string | null) => optimisticBranch,
   );
+  const rowBranchKey = displayMode === "toolbar" ? scopedThreadKey(threadRef) : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the shown ref, including an in-flight checkout's, to the row's pull request chip, which cannot read this picker's optimistic state
+  useEffect(() => {
+    if (rowBranchKey === null) return;
+    const atom = composerRowPickerBranchAtom(rowBranchKey);
+    appAtomRegistry.set(atom, resolvedActiveBranch);
+    return () => appAtomRegistry.set(atom, undefined);
+  }, [rowBranchKey, resolvedActiveBranch]);
   const listedActiveBranch =
     resolvedActiveBranch === null ? null : (branchByName.get(resolvedActiveBranch) ?? null);
   const activeBranchRefQuery = useEnvironmentQuery(

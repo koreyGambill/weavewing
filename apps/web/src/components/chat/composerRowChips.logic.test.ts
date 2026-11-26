@@ -2,6 +2,8 @@ import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  automationRelationLabel,
+  resolveComposerRowBranchPullRequest,
   resolveComposerRowPullRequestText,
   resolveThreadAutomations,
   summarizeComposerRowAutomations,
@@ -50,14 +52,61 @@ describe("resolveComposerRowPullRequestText", () => {
   });
 });
 
+describe("resolveComposerRowBranchPullRequest", () => {
+  const pr = {
+    number: 7,
+    title: "Retry count",
+    url: "https://github.com/acme/render/pull/7",
+    baseRef: "main",
+    headRef: "feature/a",
+    state: "open" as const,
+  };
+  const status = { refName: "feature/a", pr };
+
+  it("uses the branch's open pull request while the picker shows the thread's branch", () => {
+    expect(
+      resolveComposerRowBranchPullRequest({
+        threadBranch: "feature/a",
+        pickerBranch: "feature/a",
+        gitStatus: status,
+      }),
+    ).toEqual(pr);
+    // No picker in the row, such as an embedded view.
+    expect(
+      resolveComposerRowBranchPullRequest({
+        threadBranch: "feature/a",
+        pickerBranch: undefined,
+        gitStatus: status,
+      }),
+    ).toEqual(pr);
+  });
+
+  it("shows none while the picker shows a ref the thread has not recorded", () => {
+    // A checkout to feature/b is in flight: the picker already shows it, the status does not.
+    expect(
+      resolveComposerRowBranchPullRequest({
+        threadBranch: "feature/a",
+        pickerBranch: "feature/b",
+        gitStatus: status,
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("resolveThreadAutomations", () => {
   const threadId = ThreadId.make("thread-a");
-  const nightly = { id: ScheduledTaskId.make("nightly"), title: "Nightly", threadId: null };
-  const sweep = { id: ScheduledTaskId.make("sweep"), title: "Sweep", threadId };
+  const nightly = {
+    id: ScheduledTaskId.make("nightly"),
+    title: "Nightly",
+    threadId: null,
+    enabled: true,
+  };
+  const sweep = { id: ScheduledTaskId.make("sweep"), title: "Sweep", threadId, enabled: false };
   const elsewhere = {
     id: ScheduledTaskId.make("elsewhere"),
     title: "Elsewhere",
     threadId: ThreadId.make("thread-b"),
+    enabled: true,
   };
 
   it("is empty with no automation", () => {
@@ -73,27 +122,42 @@ describe("resolveThreadAutomations", () => {
       startedByTaskId: nightly.id,
       tasks: [nightly, elsewhere],
     });
-    expect(automations).toEqual([{ id: nightly.id, title: "Nightly", relation: "started" }]);
+    expect(automations).toEqual([
+      { id: nightly.id, title: "Nightly", relation: "started", enabled: true },
+    ]);
     expect(summarizeComposerRowAutomations(automations)?.value).toBe("Nightly");
   });
 
-  it("says Automation while the list has no title for the starter", () => {
+  it("offers nothing until the list arrives", () => {
     expect(
       resolveThreadAutomations({ threadId, startedByTaskId: nightly.id, tasks: null }),
-    ).toEqual([{ id: nightly.id, title: "Automation", relation: "started" }]);
+    ).toEqual([]);
   });
 
-  it("finds tasks that send to the thread", () => {
+  it("leaves out a starter that was deleted, keeping the tasks that still send here", () => {
     expect(
-      resolveThreadAutomations({ threadId, startedByTaskId: null, tasks: [nightly, sweep] }),
-    ).toEqual([{ id: sweep.id, title: "Sweep", relation: "targets" }]);
+      resolveThreadAutomations({ threadId, startedByTaskId: nightly.id, tasks: [sweep] }),
+    ).toEqual([{ id: sweep.id, title: "Sweep", relation: "targets", enabled: false }]);
+    expect(
+      resolveThreadAutomations({ threadId, startedByTaskId: nightly.id, tasks: [elsewhere] }),
+    ).toEqual([]);
+  });
+
+  it("finds tasks that send to the thread and says when one is paused", () => {
+    const [target] = resolveThreadAutomations({
+      threadId,
+      startedByTaskId: null,
+      tasks: [nightly, sweep],
+    });
+    expect(target).toEqual({ id: sweep.id, title: "Sweep", relation: "targets", enabled: false });
+    expect(automationRelationLabel(target!)).toBe("Sends here · paused");
   });
 
   it("lists a task that both started and targets the thread once", () => {
     const started = { ...nightly, threadId };
     expect(
       resolveThreadAutomations({ threadId, startedByTaskId: started.id, tasks: [started] }),
-    ).toEqual([{ id: started.id, title: "Nightly", relation: "started" }]);
+    ).toEqual([{ id: started.id, title: "Nightly", relation: "started", enabled: true }]);
   });
 
   it("leads with the starter and counts the rest", () => {

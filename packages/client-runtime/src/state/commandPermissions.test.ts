@@ -101,6 +101,30 @@ describe("command permissions", () => {
     }),
   );
 
+  it.effect("requires the destination read grant for the automation summaries stream", () =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const summaries = createCommandPermissions(
+        runtime,
+        WS_METHODS.scheduledTasksSubscribeSummaries,
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect(registry.get(summaries.permissionAtom(env))).toBe(false);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationReadScope],
+          permissions: [AuthOrchestrationReadScope],
+        }),
+      );
+      expect(registry.get(summaries.permissionAtom(env))).toBe(true);
+      yield* summaries.authorize(registry, env);
+      registry.set(sessions(other), AsyncResult.success(grant(false)));
+      expect(registry.get(summaries.permissionAtom(other))).toBe(false);
+    }),
+  );
+
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.gen(function* () {
       const registry = yield* setup;

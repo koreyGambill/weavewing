@@ -59,6 +59,7 @@ import {
 } from "../rpc/client.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
+import { createCommandPermissions } from "./commandPermissions.ts";
 import {
   applyServerConfigProjection,
   reuseUnchanged,
@@ -1529,6 +1530,20 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    // Kept open for the whole app, so it carries only what names a thread's automations. Gate
+    // on `permissionAtom` before mounting a member.
+    scheduledTaskSummariesLive: Object.assign(
+      createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "environment-data:server:scheduled-tasks:summaries",
+        tag: WS_METHODS.scheduledTasksSubscribeSummaries,
+      }),
+      {
+        permissionAtom: createCommandPermissions(
+          runtime,
+          WS_METHODS.scheduledTasksSubscribeSummaries,
+        ).permissionAtom,
+      },
+    ),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain

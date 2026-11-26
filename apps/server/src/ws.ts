@@ -2446,6 +2446,8 @@ export const layerWsRpc = (
                 ),
               ),
             ),
+        [WS_METHODS.scheduledTasksSubscribeSummaries]: (_input) =>
+          scheduledTasks.subscribeSummaries(),
         [WS_METHODS.scheduledTasksUpsert]: (input) =>
           scheduledTasks
             .upsert(input)

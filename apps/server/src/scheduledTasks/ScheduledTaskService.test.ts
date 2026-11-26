@@ -5,6 +5,7 @@ import * as NodeUtil from "node:util";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  type ScheduledTaskSummaryListResult,
   CommandId,
   MessageId,
   ProjectId,
@@ -456,6 +457,76 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
       yield* Deferred.succeed(release, undefined);
       yield* Fiber.join(run);
       assert.lengthOf((yield* service.list()).tasks, 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("sends task summaries again only when a summary changes", () =>
+  Effect.gen(function* () {
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            streamDomainEvents: Stream.empty,
+            streamDomainEventsFrom: () => Stream.empty,
+            latestDomainEventSequence: Effect.succeed(0),
+            getThreadShell: () => Effect.succeed(threadShell(ProjectId.make("project:test"))),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Scheduler.layer,
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const threadId = ThreadId.make("thread:summaries");
+      const input = {
+        id: ScheduledTaskId.make("task:summaries"),
+        title: "Nightly sweep",
+        prompt: "Sweep the retry queue.",
+        enabled: false,
+        schedule: { type: "interval" as const, everyMs: 60_000 },
+        projectId: ProjectId.make("project:test"),
+        threadId,
+        workspaceStrategy: { type: "root" as const },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+      };
+      yield* service.upsert(input);
+      const emitted = yield* Ref.make<ReadonlyArray<ScheduledTaskSummaryListResult>>([]);
+      const subscribed = yield* Deferred.make<void>();
+      const enabled = yield* Deferred.make<void>();
+      yield* service.subscribeSummaries().pipe(
+        Stream.runForEach((summaries) =>
+          Ref.update(emitted, (all) => [...all, summaries]).pipe(
+            Effect.andThen(
+              summaries.tasks[0]?.enabled
+                ? Deferred.succeed(enabled, undefined)
+                : Deferred.succeed(subscribed, undefined),
+            ),
+          ),
+        ),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(subscribed);
+      // Neither the prompt nor the thread's own switch is part of a summary.
+      yield* service.upsert({ ...input, prompt: "Sweep the retry queue twice." });
+      yield* service.setThreadEnabled({ id: input.id, threadId, enabled: false });
+      yield* service.setEnabled({ id: input.id, enabled: true });
+      yield* Deferred.await(enabled);
+      assert.deepEqual(yield* Ref.get(emitted), [
+        { tasks: [{ id: input.id, title: "Nightly sweep", threadId, enabled: false }] },
+        { tasks: [{ id: input.id, title: "Nightly sweep", threadId, enabled: true }] },
+      ]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

@@ -5,16 +5,17 @@ import type {
   VcsStatusResult,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { Atom } from "effect/reactivity";
 import { CalendarClockIcon } from "lucide-react";
 import { type MouseEvent, type Ref, useImperativeHandle, useRef, useState } from "react";
 
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useQuietThreadShell } from "~/state/entities";
-import { scheduledTasksByEnvironmentAtom } from "~/state/scheduledTasks";
+import { scheduledTaskSummariesByEnvironmentAtom } from "~/state/scheduledTasks";
 import { useThreadContextSidebarStore } from "~/threadContextSidebarStore";
 import {
-  resolveDisplayedThreadPr,
   resolveThreadPullRequestBadgePresentation,
   ThreadPullRequestBadgeControl,
   useThreadDisplayedPullRequest,
@@ -25,25 +26,28 @@ import { ComposerControl } from "./ComposerControl";
 import { useComposerRowItemPlacement } from "./ComposerRow";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRowItems";
+import { composerRowPickerBranchAtom } from "./composerRowPickerBranch";
 import {
   automationRelationLabel,
   type ComposerRowAutomation,
+  resolveComposerRowBranchPullRequest,
   resolveComposerRowPullRequestText,
   resolveThreadAutomations,
   summarizeComposerRowAutomations,
 } from "./composerRowChips.logic";
 
 const NO_AUTOMATIONS: ReadonlyArray<ComposerRowAutomation> = [];
+const NO_PICKER_BRANCH_ATOM = Atom.make<string | null | undefined>(undefined);
 
 /**
- * The automations tied to a thread, from the app-level scheduled-task list, so a thread view
- * opens no subscription of its own.
+ * The automations tied to a thread, from the app-level scheduled-task summaries, so a thread
+ * view opens no subscription of its own.
  */
 function useThreadAutomations(
   threadRef: ScopedThreadRef | null,
   startedByTaskId: ScheduledTaskId | null | undefined,
 ): ReadonlyArray<ComposerRowAutomation> {
-  const tasks = useAtomValue(scheduledTasksByEnvironmentAtom, (byEnvironment) =>
+  const tasks = useAtomValue(scheduledTaskSummariesByEnvironmentAtom, (byEnvironment) =>
     threadRef === null ? null : (byEnvironment.get(threadRef.environmentId) ?? null),
   );
   if (threadRef === null) return NO_AUTOMATIONS;
@@ -128,7 +132,7 @@ function ComposerRowAutomationChip({
           >
             <CalendarClockIcon />
             <span className="min-w-0 flex-1 truncate">{automation.title}</span>
-            <MenuItemDetail>{automationRelationLabel(automation.relation)}</MenuItemDetail>
+            <MenuItemDetail>{automationRelationLabel(automation)}</MenuItemDetail>
           </MenuItem>
         ))}
       </MenuPopup>
@@ -149,7 +153,16 @@ export function useComposerRowChipItems(input: {
 }): ReadonlyArray<ComposerRowItem> {
   const { threadRef, branch, gitStatus } = input;
   const shell = useQuietThreadShell(threadRef);
-  const branchPr = resolveDisplayedThreadPr({ threadBranch: branch, gitStatus });
+  const pickerBranch = useAtomValue(
+    threadRef === null
+      ? NO_PICKER_BRANCH_ATOM
+      : composerRowPickerBranchAtom(scopedThreadKey(threadRef)),
+  );
+  const branchPr = resolveComposerRowBranchPullRequest({
+    threadBranch: branch,
+    pickerBranch,
+    gitStatus,
+  });
   const displayed = useThreadDisplayedPullRequest(
     threadRef?.environmentId ?? null,
     shell,

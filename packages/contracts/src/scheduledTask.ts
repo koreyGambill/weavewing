@@ -438,6 +438,24 @@ export const ScheduledTaskListResult = Schema.Struct({
 });
 export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 
+/**
+ * What a thread view needs to name the automations tied to it, without each task's prompt,
+ * schedule or run history. The full record comes from `scheduledTasks.subscribe`.
+ */
+export const ScheduledTaskSummary = Schema.Struct({
+  id: ScheduledTaskId,
+  title: TrimmedNonEmptyString,
+  /** The thread the task sends to; null for a task that starts a new thread each run. */
+  threadId: Schema.NullOr(ThreadId),
+  enabled: Schema.Boolean,
+});
+export type ScheduledTaskSummary = typeof ScheduledTaskSummary.Type;
+
+export const ScheduledTaskSummaryListResult = Schema.Struct({
+  tasks: ForwardCompatibleArray(ScheduledTaskSummary),
+});
+export type ScheduledTaskSummaryListResult = typeof ScheduledTaskSummaryListResult.Type;
+
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),
   requireExisting: Schema.optional(Schema.Boolean).annotate({
