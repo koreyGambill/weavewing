@@ -34,6 +34,8 @@ interface ComposerRowItemBase {
    * `ComposerContextLabel`s, which shorten down to `COMPOSER_ROW_LABEL_MIN_PX`.
    */
   readonly shrinks?: boolean;
+  /** Starts the row's right end, just before ⋯. Only an item that stays in the row may set it. */
+  readonly endAligned?: boolean;
   /**
    * The item as it sits in the row. Omit it for an entry that lives only in ⋯.
    * While the item sits in ⋯ the row keeps this mounted, invisible and inert, so its

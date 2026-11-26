@@ -197,6 +197,7 @@ export function ComposerRow({
 
   const shown = items.filter((item) => !item.hidden);
   const rowItems = shown.filter((item) => item.renderRowItem !== undefined);
+  const hasEndAlignedItem = rowItems.some((item) => item.endAligned);
   const inMenuItems = rowItems.filter((item) => hiddenIds.includes(item.id));
   const menuOnlyItems = shown.filter((item) => item.renderRowItem === undefined);
   const menuHasRows = inMenuItems.length + menuOnlyItems.length > 0;
@@ -247,6 +248,7 @@ export function ComposerRow({
             }}
             className={cn(
               "flex items-center gap-1 empty:hidden",
+              item.endAligned && !inMenu && "ms-auto",
               inMenu
                 ? "pointer-events-none invisible absolute end-0 top-0"
                 : item.shrinks
@@ -271,7 +273,11 @@ export function ComposerRow({
         data-composer-row-menu
         aria-hidden={!menuHasRows || undefined}
         inert={!menuHasRows}
-        className={cn("ms-auto flex shrink-0", !menuHasRows && "invisible")}
+        className={cn(
+          "flex shrink-0",
+          !hasEndAlignedItem && "ms-auto",
+          !menuHasRows && "invisible",
+        )}
       >
         <Menu
           open={menuOpen}

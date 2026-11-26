@@ -15,6 +15,7 @@ export function sideAreaDetailsRowItem(threadRef: ScopedThreadRef | null): Compo
   return {
     id: "details",
     priority: null,
+    endAligned: true,
     hidden: threadRef === null,
     renderRowItem: () => (threadRef ? <DetailsToggle threadRef={threadRef} /> : null),
   };
