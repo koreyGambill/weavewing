@@ -2076,6 +2076,12 @@ export const layerWsRpc = (
         [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
         [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
           threadManagement.forceStopThread(input),
+        [ORCHESTRATION_V2_WS_METHODS.rewindWithSummary]: (input) =>
+          threadManagement.rewindWithSummary({
+            ...input,
+            createdBy: "user",
+            creationSource: "web",
+          }),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           readWorkflowScript({ scriptPath: input.scriptPath }),
         [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: (input) =>

@@ -17,6 +17,9 @@ import {
   isListedThreadLineage,
   isOrchestrationV2WorkActive,
   MessageId,
+  OrchestrationV2RewindWithSummaryError,
+  type OrchestrationV2RewindWithSummaryInput,
+  type OrchestrationV2RewindWithSummaryResult,
   OrchestrationV2StopWorkflowError,
   type OrchestrationV2StopWorkflowInput,
   OrchestrationV2ForceStopThreadError,
@@ -49,7 +52,12 @@ import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2Pe
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
+import {
+  rewindToReplyPointRefusal,
+  rewindToReplyThreadRefusal,
+} from "@t3tools/shared/orchestrationV2RewindToReply";
 import { AgentScope } from "@t3tools/shared/AgentScope";
+import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -71,7 +79,11 @@ import {
   ProviderAdapterContextRewindRefusedError,
 } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
-import { contextRewindContinuationCommand } from "./contextRewind.ts";
+import {
+  CONTEXT_REWIND_SUMMARY_ORIGIN,
+  contextRewindContinuationCommand,
+  contextRewindSummaryPrompt,
+} from "./contextRewind.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { projectedRowEncodedBytes } from "./threadHistoryPaging.ts";
@@ -121,7 +133,11 @@ export function withCreationProvenance(
       } = command;
       return { ...rest, ...provenance };
     }
-    case "thread.fork":
+    case "thread.fork": {
+      // Only the server's rewind with a summary attaches one, after the agent wrote it.
+      const { rewindSummary: _rewindSummary, ...rest } = command;
+      return { ...rest, ...provenance };
+    }
     case "thread.merge_back":
     case "delegated_task.request":
       return { ...command, ...provenance };
@@ -401,6 +417,8 @@ export class ThreadManagementBackgroundWaitError extends Schema.TaggedError<Thre
   }
 }
 
+const isRewindWithSummaryError = Schema.is(OrchestrationV2RewindWithSummaryError);
+
 const isProviderAdapterContextRewindRefusedError = Schema.is(
   ProviderAdapterContextRewindRefusedError,
 );
@@ -581,6 +599,15 @@ export interface ThreadManagementServiceShape {
     readonly summary: string;
     readonly toolCalls?: number | undefined;
   }) => Effect.Effect<{ readonly removedToolCalls: number }, ThreadManagementContextRewindError>;
+  /**
+   * Asks the agent to summarize the turns after a completed reply, then continues the conversation
+   * from that reply with the turns moved into an Earlier conversation side chat. The summary goes
+   * to the agent with the next message. Nothing is rewound unless the summary turn completes; the
+   * work continues on the server if the caller goes away.
+   */
+  readonly rewindWithSummary: (
+    input: OrchestrationV2RewindWithSummaryInput & ThreadManagementProvenance,
+  ) => Effect.Effect<OrchestrationV2RewindWithSummaryResult, OrchestrationV2RewindWithSummaryError>;
   readonly stopDelegatedTasks: (input: {
     readonly remoteDispatch?: Orchestrator.OrchestratorV2["Service"]["dispatch"];
     readonly threadId: ThreadId;
@@ -1844,6 +1871,135 @@ const make = Effect.gen(function* () {
       );
   });
 
+  const rewindWithSummary: ThreadManagementServiceShape["rewindWithSummary"] = Effect.fn(
+    "ThreadManagementService.rewindWithSummary",
+  )(function* (input) {
+    const fail = (
+      reason: OrchestrationV2RewindWithSummaryError["reason"],
+      detail?: string,
+      cause?: unknown,
+    ) =>
+      new OrchestrationV2RewindWithSummaryError({
+        threadId: input.threadId,
+        reason,
+        ...(detail === undefined ? {} : { detail }),
+        ...(cause === undefined ? {} : { cause }),
+      });
+    const records = yield* orchestrator
+      .getThreadRecords(
+        input.threadId,
+        [
+          "runs",
+          "attempts",
+          "providerThreads",
+          "providerTurns",
+          "providerSessions",
+          "runtimeRequests",
+          "contextTransfers",
+          "subagents",
+          "turnItems",
+        ],
+        { turnItemRunIds: [input.runId], turnItemTypes: ["assistant_message"] },
+      )
+      .pipe(Effect.mapError((cause) => fail("refused", "This thread could not be read.", cause)));
+    if (records.thread.deletedAt !== null)
+      return yield* fail("refused", "This thread was deleted.");
+    const refusal =
+      rewindToReplyThreadRefusal(records) ??
+      rewindToReplyPointRefusal(records, input.runId, input.replyMessageId);
+    if (refusal !== null) return yield* fail("refused", refusal);
+    const point = records.runs.find((run) => run.id === input.runId);
+    const reply = records.turnItems.findLast(
+      (item) => item.type === "assistant_message" && item.messageId === input.replyMessageId,
+    );
+    if (point === undefined || reply?.type !== "assistant_message") {
+      return yield* fail("refused", "Choose the final reply of a completed turn.");
+    }
+    const turns = records.runs.filter(
+      (run) =>
+        run.ordinal > point.ordinal && run.startedAt !== null && run.status !== "rolled_back",
+    ).length;
+    const requestId = NodeCrypto.randomUUID();
+    const messageId = MessageId.make(`message:rewind-summary:${requestId}`);
+    yield* dispatch({
+      type: "message.dispatch",
+      origin: CONTEXT_REWIND_SUMMARY_ORIGIN,
+      commandId: CommandId.make(`command:rewind-summary:${requestId}`),
+      threadId: input.threadId,
+      messageId,
+      text: contextRewindSummaryPrompt({ turns, replyExcerpt: reply.text }),
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: input.createdBy,
+      creationSource: "server",
+    }).pipe(
+      Effect.mapError((cause) =>
+        fail("refused", "The agent could not start writing the summary.", cause),
+      ),
+    );
+
+    const finish = Effect.gen(function* () {
+      const { runs } = yield* orchestrator.getThreadRecords(input.threadId, ["runs"]);
+      const requested = runs.find((run) => run.userMessageId === messageId);
+      if (requested === undefined) return yield* fail("summary-failed");
+      const { run } = yield* waitForThread({
+        projectId: records.thread.projectId,
+        threadId: input.threadId,
+        runId: requested.id,
+        timeoutMs: SETTLE_AFTER_RUN_WAIT_MS,
+      });
+      if (run?.status !== "completed") return yield* fail("summary-failed");
+      const { turnItems } = yield* orchestrator.getThreadRecords(input.threadId, ["turnItems"], {
+        turnItemRunIds: [run.id],
+        turnItemTypes: ["assistant_message"],
+      });
+      const summary = turnItems.findLast(
+        (item) =>
+          item.type === "assistant_message" &&
+          item.phase !== "commentary" &&
+          item.phase !== "partial_answer",
+      );
+      if (summary?.type !== "assistant_message" || summary.text.trim() === "") {
+        return yield* fail("summary-failed");
+      }
+      const archiveThreadId = ThreadId.make(NodeCrypto.randomUUID());
+      yield* dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make(`command:rewind-summary:${requestId}:rewind`),
+        createdBy: input.createdBy,
+        creationSource: input.creationSource,
+        sourceThreadId: input.threadId,
+        targetThreadId: archiveThreadId,
+        sourcePoint: {
+          type: "rewind_to_reply",
+          runId: input.runId,
+          messageId: input.replyMessageId,
+        },
+        sideChat: true,
+        rewindSummary: { runId: run.id, messageId: summary.messageId, text: summary.text.trim() },
+      }).pipe(
+        Effect.mapError((cause) =>
+          fail(
+            "rewind-failed",
+            cause._tag === "OrchestratorDispatchError" && typeof cause.cause === "string"
+              ? cause.cause
+              : undefined,
+            cause,
+          ),
+        ),
+      );
+      return { archiveThreadId, summarizedTurns: turns };
+    }).pipe(
+      Effect.catch((cause) =>
+        isRewindWithSummaryError(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(fail("summary-failed", undefined, cause)),
+      ),
+    );
+    // The summary turn runs on its own, so finish it even when the caller stops waiting.
+    return yield* Fiber.join(yield* Effect.forkIn(finish, layerScope));
+  });
+
   const stopDelegatedTasks: ThreadManagementServiceShape["stopDelegatedTasks"] = Effect.fn(
     "ThreadManagementService.stopDelegatedTasks",
   )(function* (input) {
@@ -2013,6 +2169,7 @@ const make = Effect.gen(function* () {
     forceStopThread,
     awaitBackgroundTasks,
     rewindContext,
+    rewindWithSummary,
     getThreadEventSequence: orchestrator.getThreadEventSequence,
     recoverDelegatedTask: orchestrator.recoverDelegatedTask,
     cancelDelegatedTask: orchestrator.cancelDelegatedTask,

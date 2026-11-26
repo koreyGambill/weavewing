@@ -56,6 +56,9 @@ import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
 import * as LegacyV1ThreadImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "../Orchestrator.ts";
+import * as CommandReceiptStore from "../CommandReceiptStore.ts";
+import * as ThreadManagementService from "../ThreadManagementService.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as EffectWorker from "../EffectWorker.ts";
 import * as EffectOutbox from "../EffectOutbox.ts";
 import * as ProjectionReplay from "./ProjectionReplay.ts";
@@ -6007,4 +6010,321 @@ describe("orchestration v2 provider switching", () => {
         );
       }),
   );
+
+  describe("rewind to a reply with a summary", () => {
+    const SUMMARY =
+      "Learned the parser lives in src/parse.ts. Changed src/parse.ts. Remaining: add tests.";
+    const root = ThreadId.make("thread:rewind-summary");
+    const withRewindSummaryHarness = <A, E, R>(
+      name: string,
+      adapter: Pick<Parameters<typeof makeTestAdapter>[0], "failedRunOrdinals">,
+      body: (input: {
+        readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
+        readonly forkRequests: Ref.Ref<
+          ReadonlyArray<ProviderAdapter.ProviderAdapterV2ForkThreadInput>
+        >;
+        readonly workspaceFile: string;
+      }) => Effect.Effect<A, E, R>,
+    ) =>
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace(name);
+        const workspaceFile = `${cwd}/rewind-summary.txt`;
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const forkRequests = yield* Ref.make<
+          ReadonlyArray<ProviderAdapter.ProviderAdapterV2ForkThreadInput>
+        >([]);
+        const registry = ProviderAdapterRegistry.layerFromAdapters([
+          makeTestAdapter({
+            instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+            driver: CLAUDE_DRIVER,
+            capabilities: ClaudeProviderCapabilitiesV2,
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            responseByRunOrdinal: { 1: "Prefix reply", 2: "Later reply", 3: SUMMARY },
+            ...adapter,
+            capturedTurns,
+            forkThread: (input) =>
+              Effect.gen(function* () {
+                const index = yield* Ref.getAndUpdate(forkRequests, (requests) => [
+                  ...requests,
+                  input,
+                ]);
+                const nativeId = `native-rewind-summary:${index.length}`;
+                return {
+                  ...input.sourceProviderThread,
+                  appThreadId: input.targetThreadId,
+                  id: ProviderThreadId.make(nativeId),
+                  nativeThreadRef: { driver: CLAUDE_DRIVER, nativeId, strength: "strong" },
+                  nativeConversationHeadRef: null,
+                  firstRunOrdinal: null,
+                  lastRunOrdinal: null,
+                  handoffIds: [],
+                  contextUsage: null,
+                  forkedFrom: { providerThreadId: input.sourceProviderThread.id },
+                };
+              }),
+          }),
+        ]);
+        return yield* body({ capturedTurns, forkRequests, workspaceFile }).pipe(
+          Effect.provide(
+            ThreadManagementService.layer.pipe(
+              Layer.provideMerge(
+                ProviderReplayHarness.layerWithRegistry(
+                  {
+                    name,
+                    runtimePolicyOverride: {
+                      cwd,
+                      approvalPolicy: "never",
+                      sandboxPolicy: {
+                        type: "readOnly",
+                        access: { type: "fullAccess" },
+                        networkAccess: false,
+                      },
+                    },
+                  },
+                  registry,
+                ),
+              ),
+              Layer.provide(ServerSettings.layerTest()),
+              Layer.provide(
+                CommandReceiptStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+              ),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer));
+
+    const setUpThread = Effect.fn("RewindSummaryTest.setUpThread")(function* (
+      workspaceFile: string,
+    ) {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("rewind-summary:create"),
+        createdBy: "user",
+        creationSource: "web",
+        threadId: root,
+        projectId,
+        title: "Rewind with a summary",
+        modelSelection: CLAUDE_MODEL_SELECTION,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: workspaceFile.slice(0, workspaceFile.lastIndexOf("/")),
+      });
+      yield* sendTo(root, "keep this prefix");
+      yield* sendTo(root, "move this later turn");
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.writeFileString(workspaceFile, "Edited in the later turn.");
+      const before = yield* orchestrator.getThreadProjection(root);
+      const [prefixReply, laterReply] = before.visibleTurnItems.flatMap(({ item }) =>
+        item.type === "assistant_message" ? [item] : [],
+      );
+      return { before, prefixReply: prefixReply!, laterReply: laterReply! };
+    });
+    const sendTo = Effect.fn("RewindSummaryTest.send")(function* (
+      targetThreadId: ThreadId,
+      text: string,
+    ) {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`rewind-summary:send:${targetThreadId}:${text}`),
+        origin: { kind: "user" },
+        createdBy: "user",
+        creationSource: "web",
+        threadId: targetThreadId,
+        messageId: MessageId.make(`rewind-summary:message:${targetThreadId}:${text}`),
+        text,
+        attachments: [],
+        modelSelection: CLAUDE_MODEL_SELECTION,
+        deliveryIntent: "auto",
+        dispatchMode: { type: "start_immediately" },
+      });
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* waitForIdle(targetThreadId);
+    });
+    const conversation = (threadId: ThreadId) =>
+      Orchestrator.OrchestratorV2.use((orchestrator) =>
+        orchestrator
+          .getTimelinePage(threadId, { view: "messages", limit: 20 })
+          .pipe(
+            Effect.map((page) =>
+              page.items.flatMap(({ item }) =>
+                item.type === "assistant_message" || item.type === "user_message"
+                  ? [item.text]
+                  : [],
+              ),
+            ),
+          ),
+      );
+    const summaryHandoffs = (projection: OrchestrationV2ThreadProjection) =>
+      projection.contextHandoffs.filter((handoff) => handoff.strategy === "checkpoint_summary");
+
+    it.live(
+      "moves the later turns into an archive and sends the agent's summary once with the next message",
+      () =>
+        withRewindSummaryHarness(
+          "rewind-summary",
+          {},
+          ({ capturedTurns, forkRequests, workspaceFile }) =>
+            Effect.gen(function* () {
+              const orchestrator = yield* Orchestrator.OrchestratorV2;
+              const threads = yield* ThreadManagementService.ThreadManagementService;
+              const { before, prefixReply } = yield* setUpThread(workspaceFile);
+
+              const result = yield* threads.rewindWithSummary({
+                threadId: root,
+                runId: before.runs[0]!.id,
+                replyMessageId: prefixReply.messageId,
+                createdBy: "user",
+                creationSource: "web",
+              });
+
+              assert.equal(result.summarizedTurns, 1);
+              const request = (yield* Ref.get(capturedTurns))[2]!;
+              assert.include(request.text, "Context rewind: summary of 1 turn");
+              assert.include(request.text, 'your reply that begins "Prefix reply"');
+              assert.include(request.text, "do not call tools");
+              const main = yield* orchestrator.getThreadProjection(root);
+              assert.deepEqual(yield* conversation(root), ["keep this prefix", "Prefix reply"]);
+              assert.includeMembers(yield* conversation(result.archiveThreadId), [
+                "move this later turn",
+                "Later reply",
+                SUMMARY,
+              ]);
+              assert.equal(
+                yield* (yield* FileSystem.FileSystem).readFileString(workspaceFile),
+                "Edited in the later turn.",
+              );
+              assert.equal(
+                (yield* Ref.get(forkRequests))[0]?.providerTurnId,
+                prefixReply.providerTurnId,
+              );
+              const shown = main.visibleTurnItems.flatMap(({ item }) =>
+                item.type === "handoff" && item.strategy === "checkpoint_summary" ? [item] : [],
+              );
+              assert.deepEqual(
+                shown.map((item) => [item.title, item.summary, item.runId]),
+                [["Context rewind: summary of 1 turn", SUMMARY, before.runs[0]!.id]],
+              );
+
+              yield* sendTo(root, "continue from the prefix");
+              const next = (yield* Ref.get(capturedTurns)).at(-1)!;
+              assert.equal(next.providerThreadId, main.thread.activeProviderThreadId);
+              assert.include(next.text, `Context rewind: summary of 1 turn\n\n${SUMMARY}`);
+              assert.include(next.text, "The 1 turn after it were removed from your context");
+              assert.include(next.text, "Files were not restored");
+              assert.include(next.text, "continue from the prefix");
+              const delivered = summaryHandoffs(yield* orchestrator.getThreadProjection(root));
+              assert.equal(delivered[0]?.delivery?.status, "inline");
+
+              yield* sendTo(root, "and again");
+              assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
+              const after = yield* orchestrator.getThreadProjection(root);
+              assert.isTrue(
+                after.visibleTurnItems.some(
+                  ({ item }) => item.type === "handoff" && item.summary === SUMMARY,
+                ),
+              );
+            }),
+        ),
+    );
+
+    it.live("leaves the conversation as it was when the summary turn fails", () =>
+      withRewindSummaryHarness(
+        "rewind-summary-failed",
+        { failedRunOrdinals: new Set([3]) },
+        ({ forkRequests, workspaceFile }) =>
+          Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            const threads = yield* ThreadManagementService.ThreadManagementService;
+            const { before, prefixReply } = yield* setUpThread(workspaceFile);
+
+            const error = yield* threads
+              .rewindWithSummary({
+                threadId: root,
+                runId: before.runs[0]!.id,
+                replyMessageId: prefixReply.messageId,
+                createdBy: "user",
+                creationSource: "web",
+              })
+              .pipe(Effect.flip);
+
+            assert.equal(error.reason, "summary-failed");
+            const main = yield* orchestrator.getThreadProjection(root);
+            assert.equal(main.thread.activeProviderThreadId, before.thread.activeProviderThreadId);
+            assert.lengthOf(yield* Ref.get(forkRequests), 0);
+            assert.lengthOf(summaryHandoffs(main), 0);
+            assert.includeMembers(yield* conversation(root), [
+              "move this later turn",
+              "Later reply",
+            ]);
+            assert.equal(main.runs.at(-1)?.status, "failed");
+          }),
+      ),
+    );
+
+    it.live("refuses a reply with no later conversation before asking for a summary", () =>
+      withRewindSummaryHarness("rewind-summary-refused", {}, ({ capturedTurns, workspaceFile }) =>
+        Effect.gen(function* () {
+          const threads = yield* ThreadManagementService.ThreadManagementService;
+          const { before, laterReply } = yield* setUpThread(workspaceFile);
+
+          const error = yield* threads
+            .rewindWithSummary({
+              threadId: root,
+              runId: before.runs[1]!.id,
+              replyMessageId: laterReply.messageId,
+              createdBy: "user",
+              creationSource: "web",
+            })
+            .pipe(Effect.flip);
+
+          assert.equal(error.reason, "refused");
+          assert.equal(error.message, "There is no later conversation to move.");
+          assert.lengthOf(yield* Ref.get(capturedTurns), 2);
+        }),
+      ),
+    );
+
+    it.live("drops an unsent summary once the archived turns merge back", () =>
+      withRewindSummaryHarness(
+        "rewind-summary-merge-back",
+        {},
+        ({ capturedTurns, workspaceFile }) =>
+          Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            const threads = yield* ThreadManagementService.ThreadManagementService;
+            const { before, prefixReply } = yield* setUpThread(workspaceFile);
+            const { archiveThreadId } = yield* threads.rewindWithSummary({
+              threadId: root,
+              runId: before.runs[0]!.id,
+              replyMessageId: prefixReply.messageId,
+              createdBy: "user",
+              creationSource: "web",
+            });
+            yield* sendTo(archiveThreadId, "work in the archive");
+            const archive = yield* orchestrator.getThreadProjection(archiveThreadId);
+
+            yield* orchestrator.dispatch({
+              type: "thread.merge_back",
+              commandId: CommandId.make("rewind-summary:merge-back"),
+              createdBy: "user",
+              creationSource: "web",
+              sourceThreadId: archiveThreadId,
+              targetThreadId: root,
+              sourcePoint: { type: "run", runId: archive.runs.at(-1)!.id },
+            });
+            yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+            yield* waitForIdle(root);
+
+            const merged = (yield* Ref.get(capturedTurns)).at(-1)!;
+            assert.equal(merged.threadId, root);
+            assert.notInclude(merged.text, SUMMARY);
+            const [handoff] = summaryHandoffs(yield* orchestrator.getThreadProjection(root));
+            assert.equal(handoff?.status, "superseded");
+          }),
+      ),
+    );
+  });
 });

@@ -225,6 +225,7 @@ export const make = Effect.gen(function* () {
       summaryHandoffOptions: true,
       conversationContextRewind: true,
       rewindToReply: true,
+      rewindWithSummary: true,
       statusSources: true,
       statusSourceSharing: true,
       statusSourceOrder: true,

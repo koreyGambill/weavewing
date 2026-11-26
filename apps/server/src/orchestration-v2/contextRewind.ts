@@ -67,3 +67,50 @@ export function contextRewindContinuationCommand(input: {
     creationSource: "server",
   };
 }
+
+/** The origin of the request that asks the agent to summarize before a user's rewind. */
+export const CONTEXT_REWIND_SUMMARY_ORIGIN = {
+  kind: "system",
+  event: "context rewind summary",
+} as const;
+
+const turnsLabel = (turns: number) => (turns === 1 ? "1 turn" : `${turns} turns`);
+
+/** The first line of the stored summary, which the thread also shows as its title. */
+export const contextRewindSummaryTitle = (turns: number) =>
+  `Context rewind: summary of ${turnsLabel(turns)}`;
+
+/**
+ * The prompt for the summary turn. It names the reply the conversation returns to, because the
+ * agent cannot see where the user clicked.
+ */
+export function contextRewindSummaryPrompt(input: {
+  readonly turns: number;
+  readonly replyExcerpt: string;
+}): string {
+  const excerpt = input.replyExcerpt.replace(/\s+/g, " ").trim();
+  const shown = excerpt.length > 200 ? `${excerpt.slice(0, 197)}...` : excerpt;
+  return `${contextRewindSummaryTitle(input.turns)}
+
+The user is rewinding this conversation to your reply that begins "${shown}". The ${turnsLabel(input.turns)} after that reply, and this request, will leave your context. The summary you write now is all you will remember of them. Files stay as they are on disk.
+
+Write that summary for your future self. Cover:
+- what you learned, about the code, the environment and what the user wants;
+- the files you created, changed or deleted, and the commands and other actions you ran that changed something, so you do not repeat them;
+- the decisions made, with their reasons;
+- what remains to do.
+
+Keep exact file paths, identifiers, commands and URLs. Be brief. Reply with the summary only: do not call tools, change files or continue the task.`;
+}
+
+/** What the model reads with the user's next message after a rewind with a summary. */
+export function contextRewindSummaryModelText(input: {
+  readonly turns: number;
+  readonly summary: string;
+}): string {
+  return `${contextRewindSummaryTitle(input.turns)}
+
+${input.summary}
+
+The user rewound the conversation to an earlier reply. The ${turnsLabel(input.turns)} after it were removed from your context, and the summary above, which you wrote, replaces them. Files were not restored: changes made in those turns are still on disk.`;
+}

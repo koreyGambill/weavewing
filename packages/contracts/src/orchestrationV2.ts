@@ -3881,6 +3881,13 @@ export const OrchestrationV2Command = Schema.Union([
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),
     forkHistoryPolicy: Schema.optionalKey(OrchestrationV2ForkHistoryPolicy),
+    /**
+     * Server only: the summary the agent wrote, in `runId`, of the turns a `rewind_to_reply`
+     * moves away. The thread keeps it and sends it with the next message.
+     */
+    rewindSummary: Schema.optionalKey(
+      Schema.Struct({ runId: RunId, messageId: MessageId, text: TrimmedNonEmptyString }),
+    ),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -4244,6 +4251,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getNativeChildWork: "orchestration.getNativeChildWork",
   stopWorkflow: "orchestration.stopWorkflow",
   forceStopThread: "orchestration.forceStopThread",
+  rewindWithSummary: "orchestration.rewindWithSummary",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeShell: "orchestration.subscribeShell",
@@ -4705,6 +4713,49 @@ export class OrchestrationV2ForceStopThreadError extends Schema.TaggedError<Orch
   }
 }
 
+/** A completed turn's final reply to rewind to; the agent first summarizes the turns after it. */
+export const OrchestrationV2RewindWithSummaryInput = Schema.Struct({
+  threadId: ThreadId,
+  runId: RunId,
+  replyMessageId: MessageId,
+});
+export type OrchestrationV2RewindWithSummaryInput =
+  typeof OrchestrationV2RewindWithSummaryInput.Type;
+
+export const OrchestrationV2RewindWithSummaryResult = Schema.Struct({
+  /** The side chat that now holds the removed turns, the summary turn among them. */
+  archiveThreadId: ThreadId,
+  summarizedTurns: PositiveInt,
+});
+export type OrchestrationV2RewindWithSummaryResult =
+  typeof OrchestrationV2RewindWithSummaryResult.Type;
+
+export class OrchestrationV2RewindWithSummaryError extends Schema.TaggedError<OrchestrationV2RewindWithSummaryError>()(
+  "OrchestrationV2RewindWithSummaryError",
+  {
+    threadId: ThreadId,
+    /**
+     * `refused`: the thread or point cannot rewind, and `detail` says why. `summary-failed`: the
+     * summary turn did not finish with a reply. `rewind-failed`: the summary exists but the rewind
+     * did not apply. The conversation is unchanged in every case.
+     */
+    reason: Schema.Literals(["refused", "summary-failed", "rewind-failed"]),
+    detail: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "refused":
+        return this.detail ?? "This reply cannot be rewound to.";
+      case "summary-failed":
+        return "The agent did not finish its summary, so nothing was rewound. Its summary turn stays in the thread.";
+      case "rewind-failed":
+        return `The summary is written, but the rewind did not apply${this.detail === undefined ? "" : `: ${this.detail}`}. The summary turn stays in the thread.`;
+    }
+  }
+}
+
 export const OrchestrationV2GetWorkflowScriptInput = Schema.Struct({
   threadId: ThreadId,
   scriptPath: TrimmedNonEmptyString,
@@ -4985,6 +5036,10 @@ export const OrchestrationV2RpcSchemas = {
   forceStopThread: {
     input: OrchestrationV2ForceStopThreadInput,
     output: OrchestrationV2ForceStopThreadResult,
+  },
+  rewindWithSummary: {
+    input: OrchestrationV2RewindWithSummaryInput,
+    output: OrchestrationV2RewindWithSummaryResult,
   },
   getWorkflowScript: {
     input: OrchestrationV2GetWorkflowScriptInput,

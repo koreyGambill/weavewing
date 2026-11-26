@@ -101,6 +101,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   summaryHandoffOptions: Schema.optionalKey(Schema.Literal(true)),
   conversationContextRewind: Schema.optionalKey(Schema.Literal(true)),
   rewindToReply: Schema.optionalKey(Schema.Literal(true)),
+  /** Serves `orchestration.rewindWithSummary`; hide the action where it is absent. */
+  rewindWithSummary: Schema.optionalKey(Schema.Literal(true)),
   statusSources: Schema.optionalKey(Schema.Boolean),
   /** Status sources take `shared` and mirror what linked environments share. */
   statusSourceSharing: Schema.optionalKey(Schema.Boolean),

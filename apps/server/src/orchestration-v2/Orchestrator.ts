@@ -87,7 +87,11 @@ import {
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
-import { isContextRewindContinuation } from "./contextRewind.ts";
+import {
+  contextRewindSummaryModelText,
+  contextRewindSummaryTitle,
+  isContextRewindContinuation,
+} from "./contextRewind.ts";
 import { isPlaceholderThreadTitle } from "./placeholderThreadTitle.ts";
 import { combinePullRequestWatchWakes, type PullRequestWatchWake } from "./pullRequestWatch.ts";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
@@ -6653,6 +6657,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
     }
+    if (command.rewindSummary !== undefined && split === undefined) {
+      return yield* invalidRewind("A rewind summary needs a reply to rewind to.");
+    }
     const splitRun = split === undefined ? null : sourceRun;
     type ArchivedRun = OrchestrationV2Run & {
       readonly status: NonNullable<OrchestrationV2Run["contextSplitArchivedStatus"]>;
@@ -6696,6 +6703,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const tip = suffix.findLast(isHandoffSourceRun);
       if (tip === undefined) {
         return yield* invalidRewind("There is no later conversation to move.");
+      }
+      // The summary must cover every turn that leaves the context, so it has to be the last one.
+      if (
+        command.rewindSummary !== undefined &&
+        (tip.id !== command.rewindSummary.runId || tip.status !== "completed")
+      ) {
+        return yield* invalidRewind("The conversation changed after the summary was written.");
       }
       if (
         splitSource === undefined ||
@@ -6972,6 +6986,85 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           consumedAt: now,
         },
       });
+      if (command.rewindSummary !== undefined && contextArchive !== undefined) {
+        const summaryRunId = command.rewindSummary.runId;
+        const turns = suffix.filter(
+          (run) => run.id !== summaryRunId && isHandoffSourceRun(run),
+        ).length;
+        const handoff: OrchestrationV2ContextHandoff = {
+          id: yield* mapDispatchError(command)(
+            idAllocator.allocate.contextHandoff({
+              threadId: thread.id,
+              fromProviderInstanceId: splitSource.providerInstanceId,
+              toProviderInstanceId: continuation.providerInstanceId,
+            }),
+          ),
+          // Names the archive, so bringing it back drops the summary before it is sent.
+          transferId: transfer.id,
+          threadId: thread.id,
+          targetRunId: summaryRunId,
+          fromProviderThreadIds: [splitSource.id],
+          toProviderThreadId: continuation.id,
+          coveredRunOrdinals: {
+            from: splitRun.ordinal + 1,
+            to: contextArchive.throughRunOrdinal,
+          },
+          strategy: "checkpoint_summary",
+          status: "ready",
+          summaryMessageId: command.rewindSummary.messageId,
+          summaryText: contextRewindSummaryModelText({
+            turns,
+            summary: command.rewindSummary.text,
+          }),
+          createdByProviderInstanceId: splitSource.providerInstanceId,
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* emitEvent({
+          type: "context-handoff.updated",
+          threadId: thread.id,
+          runId: splitRun.id,
+          providerInstanceId: continuation.providerInstanceId,
+          occurredAt: now,
+          payload: handoff,
+        });
+        // Placed with the reply it returns to, so it shows beside Earlier conversation.
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: thread.id,
+          runId: splitRun.id,
+          ...(splitRun.rootNodeId === null ? {} : { nodeId: splitRun.rootNodeId }),
+          providerInstanceId: continuation.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            id: idAllocator.derive.runSignalTurnItem({
+              runId: summaryRunId,
+              signal: "context-rewind-summary",
+            }),
+            threadId: thread.id,
+            runId: splitRun.id,
+            nodeId: splitRun.rootNodeId,
+            providerThreadId: continuation.id,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: yield* nextTurnItemOrdinal(sourceProjection),
+            status: "completed",
+            title: contextRewindSummaryTitle(turns),
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "handoff",
+            contextHandoffId: handoff.id,
+            fromProviderThreadIds: [splitSource.id],
+            toProviderThreadId: continuation.id,
+            fromProviderInstanceIds: [splitSource.providerInstanceId],
+            toProviderInstanceId: continuation.providerInstanceId,
+            strategy: "checkpoint_summary",
+            summary: command.rewindSummary.text,
+          },
+        });
+      }
       return;
     }
 
