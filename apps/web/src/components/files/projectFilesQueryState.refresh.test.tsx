@@ -73,6 +73,7 @@ const reactHooks = vi.hoisted(() => {
 });
 
 vi.mock("@effect/atom-react", () => ({
+  RegistryContext: { _currentValue: undefined },
   useAtomRefresh: (atom: object) => () => {
     atomHooks.registry?.refresh(atom);
   },
@@ -84,6 +85,8 @@ vi.mock("react", async (importOriginal) => {
   return {
     ...actual,
     useCallback: reactHooks.useCallback,
+    // Hooks run outside a render here, so a context reads its default value.
+    useContext: (context: { _currentValue: unknown } | undefined) => context?._currentValue,
     useEffect: reactHooks.useEffect,
     useMemo: <A,>(factory: () => A) => factory(),
     useRef: reactHooks.useRef,
