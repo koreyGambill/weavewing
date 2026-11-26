@@ -22,6 +22,7 @@ import {
   type ComposerRowItem,
   summarizeComposerRowAgents,
 } from "./composerRowItems";
+import { sideAreaDetailsRowItem } from "../sideAreaDetailsRowItem";
 import { bookmarkListSummary, ThreadBookmarkList } from "./ThreadBookmarkList";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
@@ -98,6 +99,7 @@ export function useThreadComposerRowItems(input: {
 }): ReadonlyArray<ComposerRowItem> {
   const bookmarks = orderBookmarks(useThreadFollowUpList(input.bookmarksThreadRef));
   const tools = useComposerToolsRowItem(input.threadRef);
+  const details = sideAreaDetailsRowItem(input.threadRef);
   const { threadRef, bookmarksThreadRef, onOpenSideChat, onRevealBookmark } = input;
   if (threadRef === null) return [];
   const agents = summarizeComposerRowAgents(input.agents);
@@ -166,5 +168,6 @@ export function useThreadComposerRowItems(input: {
           ) : null,
       },
     },
+    details,
   ];
 }

@@ -511,7 +511,7 @@ function DropdownTerminalPanel() {
       }}
       onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
-        "fixed inset-x-0 top-[var(--workspace-topbar-height)] z-50 flex max-h-[calc(100dvh-var(--workspace-topbar-height)-2rem)] flex-col border-b bg-background shadow-xl transition-transform duration-150 ease-out starting:-translate-y-full motion-reduce:transition-none [-webkit-app-region:no-drag]",
+        "fixed left-0 right-[var(--side-area-cover-right,0px)] top-[var(--workspace-topbar-height)] z-50 flex max-h-[calc(100dvh-var(--workspace-topbar-height)-2rem)] flex-col border-b bg-background shadow-xl transition-transform duration-150 ease-out starting:-translate-y-full motion-reduce:transition-none [-webkit-app-region:no-drag]",
         expanded && "bottom-0 max-h-none",
       )}
       style={

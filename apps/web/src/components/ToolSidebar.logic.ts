@@ -1,70 +1,170 @@
+import { ScopedThreadRef } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-const PersistedToolSidebar = Schema.Struct({
+import { THREAD_TOOL_ORDER } from "../threadContextSidebar";
+import type { ThreadContextSection } from "../threadContextSidebarStore";
+
+/** Every view the side area can show: the thread views, then the views that span threads. */
+export type ViewId = Exclude<ThreadContextSection, "inbox"> | "calendar" | "status";
+
+const GLOBAL_VIEW_IDS = ["calendar", "status"] as const satisfies ReadonlyArray<ViewId>;
+
+/** The view picker's order: thread views as the rail lists them, then global views. */
+export const VIEW_IDS: ReadonlyArray<ViewId> = [
+  ...THREAD_TOOL_ORDER.filter((id): id is Exclude<ThreadContextSection, "inbox"> => id !== "inbox"),
+  ...GLOBAL_VIEW_IDS,
+];
+
+function isViewId(value: string): value is ViewId {
+  return VIEW_IDS.some((id) => id === value);
+}
+
+export type ViewLayout = "compact" | "full";
+
+/** Hosts below the side area's breakpoint, or narrower than a view's `compactBelowPx`, get compact. */
+export function resolveViewLayout(
+  compactBelowPx: number | undefined,
+  host: { readonly wide: boolean; readonly width: number },
+): ViewLayout {
+  return !host.wide || (compactBelowPx !== undefined && host.width < compactBelowPx)
+    ? "compact"
+    : "full";
+}
+
+const PersistedSideArea = Schema.Struct({
+  open: Schema.Boolean,
+  view: Schema.String,
+  width: Schema.Finite,
+  pinned: Schema.Boolean,
+  locked: Schema.NullOr(ScopedThreadRef),
+});
+
+/** The tools sidebar's stored shape before it became the side area. */
+const LegacyToolSidebar = Schema.Struct({
   visible: Schema.Boolean,
-  activeTool: Schema.NullOr(Schema.Literals(["calendar", "status"])),
+  activeTool: Schema.NullOr(Schema.Literals(GLOBAL_VIEW_IDS)),
   width: Schema.Finite,
 });
 
-export interface ToolSidebarState extends Schema.Schema.Type<typeof PersistedToolSidebar> {
-  maximized: boolean;
+export interface SideAreaState {
+  readonly open: boolean;
+  readonly view: ViewId;
+  readonly width: number;
+  /** Stays open through thread switches and outside clicks; the content still follows. */
+  readonly pinned: boolean;
+  /** Holds thread views on this thread instead of the selected one. */
+  readonly locked: ScopedThreadRef | null;
+  readonly maximized: boolean;
 }
 
-export const INITIAL_TOOL_SIDEBAR: ToolSidebarState = {
-  visible: false,
-  activeTool: null,
+export const INITIAL_SIDE_AREA: SideAreaState = {
+  open: false,
+  view: "details",
   width: 300,
+  pinned: false,
+  locked: null,
   maximized: false,
 };
 
-export type ToolSidebarAction =
+export type SideAreaAction =
   | { type: "toggle" }
-  | { type: "select"; tool: NonNullable<ToolSidebarState["activeTool"]> }
-  | { type: "collapse" }
+  | { type: "show"; view: ViewId }
+  /** Opens on `view` for `thread`, or closes when it already shows that. */
+  | { type: "toggleView"; view: ViewId; thread: ScopedThreadRef }
+  | { type: "close" }
+  /** An outside click, Escape outside the side area or a thread switch: closes unless pinned. */
+  | { type: "dismiss" }
+  | { type: "pin" }
+  | { type: "lock"; thread: ScopedThreadRef | null }
   | { type: "maximize" }
   | { type: "restore" }
   | { type: "resize"; width: number };
 
-export const TOOL_SIDEBAR_RAIL_WIDTH = 36;
+export const SIDE_AREA_MIN_WIDTH = 280;
+export const SIDE_AREA_MAX_WIDTH = 640;
+// The content keeps at least this much visible beside a side area at its stored width.
+const SIDE_AREA_CONTENT_RESERVE = 320;
 
-function clampToolSidebarWidth(width: number) {
-  return Number.isFinite(width) ? Math.min(600, Math.max(280, width)) : 300;
+function clampSideAreaWidth(width: number) {
+  return Number.isFinite(width)
+    ? Math.min(SIDE_AREA_MAX_WIDTH, Math.max(SIDE_AREA_MIN_WIDTH, width))
+    : INITIAL_SIDE_AREA.width;
 }
 
-export function resolveToolSidebarWidth(width: number, availableWidth: number) {
-  return Math.min(width, Math.max(280, availableWidth - 320 - TOOL_SIDEBAR_RAIL_WIDTH));
+export function resolveSideAreaWidth(width: number, availableWidth: number) {
+  return Math.min(width, Math.max(SIDE_AREA_MIN_WIDTH, availableWidth - SIDE_AREA_CONTENT_RESERVE));
 }
 
-const decodePersistedToolSidebar = Schema.decodeUnknownOption(PersistedToolSidebar);
+const decodePersistedSideArea = Schema.decodeUnknownOption(PersistedSideArea);
+const decodeLegacyToolSidebar = Schema.decodeUnknownOption(LegacyToolSidebar);
 
-export function restoreToolSidebar(value: unknown): ToolSidebarState {
-  const parsed = decodePersistedToolSidebar(value);
-  return parsed._tag === "Some"
-    ? { ...parsed.value, width: clampToolSidebarWidth(parsed.value.width), maximized: false }
-    : INITIAL_TOOL_SIDEBAR;
+/** Reads stored state, including the tools sidebar's older shape; anything else starts fresh. */
+export function restoreSideArea(value: unknown): SideAreaState {
+  const current = decodePersistedSideArea(value);
+  if (current._tag === "Some") {
+    const { open, view, width, pinned, locked } = current.value;
+    return isViewId(view)
+      ? { open, view, width: clampSideAreaWidth(width), pinned, locked, maximized: false }
+      : INITIAL_SIDE_AREA;
+  }
+  const legacy = decodeLegacyToolSidebar(value);
+  if (legacy._tag === "Some") {
+    const { visible, activeTool, width } = legacy.value;
+    return {
+      ...INITIAL_SIDE_AREA,
+      open: visible && activeTool !== null,
+      view: activeTool ?? INITIAL_SIDE_AREA.view,
+      width: clampSideAreaWidth(width),
+    };
+  }
+  return INITIAL_SIDE_AREA;
 }
 
-export function transitionToolSidebar(
-  state: ToolSidebarState,
-  action: ToolSidebarAction,
-): ToolSidebarState {
+function sameThread(a: ScopedThreadRef | null, b: ScopedThreadRef | null) {
+  return a?.environmentId === b?.environmentId && a?.threadId === b?.threadId;
+}
+
+export function transitionSideArea(state: SideAreaState, action: SideAreaAction): SideAreaState {
   switch (action.type) {
     case "toggle":
-      return { ...state, visible: !state.visible, maximized: false };
-    case "select":
+      return { ...state, open: !state.open, maximized: false };
+    case "show":
+      return { ...state, open: true, view: action.view };
+    case "toggleView":
+      if (
+        state.open &&
+        state.view === action.view &&
+        (state.locked === null || sameThread(state.locked, action.thread))
+      ) {
+        return { ...state, open: false, maximized: false };
+      }
       return {
         ...state,
-        visible: true,
-        activeTool: state.visible && state.activeTool === action.tool ? null : action.tool,
-        maximized: false,
+        open: true,
+        view: action.view,
+        locked: sameThread(state.locked, action.thread) ? state.locked : null,
       };
-    case "collapse":
-      return { ...state, activeTool: null, maximized: false };
+    case "close":
+      return { ...state, open: false, maximized: false };
+    case "dismiss":
+      return state.pinned ? state : { ...state, open: false, maximized: false };
+    case "pin":
+      return { ...state, pinned: !state.pinned };
+    case "lock":
+      return { ...state, locked: action.thread };
     case "maximize":
-      return state.visible && state.activeTool ? { ...state, maximized: !state.maximized } : state;
+      return state.open ? { ...state, maximized: !state.maximized } : state;
     case "restore":
       return { ...state, maximized: false };
     case "resize":
-      return { ...state, width: clampToolSidebarWidth(action.width) };
+      return { ...state, width: clampSideAreaWidth(action.width) };
   }
+}
+
+/** The thread the side area's thread views show: the locked one, else the selected one. */
+export function resolveSideAreaThread(
+  locked: ScopedThreadRef | null,
+  selected: ScopedThreadRef | null,
+): ScopedThreadRef | null {
+  return locked ?? selected;
 }

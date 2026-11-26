@@ -1776,8 +1776,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:tool-sidebar",
-      title: "Toggle tools sidebar",
-      searchTerms: ["calendar", "status", "right", "sidebar", "tools"],
+      title: "Toggle side panel",
+      searchTerms: ["calendar", "status", "details", "right", "sidebar", "panel", "tools", "views"],
       icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "toolSidebar.toggle",
       run: async () => {

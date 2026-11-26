@@ -2,28 +2,66 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import {
-  INITIAL_TOOL_SIDEBAR,
-  restoreToolSidebar,
-  transitionToolSidebar,
-  type ToolSidebarAction,
-  type ToolSidebarState,
+  INITIAL_SIDE_AREA,
+  restoreSideArea,
+  transitionSideArea,
+  type SideAreaAction,
+  type SideAreaState,
 } from "./components/ToolSidebar.logic";
 
-interface ToolSidebarStore extends ToolSidebarState {
-  dispatch: (action: ToolSidebarAction) => void;
+interface SideAreaStore extends SideAreaState {
+  dispatch: (action: SideAreaAction) => void;
 }
 
-export const useToolSidebarStore = create<ToolSidebarStore>()(
+// What had focus when the side area opened; closing hands focus back to it.
+let returnFocus: HTMLElement | null = null;
+let focusOnOpen = false;
+
+/** True once after an action opened the side area, so a reload that restores it open keeps focus. */
+export function takeSideAreaFocusRequest(): boolean {
+  const requested = focusOnOpen;
+  focusOnOpen = false;
+  return requested;
+}
+
+export const useToolSidebarStore = create<SideAreaStore>()(
   persist(
-    (set) => ({
-      ...INITIAL_TOOL_SIDEBAR,
-      dispatch: (action) => set((state) => transitionToolSidebar(state, action)),
+    (set, get) => ({
+      ...INITIAL_SIDE_AREA,
+      dispatch: (action) => {
+        const wasOpen = get().open;
+        const next = transitionSideArea(get(), action);
+        if (!wasOpen && next.open) {
+          returnFocus =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          focusOnOpen = true;
+        }
+        // Focus the user moved elsewhere while it was open stays where they put it.
+        const active = document.activeElement;
+        const focusInside =
+          active === null ||
+          active === document.body ||
+          active.closest("[data-side-area]") !== null;
+        set(next);
+        if (wasOpen && !next.open) {
+          const target = returnFocus;
+          returnFocus = null;
+          focusOnOpen = false;
+          if (focusInside && target?.isConnected) target.focus({ preventScroll: true });
+        }
+      },
     }),
     {
       name: "weavewing_tool_sidebar",
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
-      partialize: ({ visible, activeTool, width }) => ({ visible, activeTool, width }),
-      merge: (persisted, current) => ({ ...current, ...restoreToolSidebar(persisted) }),
+      partialize: ({ open, view, width, pinned, locked }) => ({
+        open,
+        view,
+        width,
+        pinned,
+        locked,
+      }),
+      merge: (persisted, current) => ({ ...current, ...restoreSideArea(persisted) }),
     },
   ),
 );

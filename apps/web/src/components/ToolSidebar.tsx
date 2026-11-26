@@ -1,62 +1,132 @@
 import { useAtomValue } from "@effect/atom-react";
+import { useRouterState } from "@tanstack/react-router";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import {
-  ActivityIcon,
-  CalendarIcon,
-  Settings2Icon,
+  ChevronDownIcon,
+  LockIcon,
+  LockOpenIcon,
   Maximize2,
   Minimize2,
   PanelRight,
+  PinIcon,
+  PinOffIcon,
   X,
 } from "lucide-react";
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { isElectron } from "../env";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useResizeDrag } from "../hooks/useResizeDrag";
 import { shortcutLabelForCommand } from "../keybindings";
-import { cn } from "../lib/utils";
 import { observeResize } from "../lib/observeResize";
-import { resolveToolSidebarWidth, TOOL_SIDEBAR_RAIL_WIDTH } from "./ToolSidebar.logic";
-import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
+import { cn } from "../lib/utils";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
-import { useMediaQuery } from "../hooks/useMediaQuery";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
+import { useThreadShell } from "../state/entities";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useToolSidebarStore } from "../toolSidebarStore";
-import { CalendarTool } from "./CalendarTool";
+import { resolveThreadRouteRef } from "../threadRoutes";
+import { takeSideAreaFocusRequest, useToolSidebarStore } from "../toolSidebarStore";
+import {
+  VIEW_DEFINITIONS,
+  viewDefinition,
+  type ViewDefinition,
+  type ViewTarget,
+} from "../views/viewRegistry";
 import { DropdownTerminalButton } from "./DropdownTerminal";
-import { StatusSourcesList, useStatusSignal } from "./statusSources/StatusSources";
+import { useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
+import { SideAreaSlots, useSideAreaThreadRef } from "./threadToolsHost";
+import {
+  resolveSideAreaWidth,
+  resolveViewLayout,
+  SIDE_AREA_MAX_WIDTH,
+  SIDE_AREA_MIN_WIDTH,
+} from "./ToolSidebar.logic";
 import { Button } from "./ui/button";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import { useMobileSidebarSheetMounted } from "./ui/sidebar";
+import { Skeleton } from "./ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
 
+const WIDE_MEDIA_QUERY = "(min-width: 981px)";
+/** A thread view mounts once the selection has rested this long, so quick switches load nothing. */
+export const SIDE_AREA_SETTLE_MS = 250;
+const SIDE_AREA_COVER_VARIABLE = "--side-area-cover-right";
+// Popups and dialogs portal outside the side area; using them is not a click outside it.
+const LAYER_SELECTOR =
+  '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle]';
+
+function threadKey(ref: ScopedThreadRef | null) {
+  return ref ? `${ref.environmentId}:${ref.threadId}` : null;
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    target.closest(
+      'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .cm-editor, .xterm',
+    ) !== null
+  );
+}
+
+function openLayerVisible() {
+  return Array.from(
+    document.querySelectorAll(
+      '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+    ),
+  ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }));
+}
+
+/**
+ * The side area: one view at a time on the right, covering the content instead of resizing it.
+ * Its thread views follow the selected thread unless locked; Pin keeps it open.
+ */
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
-  const { visible, activeTool, width, maximized, dispatch } = useToolSidebarStore();
+  const open = useToolSidebarStore((state) => state.open);
+  const width = useToolSidebarStore((state) => state.width);
+  const maximized = useToolSidebarStore((state) => state.maximized);
+  const pinned = useToolSidebarStore((state) => state.pinned);
   const { state: statusState } = useStatusSignal();
   const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
   const [availableWidth, setAvailableWidth] = useState(1280);
-  const pageWidth = resolveToolSidebarWidth(width, availableWidth);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
-  const isWide = useMediaQuery("(min-width: 981px)");
+  const isWide = useMediaQuery(WIDE_MEDIA_QUERY);
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const [titlebarControlsHost, setTitlebarControlsHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
-  const toggle = () => {
-    const state = useToolSidebarStore.getState();
-    state.dispatch(
-      !window.matchMedia("(min-width: 981px)").matches && !state.activeTool
-        ? { type: "select", tool: "calendar" }
-        : { type: "toggle" },
-    );
-  };
+  const coversContent = maximized && isWide && open;
+  const panelWidth = isWide
+    ? resolveSideAreaWidth(width, availableWidth)
+    : availableWidth < 640
+      ? availableWidth
+      : Math.min(width, availableWidth);
+  const routeThreadKey = useRouterState({
+    select: (state) => threadKey(resolveThreadRouteRef(state.matches.at(-1)?.params ?? {})),
+  });
+  const seenThreadKey = useRef(routeThreadKey);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area.
+  useEffect(() => {
+    if (seenThreadKey.current === routeThreadKey) return;
+    seenThreadKey.current = routeThreadKey;
+    useToolSidebarStore.getState().dispatch({ type: "dismiss" });
+  }, [routeThreadKey]);
+
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
-    const stopMenu = registerMenuAction("toolSidebar.toggle", () => {
-      toggle();
-    });
+    const toggle = () => useToolSidebarStore.getState().dispatch({ type: "toggle" });
+    const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
       {
         "toolSidebar.toggle": (event) => {
@@ -72,29 +142,16 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       {
         onKeyDown: (event) => {
           const state = useToolSidebarStore.getState();
-          if (
-            event.key !== "Escape" ||
-            event.defaultPrevented ||
-            !state.visible ||
-            !state.activeTool ||
-            (window.matchMedia("(min-width: 981px)").matches && !state.maximized) ||
-            (event.target instanceof Element &&
-              event.target.closest(
-                'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .cm-editor, .xterm, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
-              )) ||
-            Array.from(
-              document.querySelectorAll(
-                '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
-              ),
-            ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }))
-          )
-            return false;
+          if (event.key !== "Escape" || event.defaultPrevented || !state.open) return false;
+          const inside =
+            event.target instanceof Element && event.target.closest("[data-side-area]") !== null;
+          // Outside it, Escape belongs to whatever has focus; a pinned side area ignores it there.
+          if (!inside && (state.pinned || isEditableTarget(event.target))) return false;
+          if (inside && isEditableTarget(event.target)) return false;
+          if (openLayerVisible()) return false;
           state.dispatch({
             type:
-              state.maximized && window.matchMedia("(min-width: 981px)").matches
-                ? "restore"
-                : // Narrow close keeps the tools shown, so widening later still has the rail.
-                  "collapse",
+              state.maximized && window.matchMedia(WIDE_MEDIA_QUERY).matches ? "restore" : "close",
           });
           event.preventDefault();
           event.stopPropagation();
@@ -114,26 +171,20 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       ref={commandsRef}
       className="relative flex min-h-0 min-w-0 flex-1"
       data-tool-sidebar-layout
-      style={
-        {
-          "--tools-sidebar-width": `${visible && isWide ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
-          "--tools-rail-width": `${TOOL_SIDEBAR_RAIL_WIDTH}px`,
-        } as CSSProperties
-      }
     >
       <div
         ref={setTitlebarHost}
         data-workspace-titlebar
-        inert={(maximized && isWide) || undefined}
+        inert={coversContent || undefined}
         className={cn(
           "absolute inset-x-0 top-0 z-10 h-[var(--workspace-topbar-height)] bg-background",
           isElectron && "drag-region",
-          maximized && isWide && "[&>*]:invisible",
+          coversContent && "[&>*]:invisible",
         )}
       />
       <div
-        className={cn("flex min-h-0 min-w-0 flex-1", maximized && isWide && "invisible")}
-        inert={(maximized && isWide) || undefined}
+        className={cn("flex min-h-0 min-w-0 flex-1", coversContent && "invisible")}
+        inert={coversContent || undefined}
       >
         <WorkspaceTitlebarHost value={titlebarHost}>
           <WorkspaceTitlebarControlsHost value={titlebarControlsHost}>
@@ -153,111 +204,131 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           <TooltipTrigger
             render={
               <Button
+                data-side-area-toggle
                 aria-label={
-                  statusAlert && !visible
-                    ? `Toggle tools sidebar (status ${statusAlert === "fail" ? "failing" : "warning"})`
-                    : "Toggle tools sidebar"
+                  statusAlert && !open
+                    ? `Toggle side panel (status ${statusAlert === "fail" ? "failing" : "warning"})`
+                    : "Toggle side panel"
                 }
-                aria-pressed={visible && (isWide || activeTool !== null)}
-                aria-controls="tools-sidebar"
+                aria-pressed={open}
+                aria-controls="side-area"
                 size="icon-sm"
                 variant="ghost"
-                onClick={toggle}
+                onClick={() => useToolSidebarStore.getState().dispatch({ type: "toggle" })}
               />
             }
           >
             <span className="relative flex">
               <PanelRight className="size-4" />
-              {!visible && statusAlert ? <ToolStatusDot state={statusAlert} /> : null}
+              {!open && statusAlert ? <ToolStatusDot state={statusAlert} /> : null}
             </span>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            Toggle tools sidebar{shortcut ? ` (${shortcut})` : ""}
+            Toggle side panel{shortcut ? ` (${shortcut})` : ""}
           </TooltipPopup>
         </Tooltip>
       </div>
-      {visible && (isWide || activeTool) ? (
-        <aside
-          id="tools-sidebar"
-          aria-label="Tools sidebar"
-          data-tool-sidebar-state={activeTool ? (maximized ? "maximized" : "expanded") : "rail"}
-          className={cn(
-            "workspace-tools-panel mt-[var(--workspace-topbar-height)] flex min-h-0 shrink-0 border-l bg-sidebar max-[981px]:absolute max-[981px]:inset-y-0 max-[981px]:right-0 max-[981px]:z-30 max-[981px]:shadow-xl",
-            maximized &&
-              isWide &&
-              "absolute inset-x-0 bottom-0 top-[var(--workspace-topbar-height)] z-40 mt-0",
-          )}
-        >
-          {activeTool ? (
-            <ToolSidebarPage maximized={isWide && maximized} width={pageWidth} />
-          ) : null}
-          <nav
-            aria-label="Tools"
-            className="hidden min-[981px]:flex w-(--tools-rail-width) shrink-0 flex-col items-center gap-2 py-2"
-          >
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label="Calendar"
-                    aria-pressed={activeTool === "calendar"}
-                    size="icon-sm"
-                    variant="ghost-toggle"
-                    onClick={() => dispatch({ type: "select", tool: "calendar" })}
-                  />
-                }
-              >
-                <CalendarIcon className="size-4" />
-              </TooltipTrigger>
-              <TooltipPopup side="left">Calendar</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label="Status"
-                    aria-description={
-                      statusAlert
-                        ? `Status sources ${statusAlert === "fail" ? "failing" : "warning"}`
-                        : undefined
-                    }
-                    aria-pressed={activeTool === "status"}
-                    size="icon-sm"
-                    variant="ghost-toggle"
-                    onClick={() => dispatch({ type: "select", tool: "status" })}
-                  />
-                }
-              >
-                <span className="relative flex">
-                  <ActivityIcon className="size-4" />
-                  {statusAlert ? <ToolStatusDot state={statusAlert} /> : null}
-                </span>
-              </TooltipTrigger>
-              <TooltipPopup side="left">
-                Status{statusAlert ? ` · ${statusAlert === "fail" ? "Failing" : "Warning"}` : ""}
-              </TooltipPopup>
-            </Tooltip>
-          </nav>
-        </aside>
+      {open ? (
+        <SideArea
+          maximized={isWide && maximized}
+          wide={isWide}
+          pinned={pinned}
+          width={panelWidth}
+          fullWidth={availableWidth}
+        />
       ) : null}
     </div>
   );
 }
 
-function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: number }) {
-  const { activeTool, dispatch } = useToolSidebarStore();
-  const title = activeTool === "status" ? "Status" : "Calendar";
+function SideArea({
+  maximized,
+  wide,
+  pinned,
+  width,
+  fullWidth,
+}: {
+  maximized: boolean;
+  wide: boolean;
+  pinned: boolean;
+  width: number;
+  /** The content area's width, which a maximized side area fills. */
+  fullWidth: number;
+}) {
+  const view = useToolSidebarStore((state) => state.view);
+  const locked = useToolSidebarStore((state) => state.locked);
+  const dispatch = useToolSidebarStore((state) => state.dispatch);
+  const definition = viewDefinition(view);
+  const threadRef = useSideAreaThreadRef();
+  const [actions, setActions] = useState<HTMLDivElement | null>(null);
+  const [panel, setPanel] = useState<HTMLElement | null>(null);
+  const insideClicks = useRef(new WeakSet<Event>());
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- An unpinned side area closes on a click outside it, which only a document listener sees.
+  useEffect(() => {
+    if (pinned || !panel) return;
+    let pending: number | undefined;
+    let startedOutside = false;
+    const isOutside = (event: Event) =>
+      !event
+        .composedPath()
+        .some(
+          (node) => node === panel || (node instanceof Element && node.matches(LAYER_SELECTOR)),
+        );
+    const onPointerDown = (event: PointerEvent) => {
+      startedOutside = event.isPrimary && event.button === 0 && isOutside(event);
+    };
+    const onClick = (event: MouseEvent) => {
+      const outside = startedOutside;
+      startedOutside = false;
+      if (!outside || event.detail === 0 || !isOutside(event)) return;
+      window.clearTimeout(pending);
+      // Clicks in popups opened from inside the side area reach its React tree first.
+      pending = window.setTimeout(() => {
+        if (!insideClicks.current.has(event)) {
+          useToolSidebarStore.getState().dispatch({ type: "dismiss" });
+        }
+      }, 0);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.clearTimeout(pending);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [pinned, panel]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The drop-down terminal portals to the body and stops at the side area's left edge, so the edge is published there.
+  useEffect(() => {
+    if (!panel || !wide) return;
+    const root = document.documentElement;
+    const publish = () =>
+      root.style.setProperty(
+        SIDE_AREA_COVER_VARIABLE,
+        `${Math.max(0, root.clientWidth - panel.getBoundingClientRect().left)}px`,
+      );
+    publish();
+    const stopObserving = observeResize(panel, publish);
+    window.addEventListener("resize", publish);
+    return () => {
+      stopObserving();
+      window.removeEventListener("resize", publish);
+      root.style.removeProperty(SIDE_AREA_COVER_VARIABLE);
+    };
+  }, [panel, wide]);
+
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     const pane = event.currentTarget.parentElement;
-    if (!pane || maximized) return null;
-    const max = resolveToolSidebarWidth(
-      600,
-      pane.closest("[data-tool-sidebar-layout]")?.clientWidth ?? 924,
+    if (!pane || maximized || !wide) return null;
+    const max = resolveSideAreaWidth(
+      SIDE_AREA_MAX_WIDTH,
+      pane.closest("[data-tool-sidebar-layout]")?.clientWidth ?? SIDE_AREA_MAX_WIDTH,
     );
     return {
       width: pane.getBoundingClientRect().width,
       edge: "left",
-      bounds: { min: 280, max },
+      bounds: { min: SIDE_AREA_MIN_WIDTH, max },
       resize(nextWidth) {
         pane.style.width = `${nextWidth}px`;
         return nextWidth;
@@ -270,19 +341,32 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
       },
     };
   });
+
+  const target: ViewTarget = { threadRef: definition.scope === "thread" ? threadRef : null };
+  const layout = resolveViewLayout(definition.compactBelowPx, {
+    wide,
+    width: maximized ? fullWidth : width,
+  });
+
   return (
-    <div
-      {...workspaceAreaProps("tools", 5, title)}
+    <aside
+      id="side-area"
+      ref={setPanel}
+      aria-label="Side panel"
+      data-side-area={maximized ? "maximized" : pinned ? "pinned" : "open"}
+      {...workspaceAreaProps("tools", 5)}
+      onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
-        "relative flex min-h-0 min-w-0 flex-col border-r bg-background",
-        maximized && "flex-1",
+        "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col border-l bg-background shadow-xl",
+        maximized && "left-0 shadow-none",
       )}
-      style={maximized ? undefined : { width, maxWidth: "100vw" }}
+      style={maximized ? undefined : { width }}
     >
-      {!maximized ? (
+      {!maximized && wide ? (
         <button
-          aria-label="Resize tools sidebar"
-          className="hidden min-[981px]:block absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none hover:bg-border focus-visible:bg-border"
+          type="button"
+          aria-label="Resize side panel"
+          className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none hover:bg-border focus-visible:bg-border"
           {...resize}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -292,73 +376,227 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
           onDoubleClick={() => dispatch({ type: "resize", width: 300 })}
         />
       ) : null}
-      <header className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h2>
-        <nav aria-label="Tools" className="flex gap-1 min-[981px]:hidden">
-          <Button
-            size="icon-micro"
-            variant="ghost-toggle"
-            aria-label="Calendar"
-            aria-pressed={activeTool === "calendar"}
-            onClick={() => {
-              if (activeTool !== "calendar") dispatch({ type: "select", tool: "calendar" });
-            }}
+      <header className="flex h-10 shrink-0 items-center gap-1 border-b pr-2 pl-1.5">
+        <ViewPicker definition={definition} target={{ threadRef }} />
+        <div ref={setActions} className="ms-auto flex min-w-0 items-center" />
+        <div className="flex shrink-0 items-center [-webkit-app-region:no-drag]">
+          <HeaderToggle
+            label={pinned ? "Unpin side panel" : "Pin side panel"}
+            hint={
+              pinned
+                ? "Pinned: stays open when you switch threads or click elsewhere"
+                : "Pin: keep open when you switch threads or click elsewhere"
+            }
+            pressed={pinned}
+            onClick={() => dispatch({ type: "pin" })}
           >
-            <CalendarIcon />
-          </Button>
-          <Button
-            size="icon-micro"
-            variant="ghost-toggle"
-            aria-label="Status"
-            aria-pressed={activeTool === "status"}
-            onClick={() => {
-              if (activeTool !== "status") dispatch({ type: "select", tool: "status" });
-            }}
-          >
-            <ActivityIcon />
-          </Button>
-        </nav>
-        <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+            {pinned ? <PinOffIcon /> : <PinIcon />}
+          </HeaderToggle>
+          {definition.scope === "thread" ? (
+            <HeaderToggle
+              label={locked ? "Unlock from thread" : "Lock to thread"}
+              hint={
+                locked
+                  ? "Locked: follow the selected thread again"
+                  : "Lock to thread: keep showing this thread when you select another"
+              }
+              pressed={locked !== null}
+              disabled={!locked && !threadRef}
+              onClick={() => dispatch({ type: "lock", thread: locked ? null : threadRef })}
+            >
+              {locked ? <LockIcon /> : <LockOpenIcon />}
+            </HeaderToggle>
+          ) : null}
+          {wide ? (
+            <HeaderToggle
+              label={maximized ? "Restore side panel size" : "Maximize side panel"}
+              hint={maximized ? "Restore side panel size" : "Maximize side panel"}
+              pressed={maximized}
+              onClick={() => dispatch({ type: "maximize" })}
+            >
+              {maximized ? <Minimize2 /> : <Maximize2 />}
+            </HeaderToggle>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
-              className="max-[981px]:hidden"
               render={
                 <Button
-                  size="icon-micro"
-                  variant="ghost-toggle"
-                  aria-pressed={maximized}
-                  aria-label={
-                    maximized
-                      ? `Restore ${title.toLowerCase()} size`
-                      : `Maximize ${title.toLowerCase()}`
-                  }
-                  onClick={() => dispatch({ type: "maximize" })}
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Close side panel"
+                  onClick={() => dispatch({ type: "close" })}
                 />
               }
             >
-              {maximized ? <Minimize2 /> : <Maximize2 />}
+              <X />
             </TooltipTrigger>
-            <TooltipPopup>
-              {maximized
-                ? `Restore ${title.toLowerCase()} size`
-                : `Maximize ${title.toLowerCase()}`}
-            </TooltipPopup>
+            <TooltipPopup>Close side panel</TooltipPopup>
           </Tooltip>
-          <Button
-            size="icon-micro"
-            variant="ghost"
-            aria-label={`Collapse ${title.toLowerCase()}`}
-            onClick={() => {
-              dispatch({ type: "collapse" });
-              document.querySelector<HTMLButtonElement>(`button[aria-label="${title}"]`)?.focus();
-            }}
-          >
-            <X />
-          </Button>
         </div>
       </header>
-      {activeTool === "status" ? <StatusTool /> : <CalendarTool />}
+      {locked && definition.scope === "thread" ? <LockedThreadBar threadRef={locked} /> : null}
+      <SideAreaSlots actions={actions} setActions={setActions}>
+        <SideAreaBody
+          definition={definition}
+          target={target}
+          layout={layout}
+          width={maximized ? fullWidth : width}
+        />
+      </SideAreaSlots>
+    </aside>
+  );
+}
+
+function HeaderToggle(props: {
+  label: string;
+  hint: string;
+  pressed: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-sm"
+            variant="ghost-toggle"
+            aria-label={props.label}
+            aria-pressed={props.pressed}
+            disabled={props.disabled}
+            onClick={props.onClick}
+          />
+        }
+      >
+        {props.children}
+      </TooltipTrigger>
+      <TooltipPopup>{props.hint}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function LockedThreadBar({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const shell = useThreadShell(threadRef);
+  const title = shell?.title ?? "Thread";
+  return (
+    <div className="flex h-8 shrink-0 items-center gap-1.5 border-b bg-muted/40 px-3 text-xs text-muted-foreground">
+      <LockIcon aria-hidden className="size-3.5 shrink-0" />
+      <Tooltip>
+        <TooltipTrigger render={<span className="min-w-0 truncate" />}>
+          Locked to <span className="text-foreground">{title}</span>
+        </TooltipTrigger>
+        <TooltipPopup>Locked to {title}</TooltipPopup>
+      </Tooltip>
     </div>
+  );
+}
+
+/**
+ * The view for its target. A thread switch unmounts the old thread's view at once and mounts the
+ * new one only after the selection rests, so walking down the thread list starts one load.
+ */
+function SideAreaBody({
+  definition,
+  target,
+  layout,
+  width,
+}: {
+  definition: ViewDefinition;
+  target: ViewTarget;
+  layout: "compact" | "full";
+  width: number;
+}) {
+  const key = threadKey(target.threadRef);
+  const [settledKey, setSettledKey] = useState(key);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A timer decides when a run of thread switches has stopped.
+  useEffect(() => {
+    if (settledKey === key) return;
+    const timer = window.setTimeout(() => setSettledKey(key), SIDE_AREA_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [key, settledKey]);
+  if (settledKey !== key) {
+    return <SideAreaPlaceholder threadRef={target.threadRef} />;
+  }
+  return (
+    <Fragment
+      key={
+        definition.scope === "thread" && definition.id !== "evidence"
+          ? `${key}:${definition.id}`
+          : definition.id
+      }
+    >
+      {definition.render({ target, layout, host: "panel", width })}
+    </Fragment>
+  );
+}
+
+/** What the thread list already knows about the thread, while its view waits to load. */
+function SideAreaPlaceholder({ threadRef }: { threadRef: ScopedThreadRef | null }) {
+  const shell = useThreadShell(threadRef);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-3" aria-busy="true">
+      <p className="truncate text-sm text-foreground">{shell?.title ?? "Loading thread"}</p>
+      <Skeleton className="h-4 w-3/4" />
+      <Skeleton className="h-4 w-1/2" />
+    </div>
+  );
+}
+
+function ViewPicker({ definition, target }: { definition: ViewDefinition; target: ViewTarget }) {
+  const [open, setOpen] = useState(false);
+  const Icon = definition.icon;
+  const groups = [
+    { label: "This thread", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread") },
+    { label: "Everywhere", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "global") },
+  ];
+  return (
+    <Menu open={open} onOpenChange={setOpen}>
+      <MenuTrigger
+        ref={(node: HTMLButtonElement | null) => {
+          if (node && takeSideAreaFocusRequest()) node.focus({ preventScroll: true });
+        }}
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-w-0"
+            aria-label={`View: ${definition.title}. Choose a view`}
+          />
+        }
+      >
+        <Icon />
+        <span className="min-w-0 truncate">{definition.title}</span>
+        <ChevronDownIcon className="opacity-60" />
+      </MenuTrigger>
+      <MenuPopup align="start" className="w-60">
+        <MenuRadioGroup
+          value={definition.id}
+          onValueChange={(value) => {
+            const next = VIEW_DEFINITIONS.find((entry) => entry.id === value);
+            if (next) useToolSidebarStore.getState().dispatch({ type: "show", view: next.id });
+          }}
+        >
+          {groups.map((group, index) => (
+            <Fragment key={group.label}>
+              {index > 0 ? <MenuSeparator /> : null}
+              <MenuGroup>
+                <MenuGroupLabel>{group.label}</MenuGroupLabel>
+                {group.views.map((entry) => (
+                  <MenuRadioItem key={entry.id} value={entry.id} closeOnClick>
+                    <span className="flex items-center gap-2">
+                      <entry.icon className="text-muted-foreground" />
+                      {entry.title}
+                      {open && entry.PickerCount ? <entry.PickerCount target={target} /> : null}
+                    </span>
+                  </MenuRadioItem>
+                ))}
+              </MenuGroup>
+            </Fragment>
+          ))}
+        </MenuRadioGroup>
+      </MenuPopup>
+    </Menu>
   );
 }
 
@@ -367,29 +605,5 @@ function ToolStatusDot({ state }: { state: "fail" | "warn" }) {
     <span className="pointer-events-none absolute -right-1 -top-1 flex rounded-full bg-sidebar p-px">
       <StatusSourceDot state={state} />
     </span>
-  );
-}
-
-function StatusTool() {
-  const { groups } = useStatusSignal();
-  const navigate = useNavigate();
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {groups.length === 0 ? (
-        <p className="p-3 text-sm text-muted-foreground">
-          Connect to a server that supports status sources.
-          <Button variant="ghost" size="xs" render={<Link to="/settings/status-sources" />}>
-            <Settings2Icon /> Status source settings
-          </Button>
-        </p>
-      ) : (
-        <StatusSourcesList
-          groups={groups}
-          onConfigureSources={(machine) =>
-            void navigate({ to: "/settings/status-sources", search: { machine } })
-          }
-        />
-      )}
-    </div>
   );
 }

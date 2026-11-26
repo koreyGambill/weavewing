@@ -191,9 +191,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 @media (min-width: 768px) {
   [data-tool-sidebar-layout] {
-    --workspace-controls-right: calc(
-      var(--workspace-tools-controls-right) + 2.25rem + var(--tools-sidebar-width)
-    );
+    --workspace-controls-right: calc(var(--workspace-tools-controls-right) + 2.25rem);
   }
 }
 

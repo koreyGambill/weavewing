@@ -1,24 +1,13 @@
 import { useOpenFollowUpCount } from "./reviews/FollowUps";
 import { useAtomValue } from "@effect/atom-react";
-import { useParams } from "@tanstack/react-router";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AuthOrchestrationReadScope, type ScopedThreadRef } from "@t3tools/contracts";
 import {
   BellIcon,
-  BoxesIcon,
-  CalendarClockIcon,
-  FilesIcon,
-  IdCardIcon,
   InfoIcon,
-  LinkIcon,
-  ListChecksIcon,
   MessagesSquareIcon,
-  NetworkIcon,
-  ChartGanttIcon,
   ClipboardCheckIcon,
   PinIcon,
   PinOffIcon,
-  ScanSearchIcon,
   Settings2Icon,
   type LucideIcon,
 } from "lucide-react";
@@ -43,8 +32,6 @@ import {
   type ThreadContextSection,
 } from "../threadContextSidebarStore";
 import { useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
-import { InboxView } from "./inbox/InboxView";
-import { EvidenceView } from "./evidence/EvidenceView";
 import {
   useEvidenceCounts,
   useEvidenceEnvironment,
@@ -52,10 +39,9 @@ import {
 } from "../state/evidence";
 import { useInboxSignal } from "../state/inbox";
 import { sidebarWorkspaceGet } from "../state/threadWorkspace";
-import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { FLUSH_THREAD_TOOLS, ThreadInspect, ThreadToolSection } from "./ThreadToolViews";
+import { viewDefinition } from "../views/viewRegistry";
+import { ThreadViewBody } from "../views/ThreadViewBody";
 import { Button } from "./ui/button";
-import { Empty, EmptyDescription } from "./ui/empty";
 import {
   Menu,
   MenuCheckboxItem,
@@ -67,76 +53,17 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { useSidebar, useSidebarVisibility } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { AutomationsView } from "./automations/AutomationsView";
 
-const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; about: string }> = {
-  todos: {
-    title: "Todos",
-    icon: ListChecksIcon,
-    about:
-      "Commitments agents and you track for this thread. Agents update it with list_update; you can add and check items here.",
-  },
-  evidence: {
-    title: "Evidence",
-    icon: ClipboardCheckIcon,
-    about:
-      "Proof for each land: what was asked, its commits, checks, review verdict and captures. Agents record it with evidence_record; you set each change's QA state here.",
-  },
-  artifacts: {
-    title: "Artifacts",
-    icon: FilesIcon,
-    about:
-      "Documents and pages agents publish for this thread, with any questions they ask you. Agents write them with artifact_write; you answer here.",
-  },
-  links: {
-    title: "Links",
-    icon: LinkIcon,
-    about:
-      "The thread's ticket and pull requests, then web links and files linked in the conversation. It fills as agents link work, post URLs and cite files; click a file's lines to open it there.",
-  },
-  related: {
-    title: "Related",
-    icon: NetworkIcon,
-    about:
-      "Threads this one delegated to, forked, messaged or heard from. Agent suggestions will appear under Suggested.",
-  },
-  timeline: {
-    title: "Timeline",
-    icon: ChartGanttIcon,
-    about:
-      "When this thread and its delegates ran, one row per thread on a shared clock. Hover a bar for its model and timing; click it to open that thread.",
-  },
-  details: {
-    title: "Details",
-    icon: IdCardIcon,
-    about:
-      "The conversation's details card: workspace, branch, scripts and automations. It is the same card the thread view shows.",
-  },
-  environments: {
-    title: "Environments",
-    icon: BoxesIcon,
-    about:
-      "Where this thread's code lives: the Xwing environments it and its delegated work use, or else its worktree and branch.",
-  },
-  inbox: {
-    title: "Inbox",
-    icon: BellIcon,
-    about:
-      "Urgent problems and important things you must not miss. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
-  },
-  inspect: {
-    title: "Inspect",
-    icon: ScanSearchIcon,
-    about:
-      "What the agent loaded and spent: file and skill reads, context per turn, and tokens. T3 records it as turns run.",
-  },
-  automations: {
-    title: "Automations",
-    icon: CalendarClockIcon,
-    about:
-      "Agents that run on a schedule, a webhook or an event. Switch them on or off for this thread, the project or the whole server, and open a run's thread from its history.",
-  },
+const INBOX_TOOL = {
+  title: "Inbox",
+  icon: BellIcon,
+  about:
+    "Urgent problems and important things you must not miss. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
 };
+
+function tool(view: ThreadContextSection): { title: string; icon: LucideIcon; about: string } {
+  return view === "inbox" ? INBOX_TOOL : viewDefinition(view);
+}
 
 function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
   const canRead = useEnvironmentScope(threadRef?.environmentId ?? null, AuthOrchestrationReadScope);
@@ -165,13 +92,14 @@ export function ThreadToolsFrame({ children }: { children: ReactNode }) {
       {view !== "threads" && visible ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ThreadToolHeading view={view} />
-          <ThreadToolView
+          <ThreadViewBody
             key={
               threadRef && view !== "inbox" && view !== "evidence"
                 ? `${threadRef.environmentId}:${threadRef.threadId}:${view}`
                 : view
             }
             view={view}
+            title={tool(view).title}
             threadRef={threadRef}
           />
         </div>
@@ -228,17 +156,17 @@ function ThreadToolHeading({ view }: { view: ThreadContextSection }) {
   const shell = useThreadShell(threadRef);
   return (
     <div className="flex h-10 shrink-0 items-center gap-1 px-2 pt-2">
-      <h2 className="min-w-0 truncate text-sm font-medium text-foreground">{tools[view].title}</h2>
+      <h2 className="min-w-0 truncate text-sm font-medium text-foreground">{tool(view).title}</h2>
       <Popover>
         <PopoverTrigger
           render={
-            <Button variant="ghost" size="icon-xs" aria-label={`About ${tools[view].title}`} />
+            <Button variant="ghost" size="icon-xs" aria-label={`About ${tool(view).title}`} />
           }
         >
           <InfoIcon />
         </PopoverTrigger>
         <PopoverPopup side="bottom" align="start">
-          <p className="max-w-64 text-xs leading-5">{tools[view].about}</p>
+          <p className="max-w-64 text-xs leading-5">{tool(view).about}</p>
         </PopoverPopup>
       </Popover>
       <div ref={setActions} className="ml-auto flex shrink-0 items-center" />
@@ -422,10 +350,10 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
               key={id}
               threadRef={threadRef}
               active={view === id}
-              tooltip={tooltip(id, tools[id].title)}
+              tooltip={tooltip(id, tool(id).title)}
             />
           );
-        const { title, icon } = tools[id];
+        const { title, icon } = tool(id);
         const count =
           id === "todos"
             ? signals.listCount + openFollowUps
@@ -500,7 +428,7 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
                     useThreadContextSidebarStore.getState().setHidden(item, !checked)
                   }
                 >
-                  {tools[item].title}
+                  {tool(item).title}
                 </MenuCheckboxItem>
               ))}
             </MenuGroup>
@@ -549,56 +477,5 @@ function StripButton({
       </Tooltip>
       {props.children}
     </div>
-  );
-}
-
-function ThreadToolView({
-  view,
-  threadRef,
-}: {
-  view: ThreadContextSection;
-  threadRef: ScopedThreadRef | null;
-}) {
-  const { actions, setDetails } = useThreadToolsSlots();
-  const { title } = tools[view];
-  // Inspect previews a draft's default context before its first message.
-  const { draftId: routeDraftId } = useParams({ strict: false });
-  const draftId = routeDraftId === undefined ? undefined : DraftId.make(routeDraftId);
-  const draftSession = useComposerDraftStore((store) =>
-    threadRef === null && draftId ? store.getDraftSession(draftId) : null,
-  );
-  const draft = draftId && draftSession ? { draftId, session: draftSession } : null;
-  return (
-    <section
-      aria-label={title}
-      className={cn(
-        "flex min-h-0 min-w-0 flex-1 flex-col",
-        view !== "inbox" && !FLUSH_THREAD_TOOLS.has(view) && "overflow-auto px-2.5 py-2.5",
-      )}
-    >
-      {view === "inbox" ? (
-        <InboxView actions={actions} />
-      ) : view === "automations" ? (
-        <AutomationsView threadRef={threadRef} />
-      ) : view === "evidence" ? (
-        <EvidenceView threadRef={threadRef} />
-      ) : threadRef ? (
-        <ThreadToolSection
-          section={view}
-          threadRef={threadRef}
-          detailsRef={setDetails}
-          actions={actions}
-        />
-      ) : view === "inspect" && draft ? (
-        <ThreadInspect
-          threadRef={scopeThreadRef(draft.session.environmentId, draft.session.threadId)}
-          draftId={draft.draftId}
-        />
-      ) : (
-        <Empty size="compact">
-          <EmptyDescription>Open a thread to see its {title.toLowerCase()}.</EmptyDescription>
-        </Empty>
-      )}
-    </section>
   );
 }

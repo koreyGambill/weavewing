@@ -438,12 +438,12 @@ it("retains each thread's diff selection when returning from another thread or S
   });
 });
 
-it("overlays tools on a narrow tile and dismisses them after closing the mobile sidebar", async () => {
+it("overlays the side panel on a narrow tile and dismisses it after closing the mobile sidebar", async () => {
   await using viewport = new AsyncDisposableStack();
   const initialSize = { width: window.innerWidth, height: window.innerHeight };
   viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
   await page.viewport(390, 800);
-  useToolSidebarStore.setState({ visible: false, activeTool: null, maximized: false });
+  useToolSidebarStore.setState({ open: false, pinned: false, locked: null, maximized: false });
   const thread = threadWithHistory("narrow-tools", 1);
   using _environment = installFakeEnvironment([thread]);
   __setClientSettingsForTests({
@@ -460,8 +460,8 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   });
   await userEvent.click(screen.getByRole("button", { name: "Toggle main sidebar", exact: true }));
   await userEvent.keyboard("{Escape}");
-  await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
-  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
+  await expect.element(screen.getByRole("complementary", { name: "Side panel" })).toBeVisible();
   await expect
     .element(screen.getByRole("textbox", { name: `Message ${thread.title}` }))
     .toBeVisible();
@@ -476,33 +476,24 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   composer.addEventListener("keydown", reachedComposer, { once: true });
   composer.dispatchEvent(escape);
   expect(reachedComposer).toHaveBeenCalledOnce();
-  expect(useToolSidebarStore.getState().visible).toBe(true);
+  expect(useToolSidebarStore.getState().open).toBe(true);
   const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
   handled.preventDefault();
   document.body.dispatchEvent(handled);
-  expect(useToolSidebarStore.getState().visible).toBe(true);
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "collapse" }));
+  expect(useToolSidebarStore.getState().open).toBe(true);
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "close" }));
   await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }));
   await expect.element(page.getByRole("menu")).toBeVisible();
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
-  expect(useToolSidebarStore.getState().visible).toBe(true);
+  expect(useToolSidebarStore.getState().open).toBe(false);
   await page.viewport(700, 800);
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "select", tool: "calendar" }));
-  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
-  await userEvent.click(
-    screen.getByRole("region", { name: "Calendar", exact: true }).getByRole("button", {
-      name: "Calendar",
-      exact: true,
-    }),
-  );
-  await userEvent.keyboard("{Escape}");
-  await expect
-    .element(screen.getByRole("complementary", { name: "Tools sidebar" }))
-    .not.toBeInTheDocument();
-  expect(useToolSidebarStore.getState()).toMatchObject({ visible: true, activeTool: null });
-  await page.viewport(1100, 800);
-  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "calendar" }));
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel).toBeVisible();
+  await userEvent.click(panel.getByRole("button", { name: "Close side panel", exact: true }));
+  await expect.element(panel).not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: false, view: "calendar" });
 });
 
 it("a stashed prompt ending in a file chip restores with the chip", async () => {
