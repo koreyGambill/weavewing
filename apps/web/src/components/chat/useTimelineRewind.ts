@@ -98,7 +98,32 @@ function getRewindToReplyDisabledReason({
     ? "Finish the current turn and queued work before rewinding."
     : rewindToReplyThreadRefusal(serverProjection);
   if (threadRefusal !== null) return () => threadRefusal;
-  return (runId, messageId) => rewindToReplyPointRefusal(serverProjection, runId, messageId);
+  // Rows keep this closure; holding only the fields it reads lets replaced structures be collected.
+  const {
+    thread,
+    runs,
+    attempts,
+    providerThreads,
+    providerTurns,
+    providerSessions,
+    runtimeRequests,
+    contextTransfers,
+    subagents,
+    turnItems,
+  } = serverProjection;
+  const records = {
+    thread,
+    runs,
+    attempts,
+    providerThreads,
+    providerTurns,
+    providerSessions,
+    runtimeRequests,
+    contextTransfers,
+    subagents,
+    turnItems,
+  };
+  return (runId, messageId) => rewindToReplyPointRefusal(records, runId, messageId);
 }
 
 /**
