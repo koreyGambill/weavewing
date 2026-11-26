@@ -189,7 +189,7 @@ $sourceRecord = "$repo $tagPrefix$version"
 
 if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version) -and
   (Test-Path $sourceMarker) -and ((Get-Content $sourceMarker -Raw).Trim() -eq $sourceRecord) -and
-  (Test-Path (Join-Path $targetDir "t3.exe"))) {
+  (Test-Path -PathType Leaf (Join-Path $targetDir "t3.exe"))) {
   Step "Version $version is already downloaded."
 } else {
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null

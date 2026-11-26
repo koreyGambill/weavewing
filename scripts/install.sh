@@ -233,7 +233,7 @@ target_dir="${versions_dir}/${version}"
 source_record="${repo} ${tag_prefix}${version}"
 
 if [ -f "${target_dir}/.install-complete" ] && [ "$(cat "${target_dir}/.install-complete")" = "$version" ] &&
-  [ "$(cat "${target_dir}/.install-source" 2>/dev/null)" = "$source_record" ] && [ -x "${target_dir}/t3" ]; then
+  [ "$(cat "${target_dir}/.install-source" 2>/dev/null)" = "$source_record" ] && [ -f "${target_dir}/t3" ] && [ -x "${target_dir}/t3" ]; then
   step "Version ${version} is already downloaded."
 else
   mkdir -p "$versions_dir"
