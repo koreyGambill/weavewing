@@ -20,8 +20,13 @@ the 240-character prefix as a migration rule.
 
 A rewind with a summary stores the agent's summary as a `checkpoint_summary` handoff in the same
 event batch as the split, so the conversation never rewinds without one. Turn start prepends it
-inline, like side-chat context, to the next prompt on the provider thread that split created, then
-records it as delivered. A later split moves the active conversation elsewhere and leaves it unsent.
+inline, like side-chat context, only to a prompt the user wrote, and only into the conversation the
+split continued: that provider thread, or its native conversation resumed under another account.
+Scheduled, merge-back and fresh-context turns leave it pending. A provider switch's history carries
+the summary as one historical message, so the other provider sees it while the continued
+conversation still waits for it. Recovery after a failed native resume rebuilds history without
+rolled-back runs, which include a rewind's archived turns.
 Nothing returns the summarized turns to that conversation: Bring back adds the archive as a reference,
 and a merge back from the archive sends only work done there after its fork point, which is the
-summary turn.
+summary turn. A crash between the provider accepting a prompt and the delivery record can send the
+summary twice, and a fork made before delivery starts without it.
