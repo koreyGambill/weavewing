@@ -1,6 +1,7 @@
 import {
   EVIDENCE_LIST_PAGE_SIZE,
   EVIDENCE_RECORD_MAX_BYTES,
+  EvidenceChangeKey,
   EvidenceChangeQa,
   EvidenceError,
   EvidenceLanding,
@@ -163,6 +164,9 @@ export function qaRaiseReasons(
 const RecordJson = Schema.fromJsonString(EvidenceRecord);
 const encodeRecord = Schema.encodeEffect(RecordJson);
 const decodeRecord = Schema.decodeUnknownEffect(RecordJson);
+const encodeChangeKeys = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Array(EvidenceChangeKey)),
+);
 const decodeLanding = Schema.decodeUnknownEffect(EvidenceLanding);
 // json_extract hands back nested values as JSON text.
 const decodeSummaryRow = Schema.decodeUnknownEffect(
@@ -861,7 +865,7 @@ const make = Effect.gen(function* () {
     const now = DateTime.formatIso(yield* DateTime.now);
     // Only the changes the user saw listed, and only those still waiting: a change that became
     // eligible since the list was read is left for the next dismissal.
-    const listed = JSON.stringify(input.changes);
+    const listed = yield* encodeChangeKeys(input.changes);
     const dismissed = yield* sql<{ readonly landing_id: string }>`UPDATE evidence_qa AS q SET
         note = ${note},
         raised_json = CASE WHEN raised_json IS NULL THEN '["legacy"]' ELSE raised_json END,
