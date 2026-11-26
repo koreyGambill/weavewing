@@ -92,14 +92,15 @@ describe("claudeInstructionUpdate", () => {
   });
 
   it("delivers a changed indentation as it is, so the digest and the body agree", () => {
-    const indented = claudeAppendSections("## Rules\n\n  - keep two spaces", "");
-    const flat = claudeAppendSections("## Rules\n\n- keep two spaces", "");
+    // A launch-argument append whose first line is indented, then the same append unindented.
+    const indented = claudeAppendSections("T3 text\n\n  - keep two spaces", "T3 text");
+    const flat = claudeAppendSections("T3 text\n\n- keep two spaces", "T3 text");
     const update = claudeInstructionUpdate({
       record: claudeInstructionRecord(flat),
       sections: indented,
       cut: false,
     });
-    expect(update.notice).toContain("\n  - keep two spaces\n</section>");
+    expect(update.notice).toContain('change="replaced">\n  - keep two spaces\n</section>');
   });
 
   it("sends nothing to a session that already has the current sections", () => {
