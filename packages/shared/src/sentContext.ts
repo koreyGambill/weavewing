@@ -1,21 +1,24 @@
 import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
-  type ArtifactAnswerContextRecord,
   type ComposerContextRecord,
-  type ElementContextDetails,
   type KnownComposerContextKind,
   type KnownComposerContextRecord,
   type OrchestrationMessageContext,
 } from "@t3tools/contracts";
 
 import { upgradeLegacyContextMessage } from "./composerContextLegacy.ts";
-import { collectComposerContextReferences } from "./composerContextReferences.ts";
+import {
+  collectComposerContextReferences,
+  composerContextPayloadFields,
+  type ComposerContextPayloadField,
+} from "./composerContextReferences.ts";
 
 /** One labelled piece of what a reference sent, such as a comment or the selected output. */
 export interface SentContextSection {
   /** A short heading such as "Selector"; never searched. Null when the block's own header names it. */
   readonly label: string | null;
+  /** Exactly the text the provider received for this field. */
   readonly text: string;
   /** Code, terminal output and markup keep their line breaks and render monospace. */
   readonly preformatted: boolean;
@@ -34,127 +37,34 @@ export interface SentContextBlock {
   readonly record: KnownComposerContextRecord;
 }
 
-type Expansion<K extends KnownComposerContextKind> = {
-  readonly display: "open" | "expandable";
-  readonly sections: (
-    record: Extract<KnownComposerContextRecord, { kind: K }>,
-  ) => ReadonlyArray<SentContextSection | null>;
-};
-
-const section = (
-  label: string | null,
-  text: string | null | undefined,
-  preformatted = false,
-): SentContextSection | null => {
-  const value = preformatted ? (text ?? "").replace(/^\n+|\s+$/g, "") : (text ?? "").trim();
-  return value ? { label, text: value, preformatted } : null;
-};
-
-function sourceLocation(element: ElementContextDetails): string | null {
-  const source = element.source;
-  if (!source?.fileName) return null;
-  if (source.lineNumber === null) return source.fileName;
-  return `${source.fileName}:${source.lineNumber}${source.columnNumber === null ? "" : `:${source.columnNumber}`}`;
+function shownSections(
+  fields: ReadonlyArray<ComposerContextPayloadField>,
+): SentContextSection[] {
+  return fields.flatMap((field) =>
+    field.children
+      ? shownSections(field.children)
+      : field.shown && field.value.trim()
+        ? [{ label: field.shown.label, text: field.value, preformatted: field.shown.preformatted }]
+        : [],
+  );
 }
 
-function elementSections(element: ElementContextDetails, prefix = "") {
-  return [
-    section(`${prefix}Selector`, element.selector || `<${element.tagName}>`),
-    section(`${prefix}Component`, element.componentName),
-    section(`${prefix}Source`, sourceLocation(element)),
-    section(`${prefix}HTML`, element.htmlPreview, true),
-    section(`${prefix}Styles`, element.styles, true),
-  ];
-}
-
-/** A question answer or comment: what was asked, what was chosen and what the user wrote. */
-function artifactAnswerSections(
-  record: ArtifactAnswerContextRecord,
+/** The fields the provider received that the timeline shows; none for a label-only reference. */
+export function sentContextSections(
+  record: KnownComposerContextRecord,
 ): readonly SentContextSection[] {
-  const comment = record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID;
-  return [
-    section(null, record.question),
-    comment ? null : section("Answer", record.choice),
-    section(comment ? "Comment" : "Note", record.note),
-  ].filter((entry) => entry !== null);
+  return shownSections(composerContextPayloadFields(record));
 }
-
-/**
- * Every kind's sent content. A kind with nothing beyond its chip label returns no sections, so
- * its chip gets no expand control. Adding a kind to `COMPOSER_CONTEXT_KINDS` requires an entry.
- */
-const SENT_CONTEXT_EXPANSIONS: { readonly [K in KnownComposerContextKind]: Expansion<K> } = {
-  "artifact-answer": { display: "open", sections: artifactAnswerSections },
-  // The block header already names the terminal and its lines.
-  terminal: { display: "expandable", sections: (record) => [section(null, record.text, true)] },
-  element: {
-    display: "expandable",
-    sections: (record) => [
-      section("Page", record.pageTitle),
-      section("URL", record.pageUrl),
-      ...elementSections(record),
-    ],
-  },
-  "preview-annotation": {
-    display: "expandable",
-    sections: (record) => [
-      section("Page", record.pageTitle),
-      section("URL", record.pageUrl),
-      section("Comment", record.comment),
-      section("Targets", record.targetSummary),
-      section("Requested changes", record.styleChanges.join("\n"), true),
-      ...(record.elements ?? []).flatMap((element, index) =>
-        elementSections(element, (record.elements?.length ?? 0) > 1 ? `Element ${index + 1} ` : ""),
-      ),
-    ],
-  },
-  "review-comment": {
-    display: "expandable",
-    sections: (record) => [
-      section(
-        "Pull request",
-        record.pullRequest
-          ? `#${record.pullRequest.number} ${record.pullRequest.title} (${record.pullRequest.headBranch} into ${record.pullRequest.baseBranch})`
-          : null,
-      ),
-      section("File", record.filePath.startsWith("artifact:") ? null : record.filePath),
-      section("Range", `${record.sectionTitle} · ${record.rangeLabel}`),
-      section("Comment", record.text),
-      section(record.fenceLanguage ?? "Diff", record.diff, true),
-    ],
-  },
-  response: {
-    display: "expandable",
-    sections: (record) => [
-      section("Subagents", record.subagents?.map((subagent) => subagent.title).join(", ")),
-      section("Replying to", record.citation.text),
-      section("Comment", record.citation.comment),
-    ],
-  },
-  thread: { display: "expandable", sections: (record) => [section("Title", record.title)] },
-  image: { display: "expandable", sections: () => [] },
-  file: { display: "expandable", sections: () => [] },
-  mention: { display: "expandable", sections: () => [] },
-  skill: { display: "expandable", sections: () => [] },
-  environment: { display: "expandable", sections: () => [] },
-};
 
 function blockFor(record: KnownComposerContextRecord): SentContextBlock | null {
-  // Each entry takes its own kind's record; the lookup by `record.kind` keeps them paired.
-  const expansion = SENT_CONTEXT_EXPANSIONS[record.kind] as Expansion<KnownComposerContextKind>;
-  const label = record.label.trim();
-  const sections = expansion
-    .sections(record)
-    .filter(
-      (entry): entry is SentContextSection =>
-        entry !== null && !(entry.label !== null && entry.text === label),
-    );
+  const sections = sentContextSections(record);
   if (sections.length === 0) return null;
   return {
     contextId: record.contextId,
     kind: record.kind,
     label: record.label,
-    display: expansion.display,
+    // What the user said answering a question is read without a click.
+    display: record.kind === "artifact-answer" ? "open" : "expandable",
     sections,
     record,
   };

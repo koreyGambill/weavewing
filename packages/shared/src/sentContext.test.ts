@@ -1,4 +1,5 @@
 import {
+  COMPOSER_CONTEXT_KINDS,
   ComposerContextId,
   EnvironmentId,
   MessageId,
@@ -11,8 +12,15 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatComposerContextReference } from "./composerContextReferences.ts";
-import { sentContextBlocks, sentContextSearchSegments } from "./sentContext.ts";
+import {
+  formatComposerContextReference,
+  projectComposerContextForProvider,
+} from "./composerContextReferences.ts";
+import {
+  sentContextBlocks,
+  sentContextSearchSegments,
+  sentContextSections,
+} from "./sentContext.ts";
 
 const id = (value: string) => ComposerContextId.make(value);
 const environmentId = EnvironmentId.make("env-1");
@@ -42,7 +50,8 @@ const RECORDS = {
     artifactVersion: 1,
     question: "Which cache should the build use?\nIt runs on every push.",
     choice: "Shared cache",
-    note: "Keep it warm",
+    // A note that repeats the chip label is still what the user wrote.
+    note: "Q1: Pick a cache",
   },
   discuss: {
     version: 1,
@@ -58,6 +67,20 @@ const RECORDS = {
     choice: "",
     note: "What does backoff cost us?",
   },
+  otherArtifact: {
+    version: 1,
+    kind: "artifact-answer",
+    contextId: id("answer_plan"),
+    label: "Plan review",
+    artifactId: "artifact-plan",
+    questionId: "step-2",
+    answerRevision: 0,
+    title: "Plan review",
+    artifactVersion: 3,
+    question: "Keep step two?",
+    choice: "Yes",
+    note: "",
+  },
   terminal: {
     version: 1,
     kind: "terminal",
@@ -67,7 +90,7 @@ const RECORDS = {
     terminalLabel: "Terminal 1",
     lineStart: 3,
     lineEnd: 4,
-    text: "  build ok\n  tests ok\n",
+    text: "  build ok\n  tests ok\nline outside the selection",
   },
   element: {
     version: 1,
@@ -75,6 +98,7 @@ const RECORDS = {
     contextId: id("element_e1"),
     label: "button",
     ...element,
+    selector: null,
   },
   annotation: {
     version: 1,
@@ -93,15 +117,24 @@ const RECORDS = {
     version: 1,
     kind: "review-comment",
     contextId: id("review-comment_r1"),
-    label: "src/a.ts:4",
+    label: "Plan section",
     sectionId: "s1",
     sectionTitle: "Changes",
-    filePath: "src/a.ts",
+    filePath: "artifact:plan",
     startIndex: 0,
     endIndex: 1,
     rangeLabel: "line 4",
     text: "Rename this",
     diff: "-const a = 1;\n+const b = 1;\n",
+    pullRequest: {
+      number: 7,
+      title: "Local pull request title",
+      url: "http://localhost/pr/7",
+      headBranch: "feature",
+      baseBranch: "main",
+      state: "open",
+      isDraft: false,
+    },
   },
   response: {
     version: 1,
@@ -113,13 +146,24 @@ const RECORDS = {
       environmentId,
       threadId,
       messageId: MessageId.make("m1"),
-      text: "The build failed because the cache expired.",
+      text: "The build   failed\nbecause the cache expired.",
+      comment: "A local comment the provider never sees",
       start: 0,
       end: 10,
       prefix: "",
       suffix: "",
     },
     itemId: TurnItemId.make("item-1"),
+    subagents: [{ threadId, title: "Cache audit" }],
+  },
+  thread: {
+    version: 1,
+    kind: "thread",
+    contextId: id("thread_t"),
+    label: "Build fix",
+    environmentId,
+    threadId,
+    title: "Fix the nightly build cache",
   },
   sameTitleThread: {
     version: 1,
@@ -155,6 +199,16 @@ const RECORDS = {
     mimeType: "text/plain",
     sizeBytes: 12,
   },
+  image: {
+    version: 1,
+    kind: "image",
+    contextId: id("image_i"),
+    label: "shot.png",
+    attachmentId: "att-2",
+    name: "shot.png",
+    mimeType: "image/png",
+    sizeBytes: 12,
+  },
 } satisfies Record<string, KnownComposerContextRecord>;
 
 function blocksFor(records: ReadonlyArray<ComposerContextRecord>) {
@@ -162,16 +216,62 @@ function blocksFor(records: ReadonlyArray<ComposerContextRecord>) {
   return sentContextBlocks({ text, records });
 }
 
+const indent = (text: string, depth: number) =>
+  text
+    .split("\n")
+    .map((line) => `${"  ".repeat(depth)}${line}`)
+    .join("\n");
+
+/** Each kind once; expandable kinds must show only text the provider projection delivered. */
+const PARITY = [
+  { record: RECORDS.answer, expandable: true },
+  { record: RECORDS.terminal, expandable: true },
+  { record: RECORDS.element, expandable: true },
+  { record: RECORDS.annotation, expandable: true },
+  { record: RECORDS.review, expandable: true },
+  { record: RECORDS.response, expandable: true },
+  { record: RECORDS.thread, expandable: true },
+  { record: RECORDS.mention, expandable: false },
+  { record: RECORDS.skill, expandable: false },
+  { record: RECORDS.environment, expandable: false },
+  { record: RECORDS.file, expandable: false },
+  { record: RECORDS.image, expandable: false },
+] as const;
+
 describe("sentContextBlocks", () => {
+  it("covers every known kind in the parity table", () => {
+    expect(new Set(PARITY.map(({ record }) => record.kind))).toEqual(
+      new Set(COMPOSER_CONTEXT_KINDS),
+    );
+  });
+
+  it.each(PARITY.map((row) => [row.record.kind, row] as const))(
+    "shows %s only as the provider received it",
+    (_kind, { record, expandable }) => {
+      const delivered = projectComposerContextForProvider({
+        text: formatComposerContextReference(record),
+        records: [record],
+      });
+      const sections = sentContextSections(record);
+      expect(sections.length > 0).toBe(expandable);
+      for (const section of sections) {
+        expect(
+          [0, 1, 2].some((depth) => delivered.includes(indent(section.text, depth))),
+          `${section.label ?? "(no label)"}: ${section.text}`,
+        ).toBe(true);
+      }
+    },
+  );
+
   it.each([
     [
-      "an answer shows the question, choice and note",
+      "an answer keeps a note equal to the chip label",
       RECORDS.answer,
       "open",
       [
         [null, "Which cache should the build use?\nIt runs on every push."],
         ["Answer", "Shared cache"],
-        ["Note", "Keep it warm"],
+        ["Note", "Q1: Pick a cache"],
       ],
     ],
     [
@@ -184,19 +284,19 @@ describe("sentContextBlocks", () => {
       ],
     ],
     [
-      "a terminal shows its output with leading indentation",
+      "a terminal shows only the selected lines, numbered as sent",
       RECORDS.terminal,
       "expandable",
-      [[null, "  build ok\n  tests ok"]],
+      [[null, "3 |   build ok\n4 |   tests ok"]],
     ],
     [
-      "an element shows its page, selector, source and markup",
+      "an element without a selector shows its tag, not an invented selector",
       RECORDS.element,
       "expandable",
       [
-        ["Page", "Settings"],
         ["URL", "http://localhost:3000/settings"],
-        ["Selector", "#save"],
+        ["Tag", "button"],
+        ["Title", "Settings"],
         ["Component", "SaveButton"],
         ["Source", "src/Save.tsx:12:4"],
         ["HTML", '<button id="save">Save</button>'],
@@ -204,37 +304,25 @@ describe("sentContextBlocks", () => {
       ],
     ],
     [
-      "a preview annotation shows its comment, changes and element",
-      RECORDS.annotation,
-      "expandable",
-      [
-        ["URL", "http://localhost:3000/"],
-        ["Comment", "Make this bigger"],
-        ["Targets", "1 element"],
-        ["Requested changes", "font-size: 18px\npadding: 8px"],
-        ["Selector", "#save"],
-        ["Component", "SaveButton"],
-        ["Source", "src/Save.tsx:12:4"],
-        ["HTML", '<button id="save">Save</button>'],
-        ["Styles", "color: red;"],
-      ],
-    ],
-    [
-      "a review comment shows its file, range, comment and diff",
+      "a review comment shows its delivered file, not pull request metadata",
       RECORDS.review,
       "expandable",
       [
-        ["File", "src/a.ts"],
-        ["Range", "Changes · line 4"],
+        ["File", "artifact:plan"],
+        ["Range", "line 4"],
+        ["Section", "Changes"],
         ["Comment", "Rename this"],
-        ["Diff", "-const a = 1;\n+const b = 1;"],
+        ["diff", "-const a = 1;\n+const b = 1;"],
       ],
     ],
     [
-      "a response reply shows the opening it replied to",
+      "a response reply shows the opening as sent, without the local comment",
       RECORDS.response,
       "expandable",
-      [["Replying to", "The build failed because the cache expired."]],
+      [
+        ["About subagent", "Cache audit"],
+        ["Replying to", "The build failed because the cache expired."],
+      ],
     ],
   ] as const)("%s", (_name, record, display, sections) => {
     const [block] = blocksFor([record]);
@@ -242,16 +330,8 @@ describe("sentContextBlocks", () => {
     expect(block?.sections.map((entry) => [entry.label, entry.text])).toEqual(sections);
   });
 
-  it("gives no block to kinds with nothing beyond their label", () => {
-    expect(
-      blocksFor([
-        RECORDS.sameTitleThread,
-        RECORDS.mention,
-        RECORDS.skill,
-        RECORDS.environment,
-        RECORDS.file,
-      ]),
-    ).toEqual([]);
+  it("gives no block to a thread whose title is its chip label", () => {
+    expect(blocksFor([RECORDS.sameTitleThread])).toEqual([]);
   });
 
   it("orders blocks by first reference and skips missing and unknown records", () => {
@@ -269,10 +349,7 @@ describe("sentContextBlocks", () => {
       formatComposerContextReference({ kind: "terminal", contextId: id("gone"), label: "Gone" }),
       formatComposerContextReference(RECORDS.terminal),
     ].join(" ");
-    const blocks = sentContextBlocks({
-      text,
-      records: [RECORDS.answer, RECORDS.terminal, unknown],
-    });
+    const blocks = sentContextBlocks({ text, records: [RECORDS.answer, RECORDS.terminal, unknown] });
     expect(blocks.map((block) => block.contextId)).toEqual(["terminal_t1", "answer_q1"]);
   });
 });
@@ -290,8 +367,8 @@ describe("sentContextSearchSegments", () => {
     ).toEqual([
       "Which cache should the build use? It runs on every push.",
       "Shared cache",
-      "Keep it warm",
-      "  build ok\n  tests ok",
+      "Q1: Pick a cache",
+      "3 |   build ok\n4 |   tests ok",
     ]);
   });
 });
