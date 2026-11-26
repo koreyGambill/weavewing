@@ -116,6 +116,21 @@ export function connectorsPartial(group: ConnectorsGroup, staged: ThreadToolOver
   );
 }
 
+/** Whether saving would drop connector choices the thread has saved, because the group is off. */
+export function connectorsResetPending(
+  group: ConnectorsGroup,
+  saved: ThreadToolOverrides,
+  staged: ThreadToolOverrides,
+): boolean {
+  return (
+    connectorsPartial(group, saved) &&
+    !connectorsOn(group.provider, staged) &&
+    group.names.some(
+      (name) => saved.omittedMcpServers.includes(name) && !staged.omittedMcpServers.includes(name),
+    )
+  );
+}
+
 /**
  * The group's description: what is on, then whether the thread follows the provider default.
  * `reset` says that switching the group off cleared the connectors chosen one by one.

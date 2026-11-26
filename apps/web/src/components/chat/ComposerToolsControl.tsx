@@ -37,6 +37,7 @@ import {
   connectorsDescription,
   connectorsOn,
   connectorsPartial,
+  connectorsResetPending,
   type ConnectorsGroup,
   mcpServerSections,
   withConnectorsMaster,
@@ -346,7 +347,7 @@ function McpServersSection({
           ))}
         </ul>
       )}
-      <ConnectorsMaster group={group} staged={staged} onStage={onStage} />
+      <ConnectorsMaster group={group} saved={saved} staged={staged} onStage={onStage} />
       {sections.connectors.length === 0 ? null : (
         <ul aria-label="claude.ai connectors" className="pb-1">
           {sections.connectors.map((row) => (
@@ -365,15 +366,20 @@ function McpServersSection({
 
 function ConnectorsMaster({
   group,
+  saved,
   staged,
   onStage,
 }: {
   group: ConnectorsGroup;
+  saved: ThreadToolOverrides;
   staged: ThreadToolOverrides;
   onStage: (value: ThreadToolOverrides) => void;
 }) {
-  // Set when switching off drops connectors chosen one by one, so the user sees it before saving.
-  const [reset, setReset] = useState(false);
+  // Switching off drops connectors chosen one by one, so the user sees it before saving. Choices
+  // made in this visit are tracked here; saved ones are read from the thread, so the notice is
+  // still there when the popover is reopened.
+  const [droppedUnsaved, setDroppedUnsaved] = useState(false);
+  const reset = droppedUnsaved || connectorsResetPending(group, saved, staged);
   return (
     <div className="border-t">
       <ToolSwitchRow
@@ -382,7 +388,7 @@ function ConnectorsMaster({
         estimatedTokens={CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS}
         on={connectorsOn(group.provider, staged)}
         onChange={(on) => {
-          setReset(!on && connectorsPartial(group, staged));
+          setDroppedUnsaved(!on && connectorsPartial(group, staged));
           onStage(withConnectorsMaster(staged, on, group));
         }}
         asListItem={false}

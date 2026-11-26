@@ -10,6 +10,7 @@ import {
   connectorsDescription,
   connectorsOn,
   connectorsPartial,
+  connectorsResetPending,
   EMPTY_TOOL_OVERRIDES,
   mcpServerSections,
   threadTurnRunning,
@@ -325,6 +326,15 @@ describe("MCP servers", () => {
         backgroundWork: false,
       }).kind,
     ).toBe("unchanged");
+  });
+
+  it("keeps the reset pending while saved connector choices would be dropped", () => {
+    const connectors = group(connectorsDefaultOn);
+    const saved = { ...EMPTY_TOOL_OVERRIDES, omittedMcpServers: ["claude.ai Fixture Mail"] };
+    const off = withConnectorsMaster(saved, false, connectors);
+    expect(connectorsResetPending(connectors, saved, off)).toBe(true);
+    expect(connectorsResetPending(connectors, saved, saved)).toBe(false);
+    expect(connectorsResetPending(connectors, EMPTY_TOOL_OVERRIDES, off)).toBe(false);
   });
 
   it("describes what the group has on and where that comes from", () => {

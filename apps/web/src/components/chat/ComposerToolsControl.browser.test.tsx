@@ -420,3 +420,24 @@ it("keeps Reload session in view while the lists scroll in a short window", asyn
   scroller.scrollTop = scroller.scrollHeight;
   expect(inView()).toBe(true);
 });
+
+it("still says the saved connector choices reset after the popover is closed and reopened", async () => {
+  setup();
+  const thread: ComposerToolsThread = {
+    ...idleThread,
+    toolOverrides: {
+      enabledBuiltinTools: [],
+      claudeAiConnectors: "default",
+      omittedMcpServers: ["claude.ai Fixture Mail"],
+    },
+  };
+  await using screen = await renderControl(thread, { ...provider, claudeAiConnectors: "on" });
+  const trigger = screen.getByRole("button", { name: /^Tools/ });
+  await userEvent.click(trigger);
+  const notice = () => dialogOf().getByText(/Connectors off, individual choices reset/);
+  await userEvent.click(dialogOf().getByRole("switch", { name: /claude\.ai connectors/ }));
+  await expect.element(notice()).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await userEvent.click(trigger);
+  await expect.element(notice()).toBeVisible();
+});
