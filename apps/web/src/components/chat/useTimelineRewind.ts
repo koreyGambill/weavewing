@@ -6,8 +6,6 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
-  isOrchestrationV2WorkActive,
-  latestProviderTurnForAttempt,
   type MessageId,
   type OrchestrationV2ForkHistoryPolicy,
   type ScopedThreadRef,
@@ -15,6 +13,10 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  rewindToReplyPointRefusal,
+  rewindToReplyThreadRefusal,
+} from "@t3tools/shared/orchestrationV2RewindToReply";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -83,98 +85,12 @@ function getRewindToReplyDisabledReason({
   if (!supportsRewindToReply) return () => "Update the environment to rewind to a reply.";
   if (activeEnvironmentUnavailable) return () => "Reconnect to this environment to rewind.";
   if (!serverProjection) return () => "Wait for the conversation to load.";
-  const {
-    thread,
-    runs,
-    attempts,
-    providerThreads,
-    providerTurns,
-    providerSessions,
-    turnItems,
-    runtimeRequests,
-    contextTransfers,
-    subagents,
-  } = serverProjection;
-  if (
-    isSendBusy ||
-    isRevertingCheckpoint ||
-    phase === "running" ||
-    runs.some((run) =>
-      ["queued", "preparing", "starting", "running", "waiting"].includes(run.status),
-    ) ||
-    runtimeRequests.some((request) => request.status === "pending") ||
-    contextTransfers.some(
-      (transfer) =>
-        transfer.type === "merge_back" &&
-        transfer.targetThreadId === thread.id &&
-        transfer.status === "pending",
-    ) ||
-    subagents.some((task) => isOrchestrationV2WorkActive(task.status))
-  ) {
-    return () => "Finish the current turn and queued work before rewinding.";
-  }
-  return (runId, messageId) => {
-    const run = runs.find((run) => run.id === runId);
-    const reply = turnItems.findLast(
-      (item) =>
-        item.runId === runId &&
-        item.type === "assistant_message" &&
-        item.phase !== "commentary" &&
-        item.phase !== "partial_answer",
-    );
-    if (
-      run?.status !== "completed" ||
-      reply?.type !== "assistant_message" ||
-      reply.messageId !== messageId ||
-      reply.streaming ||
-      reply.status !== "completed"
-    ) {
-      return "Choose the final reply of a completed turn.";
-    }
-    const laterRuns = runs.filter(
-      (later) =>
-        later.ordinal > run.ordinal && later.startedAt !== null && later.status !== "rolled_back",
-    );
-    if (laterRuns.length === 0) return "There is no later conversation to move.";
-    if (run.ordinal <= (thread.contextRewind?.runOrdinal ?? 0)) {
-      return "This reply belongs to an earlier conversation.";
-    }
-    const provider = providerThreads.find(
-      (provider) => provider.id === thread.activeProviderThreadId,
-    );
-    if (provider === undefined) return "Rewind to here needs the provider's saved conversation.";
-    if (provider.goal?.status === "active") return "Pause the active goal before rewinding.";
-    if (provider.pendingBackgroundTasks?.length)
-      return "Finish provider background work before rewinding.";
-    const attempt = attempts.find((attempt) => attempt.id === run.activeAttemptId);
-    const boundary =
-      latestProviderTurnForAttempt(providerTurns, run.activeAttemptId) ??
-      providerTurns.find((turn) => turn.id === attempt?.providerTurnId);
-    if (
-      run.providerThreadId !== provider.id ||
-      laterRuns.some((later) => later.providerThreadId !== provider.id) ||
-      provider.providerInstanceId !== thread.modelSelection.instanceId ||
-      provider.nativeThreadRef?.strength !== "strong" ||
-      provider.nativeThreadRef.nativeId === null ||
-      provider.providerSessionId === null ||
-      boundary?.status !== "completed" ||
-      reply.providerTurnId !== boundary.id ||
-      boundary.providerThreadId !== provider.id ||
-      boundary.nativeTurnRef?.nativeId == null
-    ) {
-      return "This reply and the later conversation need to share the active provider session and have a native turn boundary.";
-    }
-    const capabilities = providerSessions.find(
-      (session) => session.id === provider.providerSessionId,
-    )?.capabilities;
-    if (
-      capabilities &&
-      (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn)
-    ) {
-      return "This provider cannot fork its conversation at a reply.";
-    }
-    return null;
-  };
+  const busy = isSendBusy || isRevertingCheckpoint || phase === "running";
+  const threadRefusal = busy
+    ? "Finish the current turn and queued work before rewinding."
+    : rewindToReplyThreadRefusal(serverProjection);
+  if (threadRefusal !== null) return () => threadRefusal;
+  return (runId, messageId) => rewindToReplyPointRefusal(serverProjection, runId, messageId);
 }
 
 /**
