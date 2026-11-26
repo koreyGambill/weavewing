@@ -119,8 +119,9 @@ import { BookmarkRail } from "./BookmarkRail";
 import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTimelineRow";
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
 import { ThreadEvidenceTimelineRow } from "../evidence/ThreadEvidenceTimelineRow";
+import { ThreadTasksTimelineRow } from "../tasks/ThreadTasksTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
-import { qaRevealLandingId } from "../questions/questionReveal";
+import { qaRevealLandingId, taskRevealRef } from "../questions/questionReveal";
 import {
   scrollQuestionReferenceIntoRow,
   useQuestionReferenceReveal,
@@ -950,11 +951,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
   };
   useQuestionReveal(routeThreadKey, rows.length, (target) => {
     const landingId = qaRevealLandingId(target);
+    const taskRef = taskRevealRef(target);
     return revealRow(
       rows.findIndex((row) =>
-        landingId === null
-          ? row.kind === "thread-questions" && row.questionIds.includes(target)
-          : row.kind === "thread-evidence" && row.landingIds.includes(landingId),
+        taskRef !== null
+          ? row.kind === "thread-tasks" && row.taskRefs.includes(taskRef)
+          : landingId === null
+            ? row.kind === "thread-questions" && row.questionIds.includes(target)
+            : row.kind === "thread-evidence" && row.landingIds.includes(landingId),
       ),
     );
   });
@@ -1822,6 +1826,13 @@ function ThreadQuestionsRow({ questionIds }: { questionIds: ReadonlyArray<string
   ) : null;
 }
 
+function ThreadTasksRow({ taskRefs }: { taskRefs: ReadonlyArray<string> }) {
+  const ctx = use(TimelineRowCtx);
+  return ctx.threadRef ? (
+    <ThreadTasksTimelineRow threadRef={ctx.threadRef} taskRefs={taskRefs} />
+  ) : null;
+}
+
 function ThreadEvidenceRow({ landingIds }: { landingIds: ReadonlyArray<string> }) {
   const ctx = use(TimelineRowCtx);
   return ctx.threadRef ? (
@@ -1873,6 +1884,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "html-render" ||
                   row.kind === "sent-message" ||
                   row.kind === "thread-questions" ||
+                  row.kind === "thread-tasks" ||
                   row.kind === "thread-evidence" ||
                   row.kind === "question-dismissed" ||
                   row.kind === "mcp-app" ||
@@ -1929,6 +1941,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "thread-questions" ? (
         <ThreadQuestionsRow questionIds={row.questionIds} />
       ) : null}
+      {row.kind === "thread-tasks" ? <ThreadTasksRow taskRefs={row.taskRefs} /> : null}
       {row.kind === "thread-evidence" ? <ThreadEvidenceRow landingIds={row.landingIds} /> : null}
       {row.kind === "question-dismissed" ? (
         <QuestionDismissedRow questionId={row.questionId} title={row.title} />

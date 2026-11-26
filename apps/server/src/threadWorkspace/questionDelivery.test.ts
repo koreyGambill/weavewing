@@ -6,6 +6,7 @@ import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   type ArtifactAnswerContextRecord,
+  type WaitingItemContextRecord,
   type OrchestrationV2Run,
   type ThreadQuestion,
 } from "@t3tools/contracts";
@@ -51,7 +52,7 @@ const record = (
 });
 const message = (
   id: string,
-  records: ReadonlyArray<ArtifactAnswerContextRecord>,
+  records: ReadonlyArray<ArtifactAnswerContextRecord | WaitingItemContextRecord>,
   createdBy: "user" | "agent" = "user",
 ) => ({
   id: MessageId.make(id),
@@ -229,6 +230,33 @@ describe("questionDiscussions", () => {
     expect(
       discussed([question("Q1")], [m1], [run("r1", "m1", "running", { accepted: true })]),
     ).toEqual({ Q1: "m1:clear" });
+  });
+
+  it("keeps a question discussed through its card's Discuss reference while the message can reach the agent", () => {
+    const reference: WaitingItemContextRecord = {
+      version: 1,
+      kind: "waiting-item",
+      contextId: ComposerContextId.make("waiting-item_Q1"),
+      label: "Q1 · discuss · Q1",
+      itemKind: "question",
+      key: "Q1",
+      ref: "Q1",
+      title: "Q1",
+    };
+    const m1 = message("m1", [reference]);
+    const marked = question("Q1", { answer: null, discussedInMessageId: MessageId.make("m1") });
+    expect(discussed([marked], [m1], [run("r1", "m1", "queued")])).toEqual({ Q1: "m1" });
+    expect(discussed([marked], [m1], [run("r1", "m1", "completed", { accepted: true })])).toEqual({
+      Q1: "m1",
+    });
+    // A message that never started ends it, and a reference alone never starts one.
+    expect(discussed([marked], [m1], [run("r1", "m1", "cancelled")])).toEqual({});
+    expect(
+      discussed([question("Q1", { answer: null })], [m1], [run("r1", "m1", "queued")]),
+    ).toEqual({});
+    expect(
+      discussed([marked], [message("m1", [reference], "agent")], [run("r1", "m1", "queued")]),
+    ).toEqual({});
   });
 
   it("ends when the comment's turn ends before a provider accepted it", () => {

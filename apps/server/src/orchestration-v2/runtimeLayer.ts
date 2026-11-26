@@ -192,23 +192,6 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   ),
 );
 
-const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      ServerEnvironment.layerIdentity,
-      layerContextHandoffServiceProvided,
-      layerEventSink,
-      IdAllocator.layer,
-      ProjectionStore.layer,
-      layerProviderSessionManagerProvided,
-      layerProviderAuthServiceProvided,
-      layerRunExecutionServiceProvided,
-      layerRuntimePolicyProvided,
-      TurnItemPositionStore.layer,
-    ),
-  ),
-);
-
 const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -356,6 +339,25 @@ const layerThreadWorkspaceProvided = ThreadWorkspace.layer.pipe(
     ),
   ),
 );
+const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ServerEnvironment.layerIdentity,
+      layerContextHandoffServiceProvided,
+      layerEventSink,
+      IdAllocator.layer,
+      ProjectionStore.layer,
+      layerProviderSessionManagerProvided,
+      layerProviderAuthServiceProvided,
+      layerRunExecutionServiceProvided,
+      layerRuntimePolicyProvided,
+      TurnItemPositionStore.layer,
+      // Read for the lines naming what waits on the user ahead of a turn.
+      layerThreadWorkspaceProvided,
+    ),
+  ),
+);
+
 const layerMonitoringDeliveryProvided = MonitoringDelivery.layer.pipe(
   Layer.provide(layerThreadWorkspaceProvided),
   Layer.provide(layerThreadManagementProvided),

@@ -15,6 +15,7 @@ import { useWorkspaceMutationRefresh } from "../../hooks/useWorkspaceMutationRef
 import { useRightPanelStore } from "../../rightPanelStore";
 import { serverEnvironment } from "../../state/server";
 import { useSaveQuestionDraft, useThreadQuestionsWorkspace } from "../../state/threadQuestions";
+import { removeWaitingItemDiscusses, syncWaitingItemDiscusses } from "./waitingItemComposer";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
 import {
   addDraftedAnswersToComposer,
@@ -63,6 +64,7 @@ export function useWaitingOnYouStrip(input: {
   useEffect(() => {
     if (threadRef === null || workspace == null) return;
     syncQuestionAnswersInComposer(threadRef, workspace);
+    syncWaitingItemDiscusses(threadRef, workspace);
     reconcileQuestionNoteImages({
       threadRef,
       questions: workspace.questions,
@@ -77,7 +79,9 @@ export function useWaitingOnYouStrip(input: {
   )?.waitingCardsEnabled;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- question chips persist in the draft store across a settings change; turning waiting cards off takes them out so they never send
   useEffect(() => {
-    if (threadRef !== null && cardsEnabled === false) removeQuestionRecordsFromComposer(threadRef);
+    if (threadRef === null || cardsEnabled !== false) return;
+    removeQuestionRecordsFromComposer(threadRef);
+    removeWaitingItemDiscusses(threadRef);
   }, [threadRef, cardsEnabled]);
   if (threadRef === null || !enabled) return null;
   const summary = waitingStripSummary(input.waiting, input.waitingCounts);

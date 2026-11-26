@@ -193,11 +193,14 @@ it.effect(
         },
         "agent",
       );
-      yield* h.workspace.update({
-        threadId: tasked,
-        expectedRevision: 0,
-        changes: [{ text: "Rotate the staging webhook secret", owner: "you" }],
-      });
+      yield* h.workspace.update(
+        {
+          threadId: tasked,
+          expectedRevision: 0,
+          changes: [{ text: "Rotate the staging webhook secret", owner: "you" }],
+        },
+        { by: "user" },
+      );
       h.qa.set(asked, [
         { kind: "qa", ref: "QA1", key: "landing-1/toast", title: "Toast count", state: "open" },
       ]);
@@ -262,11 +265,14 @@ it.effect("rebuilds a thread whenever its questions, tasks or QA change", () =>
     yield* settle;
     expect(counts()).toMatchObject({ question: 1, qa: 0, task: 0 });
 
-    yield* h.workspace.update({
-      threadId,
-      expectedRevision: (yield* h.workspace.get({ threadId })).revision,
-      changes: [{ text: "Approve the vendor account", owner: "you" }],
-    });
+    yield* h.workspace.update(
+      {
+        threadId,
+        expectedRevision: (yield* h.workspace.get({ threadId })).revision,
+        changes: [{ text: "Approve the vendor account", owner: "you" }],
+      },
+      { by: "user" },
+    );
     yield* settle;
     expect(counts()).toMatchObject({ question: 1, qa: 0, task: 1 });
 

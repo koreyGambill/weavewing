@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as EvidenceService from "../evidence/EvidenceService.ts";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 
 import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
@@ -94,29 +95,47 @@ const withGuestAttachments = Effect.fn("ThreadMessageIntake.withGuestAttachments
   return { ...command, attachments: message?.attachments ?? [] };
 });
 
-/** The QA changes a user's message discusses, from the Discuss references it carries. */
-function discussedQaChanges(context: OrchestrationMessageContext | undefined) {
-  return (context?.records ?? []).flatMap((record) => {
-    if (record.kind !== "waiting-item" || !("itemKind" in record)) return [];
-    const slash = record.key.indexOf("/");
-    return slash > 0
-      ? [{ landingId: record.key.slice(0, slash), changeId: record.key.slice(slash + 1) }]
-      : [];
-  });
+/** The keys of one kind of waiting item a user's message discusses, from its Discuss references. */
+function discussedKeys(
+  context: OrchestrationMessageContext | undefined,
+  itemKind: "question" | "qa" | "task",
+) {
+  return (context?.records ?? []).flatMap((record) =>
+    record.kind === "waiting-item" && "itemKind" in record && record.itemKind === itemKind
+      ? [record.key]
+      : [],
+  );
 }
 
 // Discussing is a display mirror the next user action clears, so a failed write is only logged.
-const markDiscussed = (command: Extract<OrchestrationV2Command, { type: "message.dispatch" }>) => {
-  const changes = discussedQaChanges(command.context);
-  if (changes.length === 0 || command.createdBy !== "user" || command.origin.kind !== "user")
-    return Effect.void;
-  return EvidenceService.EvidenceService.pipe(
-    Effect.flatMap((evidence) =>
-      evidence.markDiscussed({ threadId: command.threadId, messageId: command.messageId, changes }),
-    ),
-    Effect.catch((error) => Effect.logWarning("Could not mark QA as discussed", error)),
-  );
-};
+const markDiscussed = Effect.fn("ThreadMessageIntake.markDiscussed")(function* (
+  command: Extract<OrchestrationV2Command, { type: "message.dispatch" }>,
+) {
+  if (command.createdBy !== "user" || command.origin.kind !== "user") return;
+  const target = { threadId: command.threadId, messageId: command.messageId };
+  const changes = discussedKeys(command.context, "qa").flatMap((key) => {
+    const slash = key.indexOf("/");
+    return slash > 0 ? [{ landingId: key.slice(0, slash), changeId: key.slice(slash + 1) }] : [];
+  });
+  if (changes.length > 0) {
+    const evidence = yield* EvidenceService.EvidenceService;
+    yield* evidence
+      .markDiscussed({ ...target, changes })
+      .pipe(Effect.catch((error) => Effect.logWarning("Could not mark QA as discussed", error)));
+  }
+  const questionIds = discussedKeys(command.context, "question");
+  const taskIds = discussedKeys(command.context, "task");
+  if (questionIds.length > 0 || taskIds.length > 0) {
+    const workspace = yield* ThreadWorkspace;
+    yield* workspace
+      .markDiscussed({ ...target, questionIds, taskIds })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not mark questions or tasks as discussed", error),
+        ),
+      );
+  }
+});
 
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
   incoming: OrchestrationV2Command,

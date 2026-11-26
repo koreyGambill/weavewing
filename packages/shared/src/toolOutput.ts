@@ -29,6 +29,8 @@ const QUESTION_ASK_TOOL_NAME = "question_ask";
 // Review tools have no presentation entry, so the T3 server prefix is matched here.
 const EVIDENCE_RECORD_TOOL =
   /^(?:(?:mcp__)?t3[-_]?code(?:[-_]direct)?(?:__|[.:/_]))?evidence_record$/i;
+const LIST_WRITE_TOOL =
+  /^(?:(?:mcp__)?t3[-_]?code(?:[-_]direct)?(?:__|[.:/_]))?list_(?:update|rewrite)$/i;
 const EVIDENCE_SLUG = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const MAX_CONTENT_BLOCKS = 32;
 const MAX_ENVELOPE_DEPTH = 4;
@@ -71,6 +73,8 @@ interface CompactToolOutput {
   questionIds?: string[];
   /** The landing `evidence_record` stored, so clients place its QA cards at the call. */
   landingId?: string;
+  /** The user tasks a `list_update` or `list_rewrite` call filed, so clients place their cards. */
+  filedTasks?: string[];
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -283,6 +287,17 @@ export function compactDynamicToolOutput(
     ) {
       output.questionIds = questionIds;
     }
+    const filedTasks = data.filedTasks;
+    if (
+      toolName != null &&
+      LIST_WRITE_TOOL.test(toolName) &&
+      Array.isArray(filedTasks) &&
+      filedTasks.length > 0 &&
+      filedTasks.length <= MAX_THREADS &&
+      filedTasks.every((ref) => typeof ref === "string" && /^T\d{1,9}$/.test(ref))
+    ) {
+      output.filedTasks = filedTasks;
+    }
     if (
       toolName != null &&
       EVIDENCE_RECORD_TOOL.test(toolName) &&
@@ -387,6 +402,16 @@ export function questionIdsFromToolItem(item: {
   if (resolveT3McpToolId(item.toolName) !== QUESTION_ASK_TOOL_NAME) return [];
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? [] : (output?.questionIds ?? []);
+}
+
+/** The user tasks a list write filed; empty when it failed, filed none or is another tool. */
+export function filedTasksFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): ReadonlyArray<string> {
+  if (item.toolName == null || !LIST_WRITE_TOOL.test(item.toolName)) return [];
+  const output = compactDynamicToolOutput(item.output, item.toolName);
+  return output?.isError ? [] : (output?.filedTasks ?? []);
 }
 
 /** The landing an `evidence_record` call stored; undefined when it failed or is another tool. */

@@ -47,6 +47,28 @@ describe("projectComposerContextForProvider with a Discuss reference", () => {
       "About QA1 (landing 3f2a91c, change toast-retry-count): Toast shows the retry count\n\nThe count overlaps the close button.",
     );
   });
+
+  it("names a question or task by its ref and kind", () => {
+    for (const [itemKind, ref, title] of [
+      ["question", "Q3", "Retry backoff cap"],
+      ["task", "T2", "Rotate the staging webhook secret"],
+    ] as const) {
+      const reference: ComposerContextRecord = {
+        version: 1,
+        kind: "waiting-item",
+        contextId: ctx(`waiting-item_${ref}`),
+        label: `${ref} · discuss · ${title}`,
+        itemKind,
+        key: itemKind === "task" ? "task-1" : ref,
+        ref,
+        title,
+      };
+      const text = `${formatComposerContextReference(reference)} Can this wait?`;
+      expect(projectComposerContextForProvider({ text, records: [reference] })).toBe(
+        `About ${ref} (${itemKind}): ${title}\n\nCan this wait?`,
+      );
+    }
+  });
 });
 
 describe("href codec", () => {

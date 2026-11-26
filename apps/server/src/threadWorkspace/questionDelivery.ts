@@ -39,6 +39,19 @@ export function runsWithProviderTurn(
 
 type Reach = "none" | "sent" | "received";
 
+/** Whether the user's message carries a card's Discuss reference to this question. */
+const discussesQuestion = (message: Message, questionId: string) =>
+  message.role === "user" &&
+  message.createdBy === "user" &&
+  (message.context?.records.some(
+    (record) =>
+      record.kind === "waiting-item" &&
+      "itemKind" in record &&
+      record.itemKind === "question" &&
+      record.key === questionId,
+  ) ??
+    false);
+
 function runReach(
   run: Run,
   runs: ReadonlyArray<Run>,
@@ -164,7 +177,15 @@ export function questionDiscussions(
       message.id === question.discussedInMessageId &&
       (((answer === null || answer.notes === "") && commentOf(message) !== undefined) ||
         recordOf(message, THREAD_QUESTIONS_ARTIFACT_ID) !== undefined);
-    let found: QuestionDiscussion | undefined;
+    // A Discuss reference keeps the question discussing while its message can still reach the agent.
+    const referenced = messages.find(
+      (message) =>
+        message.id === question.discussedInMessageId &&
+        discussesQuestion(message, question.id) &&
+        messageReach(message, runs, accepted) !== "none",
+    );
+    let found: QuestionDiscussion | undefined =
+      referenced === undefined ? undefined : { messageId: referenced.id, clearNote: false };
     for (const message of messages) {
       const current = isCurrent(message);
       if (!current && !consumed(message)) continue;

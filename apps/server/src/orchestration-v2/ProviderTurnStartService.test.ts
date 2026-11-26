@@ -26,7 +26,11 @@ import {
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
   waitingMirror,
+  type ListItem,
+  type ThreadQuestion,
 } from "@t3tools/contracts";
+import * as EvidenceService from "../evidence/EvidenceService.ts";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -513,6 +517,13 @@ function makeLocalCommandHarness(input: {
   readonly waiting?: OrchestrationV2ThreadProjection["thread"]["waiting"];
   /** The thread's MCP session holds the `questions` capability. */
   readonly questionTools?: boolean;
+  /** The thread's questions and user tasks, as the workspace store holds them. */
+  readonly waitingWork?: {
+    readonly questions?: ReadonlyArray<ThreadQuestion>;
+    readonly tasks?: ReadonlyArray<ListItem>;
+  };
+  /** The thread's QA changes the evidence store returns for the turn. */
+  readonly qa?: ReadonlyArray<EvidenceService.QaForTurn>;
   readonly sideChatRefresh?: string;
   readonly origin?: TurnOrigin;
   readonly discovery?: Discovery.DevelopmentEnvironmentDiscovery["Service"];
@@ -1385,6 +1396,20 @@ function makeLocalCommandHarness(input: {
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
         }),
+        input.waitingWork === undefined
+          ? Layer.empty
+          : Layer.mock(ThreadWorkspace)({
+              waitingWork: () =>
+                Effect.succeed({
+                  questions: input.waitingWork?.questions ?? [],
+                  tasks: input.waitingWork?.tasks ?? [],
+                }),
+            }),
+        input.qa === undefined
+          ? Layer.empty
+          : Layer.mock(EvidenceService.EvidenceService)({
+              qaForTurn: () => Effect.succeed(input.qa ?? []),
+            }),
         input.discovery === undefined
           ? Layer.empty
           : Layer.succeed(Discovery.DevelopmentEnvironmentDiscovery, input.discovery),
@@ -2399,6 +2424,49 @@ effectIt.effect("includes a persisted newest-context snapshot in the provider in
   }),
 );
 
+const waitingQuestion = (id: string, patch: Partial<ThreadQuestion> = {}): ThreadQuestion => ({
+  id,
+  prompt: `${id} prompt?`,
+  options: [],
+  recommendedOptionIds: [],
+  multiSelect: false,
+  state: "open",
+  createdAt: "2026-09-04T09:00:00.000Z",
+  closedAt: null,
+  answer: null,
+  answeredBy: null,
+  replacedBy: null,
+  ...patch,
+});
+const userTask = (ref: string, patch: Partial<ListItem> = {}): ListItem => ({
+  id: `task-${ref}`,
+  text: `${ref} task`,
+  state: "open",
+  owner: "you",
+  createdAt: "2026-09-04T09:00:00.000Z",
+  doneAt: null,
+  details: "",
+  parentId: null,
+  links: [],
+  ref,
+  ...patch,
+});
+const qaChange = (
+  ref: string,
+  patch: Partial<EvidenceService.QaForTurn> = {},
+): EvidenceService.QaForTurn => ({
+  ref,
+  title: `${ref} change`,
+  state: "pending",
+  note: "",
+  by: "server",
+  discussed: false,
+  updatedAt: "2026-09-04T09:00:00.000Z",
+  ...patch,
+});
+const WAITING_PREFIX =
+  "Waiting on the user, who already sees these, so leave them out of your reply unless this message is about one: ";
+
 effectIt.effect.each([
   { name: "a user message", enabled: true, expected: true },
   {
@@ -2412,19 +2480,17 @@ effectIt.effect.each([
     expected: false,
     origin: { kind: "scheduled-task", title: "Nightly" },
   },
-] as const)("lists open questions ahead of $name only when the user spoke", (input) =>
+] as const)("lists what waits on the user ahead of $name only when the user spoke", (input) =>
   Effect.gen(function* () {
     const harness = makeLocalCommandHarness({
       text: "My own prompt",
       sideChat: { contextRun: "delivered" },
       questionTools: input.enabled,
-      waiting: [
-        { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "open" },
-        { kind: "question", ref: "Q2", key: "Q2", title: "Flag name?", state: "deferred" },
-        // QA changes and tasks reach the agent on their own lines, not as questions.
-        { kind: "qa", ref: "QA1", key: "l1/c1", title: "Toast count", state: "open" },
-        { kind: "task", ref: "T1", key: "task-1", title: "Rotate the secret", state: "open" },
-      ],
+      waitingWork: {
+        questions: [waitingQuestion("Q1"), waitingQuestion("Q2", { state: "deferred" })],
+        tasks: [userTask("T1"), userTask("T2", { owner: "agent" })],
+      },
+      qa: [qaChange("QA1")],
       ...("origin" in input ? { origin: input.origin } : {}),
     });
     yield* harness.start;
@@ -2432,143 +2498,131 @@ effectIt.effect.each([
     if (input.expected)
       expect(text).toBe(
         withInlineContext(
-          "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q2 Flag name? (deferred; reopen it if this task settles or describes it)",
+          `${WAITING_PREFIX}Q1 Q1 prompt?; Q2 Q2 prompt? (deferred; reopen it if this task settles or describes it); QA1 QA1 change; T1 T1 task`,
           "My own prompt",
         ),
       );
-    else expect(text).not.toContain("open questions");
+    else expect(text).not.toContain("Waiting on the user");
   }),
 );
 
-effectIt.effect("marks a question the user is discussing in the open questions line", () =>
+effectIt.effect("marks what the user is discussing, keeping the question reminder", () =>
   Effect.gen(function* () {
+    const discussed = MessageId.make("message-discuss");
     const harness = makeLocalCommandHarness({
       text: "My own prompt",
       sideChat: { contextRun: "delivered" },
       questionTools: true,
-      waiting: [
-        { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "discussing" },
-        {
-          kind: "question",
-          ref: "Q2",
-          key: "Q2",
-          title: "Flag name?",
-          state: "discussing",
-          deferred: true,
-        },
-      ],
+      waitingWork: {
+        questions: [
+          waitingQuestion("Q1", { discussedInMessageId: discussed }),
+          waitingQuestion("Q2", { state: "deferred", discussedInMessageId: discussed }),
+        ],
+        tasks: [userTask("T1", { discussedInMessageId: discussed })],
+      },
+      qa: [qaChange("QA1", { discussed: true })],
     });
     yield* harness.start;
     // A deferred question the user is discussing keeps its deferred note beside the reminder.
     expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
       withInlineContext(
-        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Flag name? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)",
+        `${WAITING_PREFIX}Q1 Q1 prompt? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Q2 prompt? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open); QA1 QA1 change (discussing); T1 T1 task (discussing)`,
         "My own prompt",
       ),
     );
   }),
 );
 
-effectIt.effect("lists every question with its reminders behind more than 30 other items", () =>
+effectIt.effect("counts every waiting item from the stores, not the capped mirror", () =>
   Effect.gen(function* () {
-    const tasks = Array.from({ length: 31 }, (_, index) => ({
-      kind: "task" as const,
-      ref: `T${index + 1}`,
-      key: `task-${index + 1}`,
-      title: `Task ${index + 1}`,
-      state: "open" as const,
-    }));
-    const qa = Array.from({ length: 5 }, (_, index) => ({
-      kind: "qa" as const,
-      ref: `QA${index + 1}`,
-      key: `landing/${index + 1}`,
-      title: `Change ${index + 1}`,
-      state: "open" as const,
-    }));
+    const tasks = Array.from({ length: 31 }, (_, index) => userTask(`T${index + 1}`));
     const harness = makeLocalCommandHarness({
       text: "My own prompt",
       sideChat: { contextRun: "delivered" },
       questionTools: true,
-      // The mirror the orchestrator stores; only the display caps rows.
-      waiting: waitingMirror([
-        ...tasks,
-        ...qa,
-        {
-          kind: "question",
-          ref: "Q1",
-          key: "Q1",
-          title: "Flag name?",
-          state: "discussing",
-          deferred: true,
-        },
-        { kind: "question", ref: "Q2", key: "Q2", title: "Which database?", state: "open" },
-        {
-          kind: "question",
-          ref: "Q3",
-          key: "Q3",
-          title: "Ship it?",
-          state: "open",
-          sent: true,
-        },
-      ]).waiting,
+      // The mirror the orchestrator stores caps task rows; the line never reads it.
+      waiting: waitingMirror(
+        tasks.map((task) => ({
+          kind: "task" as const,
+          ref: task.ref ?? "",
+          key: task.id,
+          title: task.text,
+          state: "open" as const,
+        })),
+      ).waiting,
+      waitingWork: {
+        questions: [
+          waitingQuestion("Q1"),
+          waitingQuestion("Q2", { sentInMessageId: MessageId.make("message-answer") }),
+        ],
+        tasks,
+      },
+      qa: Array.from({ length: 5 }, (_, index) => qaChange(`QA${index + 1}`)),
     });
     yield* harness.start;
+    // One question, five QA changes and 31 tasks wait; the answered question rides a message.
     expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
       withInlineContext(
-        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Flag name? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Which database?",
+        `${WAITING_PREFIX}Q1 Q1 prompt?; QA1 QA1 change; QA2 QA2 change; QA3 QA3 change; QA4 QA4 change; QA5 QA5 change; T1 T1 task; T2 T2 task; T3 T3 task; T4 T4 task; and 27 more`,
         "My own prompt",
       ),
     );
   }),
 );
 
-effectIt.effect(
-  "tells the agent which questions the user changed since the previous user message",
-  () =>
-    Effect.gen(function* () {
-      const harness = makeLocalCommandHarness({
-        text: "My own prompt",
-        sideChat: { contextRun: "delivered" },
-        questionTools: true,
-        previousUserMessageAt: "2026-09-04T11:00:00Z",
-        waiting: [
-          { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "open" },
-          {
-            kind: "question",
-            ref: "Q2",
-            key: "Q2",
-            title: "Old news?",
-            state: "dismissed",
-            settledBy: "user",
-            userChangedAt: "2026-09-04T10:30:00.000Z",
-          },
-          {
-            kind: "question",
-            ref: "Q3",
-            key: "Q3",
-            title: "Flag name?",
-            state: "dismissed",
-            settledBy: "user",
-            userChangedAt: "2026-09-04T11:30:00.000Z",
-          },
-          {
-            kind: "question",
-            ref: "Q4",
-            key: "Q4",
-            title: "Ship?",
-            state: "deferred",
-            userChangedAt: "2026-09-04T11:40:00.000Z",
-          },
+effectIt.effect("names a QA problem the agent owes a fix for on a turn without the user", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Nightly check",
+      sideChat: { contextRun: "delivered" },
+      questionTools: true,
+      origin: { kind: "scheduled-task", title: "Nightly" },
+      waitingWork: { tasks: [userTask("T1")] },
+      qa: [qaChange("QA3", { state: "problem", note: "count overlaps the close button" })],
+    });
+    yield* harness.start;
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    expect(text).toContain(
+      'QA problems you owe a fix for: QA3 QA3 change: "count overlaps the close button"',
+    );
+    expect(text).not.toContain("Waiting on the user");
+  }),
+);
+
+effectIt.effect("tells the agent what the user changed since the previous user message", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      questionTools: true,
+      previousUserMessageAt: "2026-09-04T11:00:00Z",
+      waitingWork: {
+        questions: [
+          waitingQuestion("Q1"),
+          waitingQuestion("Q2", { state: "withdrawn", userChangedAt: "2026-09-04T10:30:00.000Z" }),
+          waitingQuestion("Q3", { state: "withdrawn", userChangedAt: "2026-09-04T11:30:00.000Z" }),
+          waitingQuestion("Q4", { state: "deferred", userChangedAt: "2026-09-04T11:40:00.000Z" }),
         ],
-      });
-      yield* harness.start;
-      expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
-        withInlineContext(
-          "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4.\nYour open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q4 Ship? (deferred; reopen it if this task settles or describes it)",
-          "My own prompt",
-        ),
-      );
-    }),
+        tasks: [
+          userTask("T2", {
+            state: "done",
+            settledBy: "user",
+            userChangedAt: "2026-09-04T11:45:00.000Z",
+          }),
+        ],
+      },
+      qa: [
+        qaChange("QA1", { state: "confirmed", by: "user", updatedAt: "2026-09-04T11:50:00.000Z" }),
+      ],
+    });
+    yield* harness.start;
+    expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
+      withInlineContext(
+        `Since your last message the user confirmed QA1; marked T2 done; withdrew Q3 (Q3 prompt?); deferred Q4.\n${WAITING_PREFIX}Q1 Q1 prompt?; Q4 Q4 prompt? (deferred; reopen it if this task settles or describes it)`,
+        "My own prompt",
+      ),
+    );
+  }),
 );
 
 effectIt.effect.each([

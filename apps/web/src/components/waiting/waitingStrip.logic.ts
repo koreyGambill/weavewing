@@ -4,6 +4,8 @@ import {
   type WaitingCounts,
   type WaitingItemKind,
   type WaitingItemSummary,
+  type ThreadWorkspace,
+  type WaitingItemContextRecord,
 } from "@t3tools/contracts";
 
 const WAITING_KINDS: ReadonlyArray<WaitingItemKind> = ["question", "qa", "task"];
@@ -110,3 +112,29 @@ export const waitingRefreshKey = (waiting: ReadonlyArray<WaitingItemSummary> | u
     .filter((item) => item.kind !== "qa")
     .map((item) => `${item.ref}:${item.state}:${item.sent === true}`)
     .join(",");
+
+/**
+ * The composer's Discuss references without those for questions and tasks that no longer wait
+ * on the user, read from a workspace snapshot; null when every reference still applies. QA
+ * references are left alone, since the workspace does not hold QA.
+ */
+export function discussesStillWaiting(
+  records: ReadonlyArray<WaitingItemContextRecord>,
+  workspace: Pick<ThreadWorkspace, "questions" | "items">,
+): WaitingItemContextRecord[] | null {
+  const kept = records.filter((record) => {
+    if (record.itemKind === "question")
+      return workspace.questions.some(
+        (question) =>
+          question.id === record.key &&
+          (question.state === "open" || question.state === "deferred") &&
+          question.sentInMessageId === undefined,
+      );
+    if (record.itemKind === "task")
+      return workspace.items.some(
+        (item) => item.id === record.key && item.owner === "you" && item.state === "open",
+      );
+    return true;
+  });
+  return kept.length === records.length ? null : kept;
+}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   compactDynamicToolOutput,
   evidenceLandingIdFromToolItem,
+  filedTasksFromToolItem,
   MAX_TOOL_OUTPUT_IMAGES,
   mcpToolResultOutput,
   questionIdsFromToolItem,
@@ -69,6 +70,19 @@ describe("compactDynamicToolOutput", () => {
         output: { isError: true, content: "Duplicate change id: a" },
       }),
     ).toBeUndefined();
+  });
+
+  it("keeps the user tasks a list write filed so their cards can sit at the call", () => {
+    const result = { revision: 4, items: [{ id: "a", text: "Private" }], filedTasks: ["T2"] };
+    const output = [{ type: "text", text: JSON.stringify(result) }];
+    const compact = compactDynamicToolOutput(output, "mcp__t3-code__list_update");
+    expect(compact).toEqual({ filedTasks: ["T2"] });
+    expect(
+      filedTasksFromToolItem({ toolName: "mcp__t3-code__list_update", output: compact }),
+    ).toEqual(["T2"]);
+    expect(filedTasksFromToolItem({ toolName: "list_rewrite", output: result })).toEqual(["T2"]);
+    expect(compactDynamicToolOutput(output, "list_read")).toBeUndefined();
+    expect(compactDynamicToolOutput({ filedTasks: ["Q1"] }, "list_update")).toBeUndefined();
   });
 
   it("keeps nested thread identity and scalar task IDs without result bodies", () => {

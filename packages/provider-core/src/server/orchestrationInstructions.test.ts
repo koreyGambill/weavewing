@@ -9,8 +9,7 @@ import {
   T3_CODE_ORCHESTRATION_SECTIONS,
   T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
   t3AcpPromptWithInstructions,
-  t3OpenQuestionsContext,
-  t3QuestionChangesContext,
+  t3WaitingContext,
   t3OrchestrationPrompt,
   t3OrchestrationSystemPrompt,
 } from "./orchestrationInstructions.ts";
@@ -79,50 +78,93 @@ describe("T3 question instructions", () => {
     );
   });
 
-  it("lists waiting questions on one line and deferred ones marked", () => {
-    assert.equal(t3OpenQuestionsContext([]), "");
+  it("lists waiting items on one line, keeping the question notes word for word", () => {
+    assert.equal(t3WaitingContext({}), "");
+    const prefix =
+      "Waiting on the user, who already sees these, so leave them out of your reply unless this message is about one: ";
     assert.equal(
-      t3OpenQuestionsContext([
-        { id: "Q1", title: "Which database?", state: "open" },
-        { id: "Q3", title: "Flag name?", state: "deferred" },
-      ]),
-      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q3 Flag name? (deferred; reopen it if this task settles or describes it)",
+      t3WaitingContext({
+        waiting: [
+          { kind: "question", ref: "Q1", title: "Which database?", state: "open" },
+          { kind: "question", ref: "Q3", title: "Flag name?", state: "deferred" },
+          { kind: "qa", ref: "QA1", title: "Toast shows the retry count", state: "open" },
+          { kind: "task", ref: "T2", title: "Rotate the webhook secret", state: "discussing" },
+        ],
+      }),
+      `${prefix}Q1 Which database?; Q3 Flag name? (deferred; reopen it if this task settles or describes it); QA1 Toast shows the retry count; T2 Rotate the webhook secret (discussing)`,
     );
-    assert.equal(t3OpenQuestionsContext([{ id: "Q2", title: "Gone?", state: "withdrawn" }]), "");
     assert.equal(
-      t3OpenQuestionsContext([
-        { id: "Q2", title: "Cache size?", state: "open", discussing: true },
-        { id: "Q4", title: "Region?", state: "deferred", discussing: true },
-      ]),
-      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q2 Cache size? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q4 Region? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)",
+      t3WaitingContext({
+        waiting: [
+          { kind: "question", ref: "Q2", title: "Cache size?", state: "discussing" },
+          { kind: "question", ref: "Q4", title: "Region?", state: "discussing", deferred: true },
+        ],
+      }),
+      `${prefix}Q2 Cache size? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q4 Region? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)`,
     );
     // A message already carries the answer, so the question no longer waits on the user.
     assert.equal(
-      t3OpenQuestionsContext([
-        { id: "Q1", title: "Which database?", state: "open", sent: true },
-        { id: "Q3", title: "Flag name?", state: "deferred", sent: true },
-      ]),
+      t3WaitingContext({
+        waiting: [{ kind: "question", ref: "Q1", title: "Which?", state: "open", sent: true }],
+      }),
       "",
     );
   });
 
-  it("names the questions the user withdrew, deferred or reopened after the last user turn", () => {
-    const questions = [
-      { id: "Q1", title: "Which database?", state: "open", userChangedAt: "2026-01-01T00:00:05Z" },
-      { id: "Q2", title: "Old?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:01Z" },
-      { id: "Q3", title: "Flag name?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:06Z" },
-      { id: "Q4", title: "Ship?", state: "deferred", userChangedAt: "2026-01-01T00:00:07Z" },
-      { id: "Q5", title: "Agent only", state: "open" },
-    ] as const;
+  it("caps each list at ten and counts the rest exactly", () => {
+    const waiting = Array.from({ length: 13 }, (_, index) => ({
+      kind: "task" as const,
+      ref: `T${index + 1}`,
+      title: `Task ${index + 1}`,
+      state: "open" as const,
+    }));
+    const line = t3WaitingContext({ waiting });
+    assert.include(line, "T10 Task 10; and 3 more");
+    assert.notInclude(line, "T11");
+    const problems = Array.from({ length: 11 }, (_, index) => ({
+      ref: `QA${index + 1}`,
+      title: `Change ${index + 1}`,
+      note: "still broken",
+    }));
+    assert.include(t3WaitingContext({ problems }), 'QA10 Change 10: "still broken"; and 1 more');
+    const changes = Array.from({ length: 12 }, (_, index) => ({
+      kind: "qa" as const,
+      ref: `QA${index + 1}`,
+      title: `Change ${index + 1}`,
+      change: "confirmed" as const,
+    }));
     assert.equal(
-      t3QuestionChangesContext(questions, Date.parse("2026-01-01T00:00:02Z")),
-      "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4; reopened Q1.",
+      t3WaitingContext({ changes }),
+      "Since your last message the user confirmed QA1, QA2, QA3, QA4, QA5, QA6, QA7, QA8, QA9, QA10; and 2 more.",
     );
+  });
+
+  it("merges what the user changed across kinds into one line, before the waiting line", () => {
     assert.equal(
-      t3QuestionChangesContext(questions, null),
-      "Since your last turn the user withdrew Q2 (Old?), Q3 (Flag name?); deferred Q4; reopened Q1.",
+      t3WaitingContext({
+        changes: [
+          { kind: "question", ref: "Q4", title: "Ship?", change: "withdrew" },
+          { kind: "task", ref: "T2", title: "Rotate the secret", change: "done" },
+          { kind: "qa", ref: "QA2", title: "Badge colour", change: "dismissed" },
+          { kind: "qa", ref: "QA1", title: "Toast count", change: "confirmed" },
+          { kind: "question", ref: "Q1", title: "Which?", change: "reopened" },
+          { kind: "task", ref: "T3", title: "Approve the account", change: "cancelled" },
+        ],
+        waiting: [{ kind: "question", ref: "Q1", title: "Which?", state: "open" }],
+        problems: [{ ref: "QA3", title: "Retry toast", note: "count overlaps the close button" }],
+      }),
+      [
+        "Since your last message the user confirmed QA1; dismissed QA2; marked T2 done; cancelled T3 (Approve the account); withdrew Q4 (Ship?); reopened Q1.",
+        "Waiting on the user, who already sees these, so leave them out of your reply unless this message is about one: Q1 Which?",
+        'QA problems you owe a fix for: QA3 Retry toast: "count overlaps the close button"',
+      ].join("\n"),
     );
-    assert.equal(t3QuestionChangesContext(questions, Date.parse("2026-01-01T00:00:07Z")), "");
+  });
+
+  it("keeps every orchestration section under Codex's entry limit", () => {
+    for (const section of T3_CODE_ORCHESTRATION_SECTIONS)
+      assert.isBelow(new TextEncoder().encode(section).byteLength, 4000);
+    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "## T3 Code tasks for the user");
   });
 });
 

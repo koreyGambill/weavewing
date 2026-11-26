@@ -31,11 +31,11 @@ vi.mock(import("../../state/evidence"), async (original) => {
     evidenceSetQa: { permissionAtom: () => Atom.make(true) } as never,
   };
 });
-vi.mock(import("../../state/threadWorkspace"), async (original) => {
+vi.mock(import("../../state/threadQuestions"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   return {
     ...(await original()),
-    threadListUpdate: { permissionAtom: () => Atom.make(true) } as never,
+    threadTaskUpdate: { permissionAtom: () => Atom.make(true) } as never,
   };
 });
 

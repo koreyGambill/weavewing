@@ -53,6 +53,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import { currentUserMessage, NEEDS_USER_MESSAGE } from "../orchestration-v2/currentUserMessage.ts";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
@@ -92,7 +93,17 @@ export interface LandingTarget {
   readonly remote: string | null;
 }
 
-export const AGENT_QA_NEEDS_USER_MESSAGE = "Only the user's message in this turn can settle this.";
+export const AGENT_QA_NEEDS_USER_MESSAGE = NEEDS_USER_MESSAGE;
+
+export interface QaForTurn {
+  readonly ref: string;
+  readonly title: string;
+  readonly state: EvidenceQaState;
+  readonly note: string;
+  readonly by: EvidenceQaBy;
+  readonly discussed: boolean;
+  readonly updatedAt: string;
+}
 
 export class EvidenceService extends Context.Service<
   EvidenceService,
@@ -126,6 +137,21 @@ export class EvidenceService extends Context.Service<
     readonly waitingQa: (
       threadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, EvidenceError>;
+    /**
+     * The user-authored message of the thread's current turn, or null: the only message an agent
+     * may record the user's outcome of a waiting item from, a QA change's or a user task's.
+     */
+    readonly turnUserMessage: (
+      threadId: ThreadId,
+    ) => Effect.Effect<MessageId | null, EvidenceError>;
+    /**
+     * The thread's QA changes an agent's turn names: each one still waiting on someone, and each
+     * one the user changed after `since` (every one the user changed when null).
+     */
+    readonly qaForTurn: (
+      threadId: ThreadId,
+      since: string | null,
+    ) => Effect.Effect<ReadonlyArray<QaForTurn>, EvidenceError>;
     /** Every thread showing a QA change that still waits on someone. */
     readonly waitingQaThreads: () => Effect.Effect<ReadonlyArray<ThreadId>, EvidenceError>;
     /** The thread showing each QA change that moved, as it moves. */
@@ -992,31 +1018,10 @@ const make = Effect.gen(function* () {
     return yield* writeQa({ ...input, by: "user", messageId: null });
   }, Effect.mapError(passStorage));
 
-  // The user-authored input message of the thread's current run, as the per-turn question line reads it.
-  const currentUserMessage = Effect.fnUntraced(function* (threadId: ThreadId) {
-    const [message] = yield* sql<{ readonly message_id: string }>`WITH run AS (
-          SELECT payload_json FROM orchestration_v2_projection_runs
-          WHERE thread_id = ${threadId} AND status IN ('starting', 'running', 'waiting')
-          ORDER BY ordinal DESC LIMIT 1),
-        input(message_id) AS (
-          SELECT json_extract(payload_json, '$.userMessageId') FROM run
-          UNION SELECT i.value FROM run, json_each(run.payload_json, '$.inputMessageIds') i)
-        SELECT m.message_id FROM orchestration_v2_projection_messages m
-        WHERE m.thread_id = ${threadId} AND m.message_id IN (SELECT message_id FROM input)
-          AND m.role = 'user'
-          AND json_extract(m.payload_json, '$.createdBy') = 'user'
-          AND coalesce(json_extract(m.payload_json, '$.origin.kind'), 'user') = 'user'
-          AND json_extract(m.payload_json, '$.scheduledTaskId') IS NULL
-          AND json_extract(m.payload_json, '$.senderThreadId') IS NULL
-          AND json_extract(m.payload_json, '$.linkedSender') IS NULL
-          AND json_extract(m.payload_json, '$.delegatedCompletion') IS NULL
-          AND json_extract(m.payload_json, '$.context.guest') IS NULL
-        ORDER BY m.created_at DESC LIMIT 1`;
-    return message?.message_id ?? null;
-  });
-
   const agentSetQa = Effect.fn("EvidenceService.agentSetQa")(function* (input: AgentSetQaInput) {
-    const messageId = yield* currentUserMessage(input.threadId);
+    const messageId = yield* currentUserMessage(input.threadId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
     if (messageId === null) return yield* invalid(AGENT_QA_NEEDS_USER_MESSAGE);
     const [landing] = yield* sql<{
       readonly qa_thread_id: string | null;
@@ -1117,6 +1122,46 @@ const make = Effect.gen(function* () {
       const change = records.get(landingId)?.changes.find((entry) => entry.id === changeId);
       return { ...item, title: threadQuestionTitle(change?.summary || change?.ask || changeId) };
     });
+  }, Effect.mapError(passStorage));
+
+  const turnUserMessage = Effect.fn("EvidenceService.turnUserMessage")(function* (
+    threadId: ThreadId,
+  ) {
+    return yield* currentUserMessage(threadId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
+  }, Effect.mapError(storage));
+
+  const qaForTurn = Effect.fn("EvidenceService.qaForTurn")(function* (
+    threadId: ThreadId,
+    since: string | null,
+  ) {
+    const rows = yield* sql<
+      QaRow & { readonly record_json: string }
+    >`SELECT q.landing_id, q.change_id, q.state, q.note, q.updated_at, q.by, q.ref,
+          q.discussed_message_id, l.record_json
+        FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+        WHERE coalesce(l.qa_thread_id, l.thread_id) = ${threadId}
+          AND (q.state IN ('pending', 'problem') OR (q.by = 'user' AND q.state != 'quiet'
+            AND (${since} IS NULL OR julianday(q.updated_at) > julianday(${since}))))
+        ORDER BY q.ref, l.landed_at, q.landing_id, q.change_id`;
+    const records = new Map<string, EvidenceRecord>();
+    const items: QaForTurn[] = [];
+    for (const row of rows) {
+      const record = records.get(row.landing_id) ?? (yield* decodeRecord(row.record_json));
+      records.set(row.landing_id, record);
+      const change = record.changes.find((entry) => entry.id === row.change_id);
+      items.push({
+        ref: `QA${row.ref ?? ""}`,
+        title: threadQuestionTitle(change?.summary || change?.ask || row.change_id),
+        state: row.state,
+        note: row.note,
+        by: row.by,
+        discussed: row.discussed_message_id !== null,
+        updatedAt: row.updated_at,
+      });
+    }
+    return items;
   }, Effect.mapError(passStorage));
 
   const waitingQaThreads = Effect.fn("EvidenceService.waitingQaThreads")(function* () {
@@ -1456,6 +1501,8 @@ const make = Effect.gen(function* () {
     markDiscussed,
     bulkSetQa,
     waitingQa,
+    qaForTurn,
+    turnUserMessage,
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),
     landingTarget,

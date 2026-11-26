@@ -269,19 +269,20 @@ export const ResponseContextRecord = Schema.Struct({
 export type ResponseContextRecord = typeof ResponseContextRecord.Type;
 
 /**
- * Something waiting on the user that their message is about, added by a card's Discuss. Only QA
- * changes use it so far; `key` is `<landingId>/<changeId>`.
+ * Something waiting on the user that their message is about, added by a card's Discuss. `key` is
+ * `<landingId>/<changeId>` for a QA change, the question id for a question, and the list item id
+ * for a user task.
  */
 export const WaitingItemContextRecord = Schema.Struct({
   ...recordBase,
   kind: Schema.Literal("waiting-item"),
-  itemKind: Schema.Literal("qa"),
+  itemKind: Schema.Literals(["question", "qa", "task"]),
   key: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
   /** The thread's display reference, such as QA3. */
   ref: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
   title: ShortString,
-  /** The landing's target commit. */
-  sha: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  /** A QA change's landing target commit. */
+  sha: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
 export type WaitingItemContextRecord = typeof WaitingItemContextRecord.Type;
 

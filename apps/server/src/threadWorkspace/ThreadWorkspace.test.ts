@@ -236,33 +236,47 @@ it.effect("requires handed_off while a ticket is open and reads its live state",
         },
       ],
     };
-    expect((yield* h.service.update(input).pipe(Effect.result))._tag).toBe("Failure");
-    yield* h.service.update({ ...input, changes: [{ ...input.changes[0]!, state: "handed_off" }] });
+    expect((yield* h.service.update(input, { by: "user" }).pipe(Effect.result))._tag).toBe(
+      "Failure",
+    );
+    yield* h.service.update(
+      { ...input, changes: [{ ...input.changes[0]!, state: "handed_off" }] },
+      { by: "user" },
+    );
     expect((yield* h.service.get({ threadId })).items[0]?.linkStates?.[0]?.state).toBe("open");
     h.closeTicket();
     expect((yield* h.service.get({ threadId })).items[0]).toMatchObject({
       state: "handed_off",
       linkStates: [{ state: "closed", title: "Sample ticket" }],
     });
-    const done = yield* h.service.update({
-      threadId,
-      expectedRevision: 1,
-      changes: [{ id: "ticket", state: "done" }],
-    });
+    const done = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 1,
+        changes: [{ id: "ticket", state: "done" }],
+      },
+      { by: "user" },
+    );
     expect(done.items[0]?.doneAt).not.toBeNull();
     h.reopenTicket();
-    const reopened = yield* h.service.update({
-      threadId,
-      expectedRevision: done.revision,
-      changes: [{ id: "ticket", state: "handed_off" }],
-    });
+    const reopened = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: done.revision,
+        changes: [{ id: "ticket", state: "handed_off" }],
+      },
+      { by: "user" },
+    );
     expect(
       (yield* h.service
-        .update({
-          threadId,
-          expectedRevision: reopened.revision,
-          changes: [{ id: "ticket", state: "done" }],
-        })
+        .update(
+          {
+            threadId,
+            expectedRevision: reopened.revision,
+            changes: [{ id: "ticket", state: "done" }],
+          },
+          { by: "user" },
+        )
         .pipe(Effect.result))._tag,
     ).toBe("Failure");
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
@@ -279,14 +293,17 @@ it.effect("leaves a completed delegated lane handed_off for review", () =>
     };
     expect(
       (yield* h.service
-        .update({ threadId, expectedRevision: 0, changes: [change] })
+        .update({ threadId, expectedRevision: 0, changes: [change] }, { by: "user" })
         .pipe(Effect.result))._tag,
     ).toBe("Failure");
-    yield* h.service.update({
-      threadId,
-      expectedRevision: 0,
-      changes: [{ ...change, state: "handed_off" }],
-    });
+    yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ ...change, state: "handed_off" }],
+      },
+      { by: "user" },
+    );
     h.finishLane();
     expect((yield* h.service.get({ threadId })).items[0]).toMatchObject({
       state: "handed_off",
@@ -298,67 +315,88 @@ it.effect("leaves a completed delegated lane handed_off for review", () =>
 it.effect("rewrites open items while retaining history and validates explicit ordering", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    yield* h.service.update({
-      threadId,
-      expectedRevision: 0,
-      changes: [
-        { id: "open", text: "Old open" },
-        { id: "done", text: "Finished", state: "done" },
-        { id: "dropped", text: "Dropped", state: "dropped" },
-        { id: "handoff", text: "Delegated", state: "handed_off" },
-      ],
-    });
-    const next = yield* h.service.rewrite({
-      threadId,
-      expectedRevision: 1,
-      items: [{ id: "new", text: "Replacement" }],
-    });
+    yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [
+          { id: "open", text: "Old open" },
+          { id: "done", text: "Finished", state: "done" },
+          { id: "dropped", text: "Dropped", state: "dropped" },
+          { id: "handoff", text: "Delegated", state: "handed_off" },
+        ],
+      },
+      { by: "user" },
+    );
+    const next = yield* h.service.rewrite(
+      {
+        threadId,
+        expectedRevision: 1,
+        items: [{ id: "new", text: "Replacement" }],
+      },
+      { by: "user" },
+    );
     expect(next.items.map((item) => item.id)).toEqual(["done", "dropped", "handoff", "new"]);
     expect(
       (yield* h.service
-        .rewrite({
-          threadId,
-          expectedRevision: 2,
-          items: [{ id: "done", text: "Overwrite history" }],
-        })
+        .rewrite(
+          {
+            threadId,
+            expectedRevision: 2,
+            items: [{ id: "done", text: "Overwrite history" }],
+          },
+          { by: "user" },
+        )
         .pipe(Effect.result))._tag,
     ).toBe("Failure");
     expect(
       (yield* h.service
-        .update({ threadId, expectedRevision: 2, changes: [], order: ["new", "done"] })
+        .update(
+          { threadId, expectedRevision: 2, changes: [], order: ["new", "done"] },
+          { by: "user" },
+        )
         .pipe(Effect.result))._tag,
     ).toBe("Failure");
-    const ordered = yield* h.service.update({
-      threadId,
-      expectedRevision: 2,
-      changes: [],
-      order: ["new", "handoff", "dropped", "done"],
-    });
+    const ordered = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 2,
+        changes: [],
+        order: ["new", "handoff", "dropped", "done"],
+      },
+      { by: "user" },
+    );
     expect(ordered.items.map((item) => item.id)).toEqual(["new", "handoff", "dropped", "done"]);
     expect((yield* h.service.listRead({ threadId }))[0]?.items.map((item) => item.id)).toEqual([
       "new",
       "handoff",
     ]);
-    const tree = yield* h.service.update({
-      threadId,
-      expectedRevision: 3,
-      changes: [
-        { id: "root", text: "Open root" },
-        { id: "finished-child", text: "Finished child", parentId: "root", state: "done" },
-        {
-          id: "finished-grandchild",
-          text: "Finished grandchild",
-          parentId: "finished-child",
-          state: "dropped",
-        },
-        { id: "open-grandchild", text: "Open grandchild", parentId: "finished-child" },
-      ],
-    });
-    const rewritten = yield* h.service.rewrite({
-      threadId,
-      expectedRevision: tree.revision,
-      items: [],
-    });
+    const tree = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 3,
+        changes: [
+          { id: "root", text: "Open root" },
+          { id: "finished-child", text: "Finished child", parentId: "root", state: "done" },
+          {
+            id: "finished-grandchild",
+            text: "Finished grandchild",
+            parentId: "finished-child",
+            state: "dropped",
+          },
+          { id: "open-grandchild", text: "Open grandchild", parentId: "finished-child" },
+        ],
+      },
+      { by: "user" },
+    );
+    const rewritten = yield* h.service.rewrite(
+      {
+        threadId,
+        expectedRevision: tree.revision,
+        items: [],
+      },
+      { by: "user" },
+    );
     expect(rewritten.items.map((item) => item.id)).toEqual([
       "handoff",
       "dropped",
@@ -406,22 +444,28 @@ it.effect("keeps artifact versions and validates three list levels and artifact 
       content: "Second",
       version: 2,
     });
-    yield* h.service.update({
-      threadId,
-      expectedRevision: 2,
-      changes: [
-        { id: "parent", text: "Parent", links: [{ type: "artifact", target: "design" }] },
-        { id: "child", text: "Child", parentId: "parent" },
-      ],
-    });
-    const nested = yield* h.service.update({
-      threadId,
-      expectedRevision: 3,
-      changes: [
-        { id: "grandchild", text: "Grandchild", parentId: "child" },
-        { id: "other", text: "Other root" },
-      ],
-    });
+    yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 2,
+        changes: [
+          { id: "parent", text: "Parent", links: [{ type: "artifact", target: "design" }] },
+          { id: "child", text: "Child", parentId: "parent" },
+        ],
+      },
+      { by: "user" },
+    );
+    const nested = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 3,
+        changes: [
+          { id: "grandchild", text: "Grandchild", parentId: "child" },
+          { id: "other", text: "Other root" },
+        ],
+      },
+      { by: "user" },
+    );
     for (const change of [
       { text: "Too deep", parentId: "grandchild" },
       { id: "parent", parentId: "grandchild" },
@@ -432,25 +476,37 @@ it.effect("keeps artifact versions and validates three list levels and artifact 
     ])
       expect(
         (yield* h.service
-          .update({ threadId, expectedRevision: nested.revision, changes: [change] })
+          .update(
+            { threadId, expectedRevision: nested.revision, changes: [change] },
+            { by: "user" },
+          )
           .pipe(Effect.result))._tag,
       ).toBe("Failure");
-    const moved = yield* h.service.update({
-      threadId,
-      expectedRevision: nested.revision,
-      changes: [{ id: "child", parentId: "other" }],
-    });
+    const moved = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: nested.revision,
+        changes: [{ id: "child", parentId: "other" }],
+      },
+      { by: "user" },
+    );
     expect(moved.items.find((item) => item.id === "grandchild")?.parentId).toBe("child");
-    const completed = yield* h.service.update({
-      threadId,
-      expectedRevision: moved.revision,
-      changes: [{ id: "other", state: "done" }],
-    });
-    const dropped = yield* h.service.update({
-      threadId,
-      expectedRevision: completed.revision,
-      changes: [{ id: "other", state: "dropped" }],
-    });
+    const completed = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: moved.revision,
+        changes: [{ id: "other", state: "done" }],
+      },
+      { by: "user" },
+    );
+    const dropped = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: completed.revision,
+        changes: [{ id: "other", state: "dropped" }],
+      },
+      { by: "user" },
+    );
     expect(
       dropped.items
         .filter((item) => ["child", "grandchild"].includes(item.id))
@@ -1540,27 +1596,33 @@ it.effect("follows a sent answer's turn while more than 30 other items wait in t
 it.effect("numbers the user's tasks once and lists them with questions as waiting items", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const created = yield* h.service.update({
-      threadId,
-      expectedRevision: 0,
-      changes: [
-        { text: "Rotate the staging webhook secret", owner: "you" },
-        { text: "Write the migration", owner: "agent" },
-        { text: "Approve the vendor account", owner: "you" },
-      ],
-    });
+    const created = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [
+          { text: "Rotate the staging webhook secret", owner: "you" },
+          { text: "Write the migration", owner: "agent" },
+          { text: "Approve the vendor account", owner: "you" },
+        ],
+      },
+      { by: "user" },
+    );
     expect(created.items.map((item) => item.ref)).toEqual(["T1", undefined, "T2"]);
     const [rotate, migrate, approve] = created.items;
     // Edits keep a task's number, a finished task keeps its number, and a new task takes the next.
-    const edited = yield* h.service.update({
-      threadId,
-      expectedRevision: created.revision,
-      changes: [
-        { id: rotate!.id, text: "Rotate the staging webhook secret today" },
-        { id: approve!.id, state: "done" },
-        { id: migrate!.id, owner: "you" },
-      ],
-    });
+    const edited = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: created.revision,
+        changes: [
+          { id: rotate!.id, text: "Rotate the staging webhook secret today" },
+          { id: approve!.id, state: "done" },
+          { id: migrate!.id, owner: "you" },
+        ],
+      },
+      { by: "user" },
+    );
     expect(edited.items.map((item) => item.ref)).toEqual(["T1", "T3", "T2"]);
     yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
     expect(yield* h.service.waitingItems(threadId)).toEqual([
@@ -1578,32 +1640,155 @@ it.effect("numbers the user's tasks once and lists them with questions as waitin
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect(
+  "closes a user task for the agent only from the user's message, and keeps it listed",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const agent = { by: "agent", userMessageId: null } as const;
+      const created = yield* h.service.update(
+        {
+          threadId,
+          expectedRevision: 0,
+          changes: [
+            { id: "rotate", text: "Rotate the staging webhook secret", owner: "you" },
+            { id: "approve", text: "Approve the vendor account", owner: "you" },
+          ],
+        },
+        agent,
+      );
+      const refused = (
+        changes: ReadonlyArray<Parameters<typeof h.service.update>[0]["changes"][number]>,
+        actor: Parameters<typeof h.service.update>[1] = agent,
+      ) =>
+        h.service.update({ threadId, expectedRevision: created.revision, changes }, actor).pipe(
+          Effect.flip,
+          Effect.map((error) => error.message),
+        );
+      expect(yield* refused([{ id: "rotate", state: "done" }])).toBe(
+        "Only the user marks their task done; record it from their message with settledFromUser.",
+      );
+      expect(yield* refused([{ id: "rotate", state: "done", settledFromUser: true }])).toBe(
+        "Only the user's message in this turn can settle this.",
+      );
+      expect(yield* refused([{ id: "approve", state: "dropped" }])).toBe(
+        "Dropping the user's task needs a note saying why.",
+      );
+      expect(
+        yield* h.service
+          .rewrite(
+            { threadId, expectedRevision: created.revision, items: [{ id: "rotate" }] },
+            agent,
+          )
+          .pipe(
+            Effect.flip,
+            Effect.map((error) => error.message),
+          ),
+      ).toContain("An open user task leaves the user's list only when closed");
+      const message = MessageId.make("message-user");
+      const settled = yield* h.service.update(
+        {
+          threadId,
+          expectedRevision: created.revision,
+          changes: [
+            // A task's ref names it as well as its id.
+            { id: "T1", state: "done", settledFromUser: true, note: "done, rotated it" },
+            { id: "approve", state: "dropped", note: "The vendor closed the account" },
+          ],
+        },
+        { by: "agent", userMessageId: message },
+      );
+      expect(settled.items).toMatchObject([
+        {
+          id: "rotate",
+          ref: "T1",
+          state: "done",
+          settledBy: "agent",
+          settledFromMessageId: message,
+        },
+        { ref: "T2", state: "dropped", settledBy: "agent", note: "The vendor closed the account" },
+      ]);
+      expect(
+        (yield* h.service.waitingItems(threadId)).filter((item) => item.kind === "task"),
+      ).toEqual([]);
+      expect((yield* h.service.waitingWork(threadId)).tasks.map((task) => task.ref)).toEqual([
+        "T1",
+        "T2",
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("shows a task discussed until the user changes it again", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const created = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
+      },
+      { by: "agent", userMessageId: null },
+    );
+    yield* h.service.markDiscussed({
+      threadId,
+      messageId: MessageId.make("message-discuss"),
+      questionIds: [],
+      taskIds: ["rotate", "missing"],
+    });
+    expect(yield* h.service.waitingItems(threadId)).toEqual([
+      {
+        kind: "task",
+        ref: "T1",
+        key: "rotate",
+        title: "Rotate the staging webhook secret",
+        state: "discussing",
+      },
+    ]);
+    // Discussing writes no revision, so the user's next write still applies.
+    const done = yield* h.service.update(
+      { threadId, expectedRevision: created.revision, changes: [{ id: "rotate", state: "done" }] },
+      { by: "user" },
+    );
+    expect(done.items[0]).toMatchObject({ state: "done", settledBy: "user" });
+    expect(done.items[0]?.discussedInMessageId).toBeUndefined();
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("never gives a dropped task's number to a new one", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const created = yield* h.service.update({
-      threadId,
-      expectedRevision: 0,
-      changes: [
-        { text: "Rotate the staging webhook secret", owner: "you" },
-        { text: "Approve the vendor account", owner: "you" },
-      ],
-    });
+    const created = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [
+          { text: "Rotate the staging webhook secret", owner: "you" },
+          { text: "Approve the vendor account", owner: "you" },
+        ],
+      },
+      { by: "user" },
+    );
     expect(created.items.map((item) => item.ref)).toEqual(["T1", "T2"]);
     // A rewrite replaces every open item, so T2, the highest number, leaves the list.
-    const rewritten = yield* h.service.rewrite({
-      threadId,
-      expectedRevision: created.revision,
-      items: [
-        { id: created.items[0]!.id, text: "Rotate the staging webhook secret", owner: "you" },
-      ],
-    });
+    const rewritten = yield* h.service.rewrite(
+      {
+        threadId,
+        expectedRevision: created.revision,
+        items: [
+          { id: created.items[0]!.id, text: "Rotate the staging webhook secret", owner: "you" },
+        ],
+      },
+      { by: "user" },
+    );
     expect(rewritten.items.map((item) => item.ref)).toEqual(["T1"]);
-    const added = yield* h.service.update({
-      threadId,
-      expectedRevision: rewritten.revision,
-      changes: [{ text: "Renew the signing certificate", owner: "you" }],
-    });
+    const added = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: rewritten.revision,
+        changes: [{ text: "Renew the signing certificate", owner: "you" }],
+      },
+      { by: "user" },
+    );
     expect(added.items.map((item) => item.ref)).toEqual(["T1", "T3"]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
@@ -1611,11 +1796,14 @@ it.effect("never gives a dropped task's number to a new one", () =>
 it.effect("numbers tasks saved before task numbers existed when their thread is next read", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const created = yield* h.service.update({
-      threadId,
-      expectedRevision: 0,
-      changes: [{ text: "Rotate the secret", owner: "you" }],
-    });
+    const created = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ text: "Rotate the secret", owner: "you" }],
+      },
+      { by: "user" },
+    );
     const file = h.path.join(
       h.config.stateDir,
       "thread-workspaces",

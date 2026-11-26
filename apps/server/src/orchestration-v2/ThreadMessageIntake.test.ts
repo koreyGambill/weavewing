@@ -31,6 +31,7 @@ import {
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as EvidenceService from "../evidence/EvidenceService.ts";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   OrchestratorCommandPreviouslyRejectedError,
@@ -44,12 +45,23 @@ const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
   markDiscussed: (input) => Effect.sync(() => void discussed.push(input)),
 });
 
+const discussedWork: Array<{
+  readonly messageId: string;
+  readonly questionIds: ReadonlyArray<string>;
+  readonly taskIds: ReadonlyArray<string>;
+}> = [];
+const layerWorkspace = Layer.mock(ThreadWorkspace)({
+  markDiscussed: ({ messageId, questionIds, taskIds }) =>
+    Effect.sync(() => void discussedWork.push({ messageId, questionIds, taskIds })),
+});
+
 const layerIntakeTest = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-question-intake-",
 }).pipe(
   Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
   Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provideMerge(layerEvidence),
+  Layer.provideMerge(layerWorkspace),
 );
 
 const layerFailingDispatchHandler =
@@ -486,9 +498,10 @@ it.effect("refuses a queued edit that keeps a file another edit already deleted"
   }).pipe(Effect.provide(layerIntakeTest)),
 );
 
-it.effect("marks the QA changes a user's Discuss message is about once it is accepted", () =>
+it.effect("marks the items a user's Discuss message is about once it is accepted", () =>
   Effect.gen(function* () {
     discussed.length = 0;
+    discussedWork.length = 0;
     const accepted = Layer.mock(ThreadManagementService.ThreadManagementService)({
       dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
     });
@@ -503,6 +516,21 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
       title: "Toast shows the retry count",
       sha: "abc1234",
     };
+    const { sha: _sha, ...withoutSha } = reference;
+    const question: WaitingItemContextRecord = {
+      ...withoutSha,
+      contextId: ComposerContextId.make("waiting-item_Q2"),
+      itemKind: "question",
+      key: "Q2",
+      ref: "Q2",
+    };
+    const task: WaitingItemContextRecord = {
+      ...question,
+      contextId: ComposerContextId.make("waiting-item_task-1"),
+      itemKind: "task",
+      key: "task-1",
+      ref: "T1",
+    };
     const send = (id: string, createdBy: "user" | "agent") => {
       const command: Extract<OrchestrationV2Command, { type: "message.dispatch" }> = {
         type: "message.dispatch",
@@ -514,7 +542,7 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
         createdBy,
         creationSource: "web",
         origin: { kind: "user" },
-        context: { version: 1, records: [reference] },
+        context: { version: 1, records: [reference, question, task] },
         dispatchMode: { type: "queue_after_active" },
       };
       return dispatchCommand(command).pipe(Effect.provide(accepted));
@@ -527,6 +555,9 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
         messageId: "message-user",
         changes: [{ landingId: "first", changeId: "a" }],
       },
+    ]);
+    expect(discussedWork).toEqual([
+      { messageId: "message-user", questionIds: ["Q2"], taskIds: ["task-1"] },
     ]);
   }).pipe(Effect.provide(layerIntakeTest)),
 );

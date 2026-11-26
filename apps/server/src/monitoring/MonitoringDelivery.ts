@@ -90,19 +90,22 @@ export const layer = Layer.effect(
         yield* Effect.gen(function* () {
           const current = yield* workspace.get({ threadId: finding.threadId });
           if (current.items.some((item) => item.id === id)) return;
-          yield* workspace.update({
-            threadId: finding.threadId,
-            expectedRevision: current.revision,
-            changes: [
-              {
-                id,
-                text: finding.summary,
-                owner: "you",
-                state: "open",
-                details: `${finding.detail}\n\nEvidence:\n${finding.evidence.map((item) => `${item.messageId}: ${item.excerpt}`).join("\n")}\n\nAdvisory from ${profile.modelSelection.model}. Accept or reject before changing instructions, skills or knowledge.`,
-              },
-            ],
-          });
+          yield* workspace.update(
+            {
+              threadId: finding.threadId,
+              expectedRevision: current.revision,
+              changes: [
+                {
+                  id,
+                  text: finding.summary,
+                  owner: "you",
+                  state: "open",
+                  details: `${finding.detail}\n\nEvidence:\n${finding.evidence.map((item) => `${item.messageId}: ${item.excerpt}`).join("\n")}\n\nAdvisory from ${profile.modelSelection.model}. Accept or reject before changing instructions, skills or knowledge.`,
+                },
+              ],
+            },
+            { by: "agent", userMessageId: null },
+          );
         }).pipe(
           Effect.retry({ times: 1, while: (cause) => cause.code === "conflict" }),
           Effect.mapError(

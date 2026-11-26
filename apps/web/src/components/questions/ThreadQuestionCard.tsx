@@ -8,7 +8,7 @@ import {
   threadQuestionStatus,
   withoutThreadQuestionImageMarkers,
 } from "@t3tools/client-runtime/state/thread-questions";
-import type { ScopedThreadRef, ThreadQuestion } from "@t3tools/contracts";
+import { threadQuestionTitle, type ScopedThreadRef, type ThreadQuestion } from "@t3tools/contracts";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -45,6 +45,12 @@ import {
   useQuestionNoteImages,
 } from "./questionNoteImages";
 import { revealQuestionInChat, threadQuestionElementId } from "./questionReveal";
+import {
+  removeWaitingItemDiscuss,
+  toggleWaitingItemDiscuss,
+  useWaitingItemsInComposer,
+  waitingItemDiscussRecord,
+} from "../waiting/waitingItemComposer";
 
 const NOTE_SAVE_DELAY_MS = 600;
 
@@ -53,9 +59,9 @@ const HELP = {
     "Set this aside. It leaves your count, and the agent may raise it again when the work needs it.",
   reopen: "Open this again so you can answer it.",
   dismiss: "Close this without answering. The agent is told with your next message.",
-  discuss: "Put your note in the composer as a comment on this question. It stays open.",
-  discussOff: "Take your comment out of the composer. Your note stays here.",
-  discussDisabled: "Write a note first; Discuss sends the note, not your choice.",
+  discuss:
+    "Put a reference to this question in the composer and write about it there. It stays open.",
+  discussOff: "Take the reference to this question out of the composer.",
   answer: "Queue this answer to go with your next message.",
   answerDisabled: "Choose an option or add a note first.",
   cancel: "Take this answer out of your message. Your choice stays on the card.",
@@ -89,7 +95,9 @@ export function ThreadQuestionCard({
   const saveDraft = useSaveQuestionDraft(threadRef);
   const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
-  const inComposer = useQuestionsInComposer(threadRef).get(question.id);
+  // The composer holds this question's answer, or a Discuss reference to it, or both.
+  const answerInComposer = useQuestionsInComposer(threadRef).get(question.id) === "answer";
+  const discussing = useWaitingItemsInComposer(threadRef, "question").has(question.id);
   // Local until the server returns them, so typing and choosing never wait on a round trip.
   const [pendingChoice, setPendingChoice] = useState<ReadonlyArray<string> | null>(null);
   const [pendingNotes, setPendingNotes] = useState<string | null>(null);
@@ -98,7 +106,10 @@ export function ThreadQuestionCard({
   const [descriptionsCollapsed, setDescriptionsCollapsed] = useState(false);
   const chosenOptionIds = pendingChoice ?? question.answer?.chosenOptionIds ?? [];
   const notes = pendingNotes ?? question.answer?.notes ?? "";
-  const status = threadQuestionStatus(question, inComposer);
+  const status = threadQuestionStatus(
+    question,
+    answerInComposer ? "answer" : discussing ? "discuss" : undefined,
+  );
   const waiting = question.state === "open" || question.state === "deferred";
   const editable = waiting && status !== "sent";
   const usable = canAct && !busy && editable;
@@ -166,6 +177,7 @@ export function ThreadQuestionCard({
     changeNotes(withoutThreadQuestionImageMarkers(question.id, notes, new Set([number])));
   };
   const changeState = async (state: "open" | "deferred" | "withdrawn") => {
+    if (state === "withdrawn") removeWaitingItemDiscuss(threadRef, "question", question.id);
     setBusy(true);
     await writer.flush(question.id, saveDraft);
     await update({
@@ -174,12 +186,12 @@ export function ThreadQuestionCard({
     });
     setBusy(false);
   };
-  const toComposer = async (kind: "answer" | "discuss") => {
+  const toComposer = async () => {
     setBusy(true);
     // Notes still waiting or in flight are part of what the user means to queue.
     const flushed = await writer.flush(question.id, saveDraft);
     setBusy(false);
-    const record = questionAnswerForComposer(threadRef.threadId, question, flushed, kind);
+    const record = questionAnswerForComposer(threadRef.threadId, question, flushed);
     if (record !== null) addQuestionAnswersToComposer(threadRef, [record]);
     else if (flushed === null)
       toastManager.add({
@@ -377,46 +389,45 @@ export function ThreadQuestionCard({
                 Dismiss
               </HelpButton>
               <HelpButton
-                help={
-                  !editable
-                    ? HELP.sent
-                    : inComposer === "discuss"
-                      ? HELP.discussOff
-                      : notes.trim()
-                        ? HELP.discuss
-                        : HELP.discussDisabled
-                }
-                disabled={!usable || (inComposer !== "discuss" && notes.trim() === "")}
-                onClick={() =>
-                  inComposer === "discuss"
-                    ? removeQuestionAnswerFromComposer(threadRef, question.id)
-                    : void toComposer("discuss")
+                help={!editable ? HELP.sent : discussing ? HELP.discussOff : HELP.discuss}
+                aria-label={`Discuss ${question.id}`}
+                aria-pressed={discussing}
+                disabled={!canAct || !editable}
+                onClick={(event) =>
+                  toggleWaitingItemDiscuss(
+                    threadRef,
+                    waitingItemDiscussRecord({
+                      itemKind: "question",
+                      key: question.id,
+                      ref: question.id,
+                      title: threadQuestionTitle(question.prompt),
+                    }),
+                    event.currentTarget,
+                  )
                 }
               >
-                {inComposer === "discuss" ? "Cancel" : "Discuss"}
+                Discuss
               </HelpButton>
               <HelpButton
                 help={
                   !editable
                     ? HELP.sent
-                    : inComposer === "answer"
+                    : answerInComposer
                       ? HELP.cancel
                       : hasDraft
                         ? HELP.answer
                         : HELP.answerDisabled
                 }
                 // A disabled primary button still reads as live, so Answer is primary only when usable.
-                variant={
-                  inComposer !== "answer" && usable && hasDraft ? "default" : "contrast-outline"
-                }
-                disabled={!usable || (inComposer !== "answer" && !hasDraft)}
+                variant={!answerInComposer && usable && hasDraft ? "default" : "contrast-outline"}
+                disabled={!usable || (!answerInComposer && !hasDraft)}
                 onClick={() =>
-                  inComposer === "answer"
+                  answerInComposer
                     ? removeQuestionAnswerFromComposer(threadRef, question.id)
-                    : void toComposer("answer")
+                    : void toComposer()
                 }
               >
-                {inComposer === "answer" ? "Cancel" : "Answer"}
+                {answerInComposer ? "Cancel" : "Answer"}
               </HelpButton>
             </>
           }

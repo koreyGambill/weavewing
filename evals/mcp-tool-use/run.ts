@@ -74,7 +74,7 @@ import {
   QUESTION_TOOL_NAMES,
   QuestionToolkit,
 } from "../../apps/server/src/mcp/toolkits/questions/tools.ts";
-import { t3OpenQuestionsContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
+import { t3WaitingContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { ticketExport } from "./ticketExport.ts";
 import {
@@ -382,6 +382,23 @@ export const McpToolUseCase = Schema.Struct({
           state: Schema.Literals(["open", "deferred"]),
           discussing: Schema.optional(Schema.Literal(true)),
         }),
+      ),
+    ),
+    /** QA changes and user tasks the per-turn line lists after the questions. Needs `questions`. */
+    waiting: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          kind: Schema.Literals(["qa", "task"]),
+          ref: Schema.String,
+          title: Schema.String,
+          state: Schema.Literals(["open", "discussing"]),
+        }),
+      ),
+    ),
+    /** QA problems the per-turn line says the agent owes a fix for. Needs `questions`. */
+    qaProblems: Schema.optional(
+      Schema.Array(
+        Schema.Struct({ ref: Schema.String, title: Schema.String, note: Schema.String }),
       ),
     ),
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
@@ -1334,10 +1351,28 @@ export const buildMessages = (sample: Sample) => {
     testCase.promptContext === undefined
       ? testCase.prompt
       : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
-  // T3 lists open questions ahead of a user's own message, after any side-chat context.
+  // T3 lists what waits on the user ahead of a user's own message, after any side-chat context.
   const inlineContext = [
     sideChatContext ?? "",
-    role === "top" ? t3OpenQuestionsContext(testCase.setup.questions ?? []) : "",
+    role === "top" && testCase.setup.questions !== undefined
+      ? t3WaitingContext({
+          waiting: [
+            ...testCase.setup.questions.map((question) => ({
+              kind: "question" as const,
+              ref: question.id,
+              title: question.title,
+              ...(question.discussing === true
+                ? {
+                    state: "discussing" as const,
+                    ...(question.state === "deferred" ? { deferred: true as const } : {}),
+                  }
+                : { state: question.state }),
+            })),
+            ...(testCase.setup.waiting ?? []),
+          ],
+          problems: testCase.setup.qaProblems,
+        })
+      : "",
   ]
     .filter((part) => part !== "")
     .join("\n\n");
