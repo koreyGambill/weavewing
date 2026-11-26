@@ -146,9 +146,9 @@ describe("Weavewing outbound guard", () => {
     expect(sourceOf("apps/web/src/weavewingFramePolicy.ts")).toContain(
       "meta.content = WEB_APP_FRAME_CSP;",
     );
-    expect(sourceOf("apps/web/src/main.tsx")).toContain(
-      "if (!isElectron) installWebFramePolicy();\nconst router = startAppServices();",
-    );
+    // The entry module's first statement, ahead of app services and the first render.
+    const entryBody = sourceOf("apps/web/src/main.tsx").replace(/^import[^;]*;\s*/gm, "");
+    expect(entryBody.startsWith("if (!isElectron) installWebFramePolicy();\n")).toBe(true);
   });
 
   it.each([
