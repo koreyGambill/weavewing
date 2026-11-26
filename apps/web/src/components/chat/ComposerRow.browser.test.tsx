@@ -11,7 +11,7 @@ import {
 } from "../BranchToolbarEnvironmentSelector";
 import { MenuItem } from "../ui/menu";
 import { ComposerRow } from "./ComposerRow";
-import { COMPOSER_ROW_PRIORITY, openComposerRowControl } from "./composerRow";
+import { COMPOSER_ROW_PRIORITY, openComposerRowControl } from "./composerRowItems";
 
 const STUDIO = EnvironmentId.make("row-test-studio");
 const BUILD = EnvironmentId.make("row-test-build");

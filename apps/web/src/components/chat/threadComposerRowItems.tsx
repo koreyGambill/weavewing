@@ -21,7 +21,7 @@ import {
   type ComposerRowAgentsSummary,
   type ComposerRowItem,
   summarizeComposerRowAgents,
-} from "./composerRow";
+} from "./composerRowItems";
 import { bookmarkListSummary, ThreadBookmarkList } from "./ThreadBookmarkList";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 

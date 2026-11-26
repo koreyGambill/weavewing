@@ -74,7 +74,7 @@ import { MiddleTruncate } from "./ui/middle-truncate";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { cn } from "~/lib/utils";
 import { ComposerRow } from "./chat/ComposerRow";
-import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./chat/composerRow";
+import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./chat/composerRowItems";
 import { ComposerRowBranchMenuRow, ComposerRowComputerMenuRow } from "./chat/branchToolbarRowItems";
 
 export interface BranchToolbarHandle {

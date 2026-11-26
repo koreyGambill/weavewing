@@ -126,7 +126,7 @@ import {
 } from "./composerContextUndo";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
-import { openComposerRowControl } from "./composerRow";
+import { openComposerRowControl } from "./composerRowItems";
 import { CollapsedComposerPromptPreview } from "./CollapsedComposerPromptPreview";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
 import { useOfflineOutbox } from "../../state/offlineOutbox";

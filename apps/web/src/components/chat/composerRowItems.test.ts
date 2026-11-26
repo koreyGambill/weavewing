@@ -5,7 +5,7 @@ import {
   type ComposerRowItemWidth,
   resolveComposerRowHiddenIds,
   summarizeComposerRowAgents,
-} from "./composerRow";
+} from "./composerRowItems";
 
 // On-screen order: computer, location, branch, diff, agents. Gaps of 4 and a 24 px menu.
 const items: ReadonlyArray<ComposerRowItemWidth> = [

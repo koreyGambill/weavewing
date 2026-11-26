@@ -30,7 +30,7 @@ import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { ComposerControl } from "./ComposerControl";
 import { useComposerRowItemPlacement } from "./ComposerRow";
-import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRow";
+import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRowItems";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   claudeSettingsForInstance,

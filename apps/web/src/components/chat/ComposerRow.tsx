@@ -16,7 +16,7 @@ import {
   type ComposerRowItem,
   type ComposerRowItemWidth,
   resolveComposerRowHiddenIds,
-} from "./composerRow";
+} from "./composerRowItems";
 import { elementOuterWidth } from "./restingComposerControlsMeasurement";
 
 export interface ComposerRowItemPlacement {
