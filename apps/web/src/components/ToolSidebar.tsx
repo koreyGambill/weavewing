@@ -27,7 +27,12 @@ import { DeferEnvironmentQueries } from "../state/query";
 import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveThreadRouteRef } from "../threadRoutes";
-import { takeSideAreaFocusRequest, useToolSidebarStore } from "../toolSidebarStore";
+import {
+  takeSideAreaFocusRequest,
+  takeSideAreaRouteHold,
+  useToolSidebarStore,
+} from "../toolSidebarStore";
+import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
 import {
   VIEW_DEFINITIONS,
   viewDefinition,
@@ -104,7 +109,10 @@ function openLayerVisible() {
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const open = useToolSidebarStore((state) => state.open);
   const width = useToolSidebarStore((state) => state.width);
-  const maximized = useToolSidebarStore((state) => state.maximized);
+  // A view with a page opens its page instead of maximizing.
+  const maximized = useToolSidebarStore(
+    (state) => state.maximized && !viewDefinition(state.view).page,
+  );
   const pinned = useToolSidebarStore((state) => state.pinned);
   const { state: statusState } = useStatusSignal();
   const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
@@ -129,6 +137,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
+    if (takeSideAreaRouteHold()) return;
     useToolSidebarStore.getState().dispatch({ type: "dismiss" });
   }, [routeThreadKey]);
 
@@ -277,6 +286,7 @@ function SideArea({
   const threadRef = useSideAreaThreadRef();
   const lockedState = useLockedThreadState(locked);
   const unlock = () => dispatch({ type: "lock", thread: null });
+  const openViewPage = useOpenViewPage();
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<HTMLElement | null>(null);
   const insideClicks = useRef(new WeakSet<Event>());
@@ -431,7 +441,26 @@ function SideArea({
               {locked ? <LockIcon /> : <LockOpenIcon />}
             </HeaderToggle>
           ) : null}
-          {wide ? (
+          {definition.page ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Open ${definition.title} as a page`}
+                    onClick={() => {
+                      dispatch({ type: "close" });
+                      void openViewPage(definition);
+                    }}
+                  />
+                }
+              >
+                <Maximize2 />
+              </TooltipTrigger>
+              <TooltipPopup>Open {definition.title} as a page</TooltipPopup>
+            </Tooltip>
+          ) : wide ? (
             <HeaderToggle
               label={maximized ? "Restore side panel size" : "Maximize side panel"}
               hint={maximized ? "Restore side panel size" : "Maximize side panel"}
@@ -602,7 +631,15 @@ function SideAreaBody({
             : definition.id
         }
       >
-        {definition.render({ target, layout, host: "panel", width, slots })}
+        <HostedView
+          definition={definition}
+          target={target}
+          layout={layout}
+          host="panel"
+          width={width}
+          slots={slots}
+          onOpenFullSize={() => useToolSidebarStore.getState().dispatch({ type: "close" })}
+        />
       </Fragment>
     </DeferEnvironmentQueries>
   );

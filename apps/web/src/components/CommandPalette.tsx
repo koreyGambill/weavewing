@@ -5,6 +5,8 @@ import { lastFocusedTerminalFind } from "~/lib/terminalFocus";
 import { stepThreadBookmark, useThreadBookmarkCount } from "./chat/threadBookmarkActions";
 import { bookmarkInPlaceNavigation } from "./reviews/bookmarks.logic";
 import { useToolSidebarStore } from "../toolSidebarStore";
+import { viewPagePaletteDefinitions } from "../views/viewPage.logic";
+import { VIEW_DEFINITIONS } from "../views/viewRegistry";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { openChangeThreadFolder } from "./chat/changeThreadFolderDialogState";
@@ -1772,6 +1774,19 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  for (const definition of viewPagePaletteDefinitions(VIEW_DEFINITIONS)) {
+    actionItems.push({
+      kind: "action",
+      value: `action:view-page:${definition.id}`,
+      title: `Open ${definition.title} as a page`,
+      searchTerms: [definition.title.toLowerCase(), "page", "view", "full", "expand"],
+      icon: <definition.icon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/view/$viewId", params: { viewId: definition.id } });
+      },
+    });
+  }
 
   if (window.matchMedia("(min-width: 768px)").matches)
     actionItems.push({

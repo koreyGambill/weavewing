@@ -21,7 +21,7 @@ const run = (state: SideAreaState, ...actions: SideAreaAction[]) =>
   actions.reduce(transitionSideArea, state);
 
 describe("side area", () => {
-  it("lists the rail's thread views, then Calendar and Status", () => {
+  it("lists the rail's thread views, then Calendar, Status and Pull requests", () => {
     expect(VIEW_IDS).toEqual([
       "todos",
       "evidence",
@@ -35,6 +35,7 @@ describe("side area", () => {
       "automations",
       "calendar",
       "status",
+      "pull-requests",
     ]);
   });
 

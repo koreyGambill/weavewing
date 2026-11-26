@@ -297,3 +297,61 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   expect(maxThreadsInFlight).toBe(1);
   expect(useToolSidebarStore.getState().open).toBe(true);
 });
+
+it("opens a global view as a page from the side panel and hands it back", async () => {
+  const thread = threadWithHistory("page", 1);
+  const { stack, screen, router } = await mountApp([thread], 1280);
+  await using _app = stack;
+  const threadPath = `/${ENVIRONMENT_ID}/${thread.id}`;
+  await act(() => {
+    const { dispatch } = useToolSidebarStore.getState();
+    dispatch({ type: "show", view: "details" });
+    dispatch({ type: "maximize" });
+    dispatch({ type: "show", view: "calendar" });
+  });
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel).toHaveAttribute("data-side-area", "open");
+  await expect
+    .element(panel.getByRole("button", { name: "Maximize side panel" }))
+    .not.toBeInTheDocument();
+  await userEvent.click(panel.getByRole("button", { name: "Open Calendar as a page" }));
+
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/view/calendar"));
+  await expect.element(screen.getByRole("heading", { name: "Calendar", level: 1 })).toHaveFocus();
+  await expect.element(panel).not.toBeInTheDocument();
+  await expect.element(screen.getByRole("navigation", { name: "Threads" })).toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", { name: "Open in side panel" }));
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
+  await expect.element(panel.getByRole("button", { name: /^View: Calendar/ })).toBeVisible();
+
+  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "status" } }));
+  await expect.element(screen.getByRole("heading", { name: "Status", level: 1 })).toHaveFocus();
+  await act(() => router.history.back());
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
+});
+
+it("offers Open full size for a view narrower than its minimum width", async () => {
+  const { stack, screen, router } = await mountApp([threadWithHistory("narrow", 1)], 1280);
+  await using _app = stack;
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "pull-requests" }));
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await userEvent.click(panel.getByRole("button", { name: "Open full size" }));
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/pull-requests"));
+  await expect.element(panel).not.toBeInTheDocument();
+});
+
+it("shows a way back for a view id with no page", async () => {
+  const thread = threadWithHistory("missing", 1);
+  const { stack, screen, router } = await mountApp([thread], 1280);
+  await using _app = stack;
+  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "todos" } }));
+  await expect.element(screen.getByRole("heading", { name: "View not found" })).toHaveFocus();
+  await expect.element(screen.getByText("Todos has no page")).toBeVisible();
+  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "no-such-view" } }));
+  await expect.element(screen.getByText("There is no view here")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Return to previous page" }));
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/view/todos"));
+  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "pull-requests" } }));
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/pull-requests"));
+});
