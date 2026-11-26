@@ -61,6 +61,8 @@ interface RuleHarness {
 interface RuleHarnessOptions {
   readonly filename?: string;
   readonly ruleOptions?: ReadonlyArray<unknown>;
+  // Empty files written beside the fixture, for rules that read its directory.
+  readonly siblings?: ReadonlyArray<string>;
 }
 
 const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
@@ -116,6 +118,9 @@ export const createOxlintRuleHarness = (
     );
     yield* fs.makeDirectory(path.dirname(sourcePath), { recursive: true });
     yield* fs.writeFileString(sourcePath, source);
+    for (const sibling of options.siblings ?? []) {
+      yield* fs.writeFileString(path.join(path.dirname(sourcePath), sibling), "");
+    }
 
     // Run through the current Node binary: oxlint's bin is an extensionless
     // shebang script, which Windows cannot spawn directly and which would

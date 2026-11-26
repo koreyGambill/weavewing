@@ -2,6 +2,7 @@ import { definePlugin } from "@oxlint/plugins";
 
 import maxSettingsDescriptionLength from "./rules/max-settings-description-length.ts";
 import namespaceNodeImports from "./rules/namespace-node-imports.ts";
+import noCaseCollidingModules from "./rules/no-case-colliding-modules.ts";
 import noDomTestEnvironment from "./rules/no-dom-test-environment.ts";
 import noEmDashCopy from "./rules/no-em-dash-copy.ts";
 import noFrameWaitsInBrowserTests from "./rules/no-frame-waits-in-browser-tests.ts";
@@ -42,6 +43,7 @@ export default definePlugin({
   rules: {
     "max-settings-description-length": maxSettingsDescriptionLength,
     "namespace-node-imports": namespaceNodeImports,
+    "no-case-colliding-modules": noCaseCollidingModules,
     "no-dom-test-environment": noDomTestEnvironment,
     "no-em-dash-copy": noEmDashCopy,
     "no-frame-waits-in-browser-tests": noFrameWaitsInBrowserTests,
