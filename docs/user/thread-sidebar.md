@@ -162,7 +162,16 @@ thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#wai
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
-Agents record a landing with `evidence_record` after they merge work.
+Agents record a landing with `evidence_record` after they merge work. For landed work
+with nothing to check, such as a typo fix, the agent records an exemption with a
+one-line reason instead; it covers those commits and shows in Evidence as **Exempt**.
+
+When an agent's turn ends after it ran a landing command (`git merge`, `git push` to
+the target branch, `gh pr merge`, `xwing env land` or `sparkwing run land`) and the
+target branch gained commits during that command that no landing or exemption covers,
+Weavewing sends the agent one message asking it to record evidence or an exemption.
+It asks once per landing and never about the turn that answers. Turn this off with
+**Ask agents to record landed work** in **Settings → Threads**.
 
 A change that has something only you can judge, such as captures, a waived review
 or one that asked for changes, a failed or skipped check, or a gap, shows a

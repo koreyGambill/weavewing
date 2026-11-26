@@ -417,8 +417,17 @@ it("the record contract refuses shapes the agent cannot send", () => {
   const decode = Schema.decodeUnknownExit(EvidenceRecordInput);
   const valid = recordInput("ok", [change("a")]);
   assert.isTrue(decode(valid)._tag === "Success");
+  const { changes: _changes, ...exempt } = {
+    ...valid,
+    exempt: { reason: "Docs-only fix with nothing to check." },
+  };
+  assert.isTrue(decode(exempt)._tag === "Success");
+  assert.isTrue(decode({ ...exempt, changes: [] })._tag === "Success");
   for (const bad of [
     { ...valid, changes: [] },
+    { ...exempt, changes: [change("a")] },
+    { ...exempt, exempt: { reason: "first line\nsecond line" } },
+    { ...exempt, exempt: { reason: " " } },
     { ...valid, id: "has space" },
     { ...valid, changes: [change("a", { commits: ["not-a-sha"] })] },
     { ...valid, changes: Array.from({ length: 21 }, (_, index) => change(`c${index}`)) },
@@ -561,6 +570,77 @@ it.effect("flags merges on the target branch that no landing covers", () =>
     assert.strictEqual(gitProbe.calls, 0);
     yield* TestClock.adjust("31 seconds");
     assert.deepStrictEqual(yield* evidence.coverage({}), []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("finds the uncovered commits a branch gained while a window was open", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const evidence = yield* Service.EvidenceService;
+    const { repo, git, commit, base } = yield* scratchRepo();
+    // Committed long before they land: a fast-forward keeps their committer times.
+    yield* git(["checkout", "-q", "-b", "feature"]);
+    const first = yield* commit("first feature commit");
+    const second = yield* commit("second feature commit");
+    yield* git(["checkout", "-q", "main"]);
+    yield* git(["merge", "-q", "--ff-only", "feature"], "2026-02-01T00:00:00Z");
+    const at = (iso: string) => DateTime.toEpochMillis(DateTime.makeUnsafe(iso));
+    const landedWindow = { fromMs: at("2026-02-01T00:00:00Z"), toMs: at("2026-02-01T00:00:05Z") };
+
+    const target = yield* evidence.landingTarget(project);
+    assert.deepStrictEqual(target, { projectId: project, cwd: repo, branch: "main", remote: null });
+    const landed = (windows = [landedWindow]) =>
+      evidence
+        .uncoveredLanded({ target: target!, windows })
+        .pipe(Effect.map((commits) => commits.map(({ sha }) => sha)));
+    assert.deepStrictEqual(yield* landed(), [second, first]);
+    // Nothing moved in mid-January, and the branch was created, not moved, on January 1.
+    assert.deepStrictEqual(
+      yield* landed([
+        { fromMs: at("2026-01-15T00:00:00Z"), toMs: at("2026-01-16T00:00:00Z") },
+        { fromMs: at("2025-12-31T00:00:00Z"), toMs: at("2026-01-02T00:00:00Z") },
+      ]),
+      [],
+    );
+
+    yield* evidence.record(
+      recordInput("partial", [change("a", { commits: [first.slice(0, 7)] })], {
+        target: { branch: "main", sha: base },
+      }),
+    );
+    assert.deepStrictEqual(yield* landed(), [second]);
+    // An exemption names the tip it left, which covers the whole batch it landed.
+    yield* evidence.record({
+      ...recordInput("docs-only", [], { target: { branch: "main", sha: second } }),
+      changes: [],
+      exempt: { reason: "Docs-only change." },
+    });
+    assert.deepStrictEqual(yield* landed(), []);
+    const listed = (yield* evidence.list({})).items.find((item) => item.id === "docs-only");
+    assert.deepStrictEqual(
+      { changeCount: listed?.changeCount, exempt: listed?.exempt },
+      { changeCount: 0, exempt: { reason: "Docs-only change." } },
+    );
+
+    // A push to the remote's branch moves the remote-tracking ref while local main stays put.
+    const remote = yield* fs.realPath(
+      yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-remote-" }),
+    );
+    yield* git(["init", "-q", "--bare", remote]);
+    yield* git(["remote", "add", "origin", remote]);
+    yield* git(["push", "-q", "origin", "main"], "2026-03-01T00:00:00Z");
+    yield* git(["checkout", "-q", "-b", "pushed"]);
+    const pushed = yield* commit("pushed straight to the remote");
+    yield* git(["push", "-q", "origin", "pushed:main"], "2026-03-02T00:00:00Z");
+    const remoteTarget = yield* evidence.landingTarget(project);
+    assert.deepStrictEqual(remoteTarget?.remote, "origin");
+    assert.deepStrictEqual(
+      (yield* evidence.uncoveredLanded({
+        target: remoteTarget!,
+        windows: [{ fromMs: at("2026-03-02T00:00:00Z"), toMs: at("2026-03-02T00:00:01Z") }],
+      })).map(({ sha }) => sha),
+      [pushed],
+    );
   }).pipe(Effect.provide(testLayer)),
 );
 
@@ -1018,7 +1098,7 @@ it("requires a reason to waive review or skip a check, not to waive QA, and keep
   });
   assert.isTrue(decoded._tag === "Success");
   if (decoded._tag === "Success")
-    assert.deepStrictEqual(decoded.value.changes[0]?.review, { verdict: "approved" });
+    assert.deepStrictEqual(decoded.value.changes?.[0]?.review, { verdict: "approved" });
 
   // A client built before the linked thread's state existed reads a change carrying it.
   const olderClientChange = decodeChange({

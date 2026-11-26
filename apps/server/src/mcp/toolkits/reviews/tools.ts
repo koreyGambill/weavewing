@@ -100,7 +100,7 @@ export const ReviewToolkit = Toolkit.make(
   Tool.make("evidence_record", {
     ...common,
     description:
-      "After work lands on the target branch, record its proof: one landing per merge or batch, one change per ask, with the user's ask, commits, review verdict, gate results, captures under ~/evidence and gaps. List as gaps only what the user could check and you did not. A waived review needs review.reason and a skipped check needs reason, one line each. Name problem changes this work fixes in `fixes`. Recording an id again replaces it and keeps the user's QA. Omit threadId for this thread.",
+      "After work lands on the target branch, record its proof: one landing per merge or batch, one change per ask, with the user's ask, commits, review verdict, gate results, captures under ~/evidence and gaps. List as gaps only what the user could check and you did not. A waived review needs review.reason and a skipped check needs reason, one line each. Name problem changes this work fixes in `fixes`. When landed work needs no evidence, such as a typo or comment fix, send `target` and `exempt.reason` with no changes. Recording an id again replaces it and keeps the user's QA. Omit threadId for this thread.",
     parameters: EvidenceRecordInput,
     success: EvidenceRecordResult,
   }).annotate(Tool.Readonly, true),

@@ -87,14 +87,14 @@ const SHELL_WORD_PIECE = /"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|\\([\s\S])|(\S)/gu;
 const HEREDOC_BODY =
   /<<-?[ \t]*(['"]?)(\w+)\1[^\n]*\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/gu;
 const QUOTED_OR_COMMENT = /'[^']*'|"(?:\\[\s\S]|[^"\\])*"|(?<=^|[\s;&|(])#[^\n]*/gmu;
-const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/u;
+export const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/u;
 // Commands that print other change requests' URLs, so output beside them proves nothing.
 const LISTS_CHANGE_REQUESTS =
   /\b(?:gh\s+(?:pr\s+(?:list|status)|search\s+prs|api)|glab\s+(?:mr\s+list|api))\b/u;
 const URL_LINE = /^[ \t]*(https?:\/\/\S+)[ \t]*$/gmu;
 
 /** The script a shell input runs, unwrapped from Codex's `sh -lc`. */
-function shellScript(input: string): string {
+export function shellScript(input: string): string {
   const [, wrapped] = SHELL_WRAPPER.exec(input) ?? [];
   return wrapped === undefined
     ? input
@@ -137,7 +137,7 @@ function shellSegments(script: string): ReadonlyArray<string> {
 }
 
 /** The commands a script runs, without the text it carries. */
-const shellCode = (script: string) =>
+export const shellCode = (script: string) =>
   script.replace(HEREDOC_BODY, "<<").replace(QUOTED_OR_COMMENT, "''");
 
 const isPushCommand = (input: string) => PUSH_COMMAND.test(shellCode(shellScript(input)));

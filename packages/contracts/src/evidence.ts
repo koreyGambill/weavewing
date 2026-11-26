@@ -112,13 +112,21 @@ export const EvidenceChange = Schema.Struct({
 });
 export type EvidenceChange = typeof EvidenceChange.Type;
 
-/** The agent-written part of a landing, stored as one JSON document. */
+/** Landed work the agent says needs no evidence; it covers its target like a landing does. */
+export const EvidenceExempt = Schema.Struct({
+  reason: Reason.check(Schema.isPattern(/^[^\n]*$/)).annotate({
+    description: "Why this landing needs no evidence, in one line.",
+  }),
+});
+
+/** The agent-written part of a landing, stored as one JSON document. An exemption has no changes. */
 export const EvidenceRecord = Schema.Struct({
   id: EvidenceSlug,
   title: Text(200),
   target: Schema.Struct({ branch: Text(200), sha: Text(64) }),
   verifications: Schema.Array(EvidenceVerification).check(Schema.isMaxLength(20)),
-  changes: Schema.Array(EvidenceChange).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  changes: Schema.Array(EvidenceChange).check(Schema.isMaxLength(20)),
+  exempt: Schema.optional(EvidenceExempt),
 });
 export type EvidenceRecord = typeof EvidenceRecord.Type;
 
@@ -143,17 +151,31 @@ const EvidenceChangeInput = EvidenceChangeInputFields.check(
   ),
 );
 
-/**
- * Recording again with the same id replaces the record and keeps QA. A waived
- * review or skipped check needs its reason here; stored records may predate that.
- */
-export const EvidenceRecordInput = Schema.Struct({
+const EvidenceRecordInputFields = Schema.Struct({
   ...EvidenceRecord.fields,
   verifications: Schema.Array(EvidenceVerificationInput).check(Schema.isMaxLength(20)),
-  changes: Schema.Array(EvidenceChangeInput).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  changes: Schema.optional(
+    Schema.Array(EvidenceChangeInput).check(Schema.isMaxLength(20)).annotate({
+      description: "At least one, unless exempt.",
+    }),
+  ),
   threadId: Schema.optional(ThreadId),
   landedAt: Schema.optional(IsoDateTime),
 });
+
+/**
+ * Recording again with the same id replaces the record and keeps QA. A waived
+ * review or skipped check needs its reason here; stored records may predate that.
+ * An exemption names the target and has no changes.
+ */
+export const EvidenceRecordInput = EvidenceRecordInputFields.check(
+  Schema.makeFilter((input: typeof EvidenceRecordInputFields.Type) => {
+    const count = input.changes?.length ?? 0;
+    if (input.exempt !== undefined)
+      return count === 0 ? true : "An exemption has no changes; send exempt or changes, not both.";
+    return count > 0 ? true : "Record at least one change, or exempt.reason when none is needed.";
+  }),
+);
 export type EvidenceRecordInput = typeof EvidenceRecordInput.Type;
 
 export const EvidenceChangeQa = Schema.Struct({
@@ -225,6 +247,7 @@ export const EvidenceLandingSummary = Schema.Struct({
   ),
   changeCount: NonNegativeInt,
   qa: EvidenceQaTally,
+  exempt: Schema.optional(EvidenceExempt),
 });
 export type EvidenceLandingSummary = typeof EvidenceLandingSummary.Type;
 

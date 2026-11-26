@@ -438,9 +438,13 @@ function LandingCard({
                 </span>
               ),
             )}
-            <span>
-              {landing.changeCount} change{landing.changeCount === 1 ? "" : "s"}
-            </span>
+            {landing.exempt ? (
+              <span className="min-w-0 break-words">Exempt: {landing.exempt.reason}</span>
+            ) : (
+              <span>
+                {landing.changeCount} change{landing.changeCount === 1 ? "" : "s"}
+              </span>
+            )}
           </span>
           {showThread ? (
             <span className="block truncate text-muted-foreground">
