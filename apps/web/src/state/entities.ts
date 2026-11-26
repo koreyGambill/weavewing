@@ -262,6 +262,14 @@ export function useThreadHasSubagents(ref: ScopedThreadRef | null): boolean {
   );
 }
 
+/** Whether the thread's waiting strip lists a QA change. */
+export function useThreadWaitsOnQa(ref: ScopedThreadRef | null): boolean {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_SHELL_ATOM : environmentThreadShells.quietThreadShellAtom(ref),
+    (shell) => shell?.waiting?.some((item) => item.kind === "qa") === true,
+  );
+}
+
 /** The detail's live visit mark, which the thread structure leaves out. */
 export function useThreadLastVisitedAt(ref: ScopedThreadRef | null): DateTime.Utc | null {
   return useAtomValue(

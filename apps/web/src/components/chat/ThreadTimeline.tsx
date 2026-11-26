@@ -10,7 +10,7 @@ import {
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
 import { useThreadEvidence } from "../../state/evidence";
-import { useThreadHasSubagents } from "../../state/entities";
+import { useThreadHasSubagents, useThreadWaitsOnQa } from "../../state/entities";
 import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
 import {
   placedLandingIds,
@@ -67,10 +67,12 @@ export function ThreadTimeline({
   });
   const plainEntries =
     draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals, historyComplete);
-  // QA cards read the thread's landings only when the timeline has somewhere to put them.
+  // QA cards read the thread's landings only when the timeline has somewhere to put them, or the
+  // strip lists a QA change whose card must open.
   const hasSubagents = useThreadHasSubagents(threadDetailRef);
+  const waitsOnQa = useThreadWaitsOnQa(threadDetailRef);
   const evidence = useThreadEvidence(
-    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents)
+    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents || waitsOnQa)
       ? threadDetailRef
       : null,
     placedLandingIds(plainEntries),
