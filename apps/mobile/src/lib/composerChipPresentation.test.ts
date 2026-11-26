@@ -19,6 +19,7 @@ const CHIP_ACCENTS = [
         "terminal",
         "element",
         "review-comment",
+        "artifact-answer",
         "pull-request",
         "skill",
         "thread",

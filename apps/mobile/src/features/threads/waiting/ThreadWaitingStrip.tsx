@@ -37,6 +37,7 @@ import {
   qaKeyParts,
   waitingRowNote,
   waitingSummary,
+  withQuestionRows,
 } from "./waitingStrip.logic";
 
 export const WAITING_KIND_SYMBOL: Record<WaitingItemKind, AppSymbolName> = {
@@ -50,8 +51,13 @@ interface WaitingSheetProps {
   readonly draftKey: string | null;
   /** Whether the environment records evidence, so QA rows can read their cards. */
   readonly evidenceSupported: boolean;
-  /** Opens the question's card; without it a question row only shows its full title. */
-  readonly onOpenQuestion?: (questionId: string) => void;
+  /** Every open and deferred question the client has loaded, listed in place of the capped rows'. */
+  readonly questionRows?: ReadonlyArray<WaitingItemSummary>;
+  /**
+   * A question's card, shown in the sheet in place of the list; `onDone` closes the sheet. Without
+   * it a question row only shows its full title.
+   */
+  readonly renderQuestion?: (questionId: string, onDone: () => void) => ReactNode;
   /** The thread's answered questions, listed first under History. */
   readonly questionHistory?: ReactNode;
 }
@@ -70,7 +76,8 @@ export function ThreadWaitingStrip(
   },
 ) {
   const shell = useThreadShell(props.threadRef);
-  const summary = waitingSummary(shell?.waiting, shell?.waitingCounts);
+  const rows = withQuestionRows(shell?.waiting, props.questionRows);
+  const summary = waitingSummary(rows, shell?.waitingCounts);
   const spoken =
     summary === null
       ? ""
@@ -118,7 +125,7 @@ export function ThreadWaitingStrip(
       {props.open ? (
         <WaitingSheet
           {...props}
-          rows={shell?.waiting}
+          rows={rows}
           unlisted={summary?.unlisted ?? 0}
           onClose={() => props.onOpenChange(false)}
         />
@@ -137,6 +144,8 @@ function WaitingSheet(
 ) {
   const insets = useSafeAreaInsets();
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The question whose card the sheet shows in place of the list, opened from its row.
+  const [question, setQuestion] = useState<string | null>(null);
   const groups = groupWaitingRows(props.rows);
   const listedQa = new Set(
     groups.flatMap((group) => group.items.flatMap((row) => (row.kind === "qa" ? [row.key] : []))),
@@ -168,6 +177,35 @@ function WaitingSheet(
       onDiscuss={props.onClose}
     />
   );
+
+  if (question !== null && props.renderQuestion !== undefined) {
+    return (
+      <Sheet title={question} onClose={props.onClose}>
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          automaticallyAdjustKeyboardInsets
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            gap: 12,
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: Math.max(20, insets.bottom),
+          }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to waiting and history"
+            onPress={() => setQuestion(null)}
+            className="min-h-11 flex-row items-center gap-1.5 self-start rounded-xl px-2 active:bg-subtle"
+          >
+            <SymbolView name="chevron.left" size={13} tintColorClassName="accent-primary-text" />
+            <Text className="font-t3-medium text-sm text-primary-text">Waiting and history</Text>
+          </Pressable>
+          {props.renderQuestion(question, props.onClose)}
+        </ScrollView>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet title="Waiting and history" onClose={props.onClose}>
@@ -206,10 +244,9 @@ function WaitingSheet(
                     highlighted={row.state === "open" && row.sent !== true}
                     expanded={isOpen}
                     onPress={() => {
-                      if (row.kind === "question" && props.onOpenQuestion !== undefined) {
-                        props.onClose();
-                        props.onOpenQuestion(row.key);
-                      } else toggle(id);
+                      if (row.kind === "question" && props.renderQuestion !== undefined)
+                        setQuestion(row.key);
+                      else toggle(id);
                     }}
                   />
                   {isOpen && row.kind === "qa" ? (

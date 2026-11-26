@@ -1409,6 +1409,33 @@ export function setComposerDraftText(draftKey: string, value: string): void {
   scheduleUnusedComposerAttachmentCleanup(removed);
 }
 
+/**
+ * Rewrites a draft's text and context in one step, such as to swap context records together with
+ * their references. `update` returns null to leave the draft as it is.
+ */
+export function updateComposerDraftContent(
+  draftKey: string,
+  update: (draft: ComposerDraft) => {
+    readonly text: string;
+    readonly context: OrchestrationMessageContext | undefined;
+  } | null,
+): void {
+  let removed: ReadonlyArray<DraftComposerAttachment> = [];
+  updateComposerDrafts((current) => {
+    const existing = normalizeDraft(current[draftKey]);
+    const next = update(existing);
+    if (next === null) return current;
+    const draft = withReferencedContextFiles(
+      existing,
+      next.text,
+      referencedComposerContext(next.text, next.context),
+    );
+    removed = existing.attachments.filter((attachment) => !draft.attachments.includes(attachment));
+    return withComposerDraft(current, draftKey, draft);
+  });
+  scheduleUnusedComposerAttachmentCleanup(removed);
+}
+
 export function insertComposerDraftText(
   draftKey: string,
   value: string,

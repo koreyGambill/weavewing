@@ -7,6 +7,7 @@ import {
   qaKeyParts,
   waitingCountsPhrase,
   waitingSummary,
+  withQuestionRows,
 } from "./waitingStrip.logic";
 
 const row = (overrides: Partial<WaitingItemSummary> & Pick<WaitingItemSummary, "kind" | "ref">) =>
@@ -99,4 +100,29 @@ it("splits a QA key and rejects one without a change id", () => {
   });
   expect(qaKeyParts("landing-1/")).toBeNull();
   expect(qaKeyParts("landing-1")).toBeNull();
+});
+
+describe("withQuestionRows", () => {
+  it("lists all 31 open questions past the thread's 30-row cap and keeps its QA rows", () => {
+    const capped = [
+      ...Array.from({ length: 29 }, (_, index) => row({ kind: "question", ref: `Q${index + 1}` })),
+      row({ kind: "qa", ref: "QA1", key: "landing/change" }),
+    ];
+    const loaded = Array.from({ length: 31 }, (_, index) =>
+      row({ kind: "question", ref: `Q${index + 1}` }),
+    );
+    const rows = withQuestionRows(capped, loaded);
+    const groups = groupWaitingRows(rows);
+    expect(groups.map((group) => [group.kind, group.items.length])).toEqual([
+      ["question", 31],
+      ["qa", 1],
+    ]);
+    expect(groups[0]?.items.at(-1)?.ref).toBe("Q31");
+    expect(waitingSummary(rows, counts({ question: 31, qa: 1, live: 32 }))?.unlisted).toBe(0);
+  });
+
+  it("keeps the thread's rows until the questions have loaded", () => {
+    const capped = [row({ kind: "question", ref: "Q1" })];
+    expect(withQuestionRows(capped, undefined)).toBe(capped);
+  });
 });

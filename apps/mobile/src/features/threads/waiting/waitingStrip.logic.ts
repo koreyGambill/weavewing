@@ -53,6 +53,19 @@ export function waitingSummary(
   };
 }
 
+/**
+ * The thread's rows with its question rows replaced by `questionRows`, every open and deferred
+ * question the client has loaded, since the thread's own rows are capped. Without them the rows
+ * are kept as they are.
+ */
+export function withQuestionRows(
+  rows: ReadonlyArray<WaitingItemSummary> | undefined,
+  questionRows: ReadonlyArray<WaitingItemSummary> | undefined,
+): ReadonlyArray<WaitingItemSummary> | undefined {
+  if (questionRows === undefined) return rows;
+  return [...questionRows, ...(rows ?? []).filter((row) => row.kind !== "question")];
+}
+
 /** The still-waiting rows by kind, in the strip's order; empty kinds are left out. */
 export function groupWaitingRows(
   rows: ReadonlyArray<WaitingItemSummary> | undefined,

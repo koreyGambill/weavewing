@@ -307,6 +307,13 @@ export function ComposerContextSheet(props: {
             {record.kind === "mention" ? (
               <ContextField label="Path" value={record.path} code />
             ) : null}
+            {record.kind === "artifact-answer" ? (
+              <>
+                <ContextField label="Question" value={record.question} />
+                <ContextField label="Answer" value={record.choice} />
+                <ContextField label="Note" value={record.note} />
+              </>
+            ) : null}
             {record.kind === "thread" ? (
               <View className="gap-3">
                 <ContextField label="Thread" value={record.title} />

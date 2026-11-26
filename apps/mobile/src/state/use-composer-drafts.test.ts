@@ -224,8 +224,11 @@ import {
   setStickyComposerModelSelection,
   stickyComposerModelSelectionAtom,
   undoComposerDraftMergeState,
+  updateComposerDraftContent,
   updateComposerDraftSettings,
 } from "./use-composer-drafts";
+import { threadQuestionAnswerRecord } from "@t3tools/client-runtime/state/thread-questions";
+import { withComposerQuestionRecords } from "../features/threads/questions/questionComposerDraft";
 import { retainComposerAttachmentFileForPreview } from "../lib/composerAttachmentPreviewRetention";
 
 const DRAFT: ComposerDraft = {
@@ -1072,6 +1075,31 @@ describe("mobile composer drafts", () => {
       }).trimEnd(),
     ).toBe("About QA3 (landing 0123456789abcdef, change change-a): Compact strip\n\nLooks off");
     removeQaDiscuss(draftKey, record);
+    expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
+  });
+
+  it("adds and removes a question answer with its reference, kept through persistence", () => {
+    const draftKey = "question-environment:question-thread";
+    const record = threadQuestionAnswerRecord("question-thread", {
+      id: "Q1",
+      prompt: "Which cache?",
+      options: [{ id: "sqlite", label: "SQLite", description: "" }],
+      state: "open",
+      answer: { chosenOptionIds: ["sqlite"], notes: "", submittedAt: null, draftRevision: 2 },
+    })!;
+    setComposerDraftText(draftKey, "Ship it");
+    updateComposerDraftContent(draftKey, (draft) => withComposerQuestionRecords(draft, [record]));
+    const draft = getComposerDraftSnapshot(draftKey);
+    expect(draft.text).toBe(`Ship it ${formatComposerContextReference(record)} `);
+    expect(draft.context?.records).toEqual([record]);
+    expect(composerContextSendBlockReason(draft.context)).toBeNull();
+    const decoded = decodePersistedComposerState(
+      JSON.parse(JSON.stringify({ schemaVersion: 1, drafts: { [draftKey]: draft } })),
+    ).drafts[draftKey];
+    expect(decoded?.context?.records).toEqual([record]);
+
+    updateComposerDraftContent(draftKey, (current) => withComposerQuestionRecords(current, []));
+    expect(getComposerDraftSnapshot(draftKey)).toMatchObject({ text: "Ship it" });
     expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
   });
 

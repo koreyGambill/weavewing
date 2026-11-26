@@ -75,7 +75,7 @@ function proseDirectionStyle(text: string, setDirection: TextDirection | undefin
   } as const;
 }
 
-function QuestionText(props: {
+export function QuestionText(props: {
   readonly markdown: string;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;

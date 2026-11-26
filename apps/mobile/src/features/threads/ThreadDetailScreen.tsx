@@ -189,6 +189,10 @@ import { FreshSessionNotice } from "./FreshSessionNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
+import { ThreadQuestionHistory } from "./questions/ThreadQuestionHistory";
+import { ThreadQuestionPane } from "./questions/ThreadQuestionPane";
+import { ThreadQuestionsSync } from "./questions/ThreadQuestionsSync";
+import { useWorkspaceQuestionRows } from "./questions/useWorkspaceQuestionRows";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
@@ -431,6 +435,11 @@ function ThreadDetailBody(
   // Keep the last input owner through keyboard dismissal, so closing sidebar
   // search cannot briefly lift the composer into the keyboard's closing frame.
   const [composerOwnsKeyboard, setComposerOwnsKeyboard] = useState(false);
+  const questionThreadRef = {
+    environmentId: props.environmentId,
+    threadId: props.selectedThread.id,
+  };
+  const questionRows = useWorkspaceQuestionRows(questionThreadRef);
   if (sidebarSearchActive && composerOwnsKeyboard) setComposerOwnsKeyboard(false);
   const navigation = useNavigation();
   const openLinkedThread = useOpenLinkedThread();
@@ -1727,6 +1736,30 @@ function ThreadDetailBody(
                         }
                         open={props.waitingSheetOpen === true}
                         onOpenChange={(open) => props.onWaitingSheetOpenChange?.(open)}
+                        questionRows={questionRows}
+                        renderQuestion={(questionId, onDone) => (
+                          <ThreadQuestionPane
+                            threadRef={questionThreadRef}
+                            questionId={questionId}
+                            workspaceRoot={props.threadCwd}
+                            onDone={onDone}
+                          />
+                        )}
+                        questionHistory={
+                          <ThreadQuestionHistory
+                            threadRef={props.selectedThreadDetailRef}
+                            workspaceRoot={props.threadCwd}
+                          />
+                        }
+                      />
+                    )}
+                    {props.draftMode ? null : (
+                      <ThreadQuestionsSync
+                        environmentId={props.environmentId}
+                        threadId={props.selectedThread.id}
+                        latestRun={props.selectedThread.latestRun}
+                        waiting={props.selectedThread.waiting}
+                        waitingCounts={props.selectedThread.waitingCounts}
                       />
                     )}
                     {props.draftMode ? null : (

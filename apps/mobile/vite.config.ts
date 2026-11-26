@@ -33,6 +33,7 @@ const reactTests = [
   "src/components/ui/FilePreviewSession.test.tsx",
   "src/features/threads/UsageLimitRecoveryCard.test.tsx",
   "src/features/threads/PendingUserInputCard.test.tsx",
+  "src/features/threads/questions/useFocusedQuestionsRefresh.test.tsx",
   "src/features/threads/NewTaskDraftRouteScreen.test.tsx",
   "src/native/NativeHeaderToolbar.test.tsx",
   "src/components/ComposerEditor.ios.test.tsx",
