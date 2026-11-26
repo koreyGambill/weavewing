@@ -602,13 +602,23 @@ it.effect("finds the uncovered commits a branch gained while a window was open",
       ]),
       [],
     );
+    // A branch created inside the window has no earlier value, so nothing counts as landed on it.
+    yield* git(["branch", "release", "feature"], "2026-02-10T00:00:00Z");
+    assert.deepStrictEqual(
+      yield* evidence.uncoveredLanded({
+        target: { ...target!, branch: "release" },
+        windows: [{ fromMs: at("2026-02-10T00:00:00Z"), toMs: at("2026-02-10T00:00:01Z") }],
+      }),
+      [],
+    );
 
+    // A change's commits cover only themselves.
     yield* evidence.record(
-      recordInput("partial", [change("a", { commits: [first.slice(0, 7)] })], {
+      recordInput("partial", [change("a", { commits: [second.slice(0, 7)] })], {
         target: { branch: "main", sha: base },
       }),
     );
-    assert.deepStrictEqual(yield* landed(), [second]);
+    assert.deepStrictEqual(yield* landed(), [first]);
     // An exemption names the tip it left, which covers the whole batch it landed.
     yield* evidence.record({
       ...recordInput("docs-only", [], { target: { branch: "main", sha: second } }),
