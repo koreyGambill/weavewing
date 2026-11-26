@@ -10,7 +10,9 @@ import {
   checkout,
   checkoutArgs,
   comparisonBase,
+  definitionDigest,
   logged,
+  toolchainVersions,
 } from "../lib/checkout.ts";
 
 // Two gates fit beside the daemon's machine reserve on 16 cores. check-changed weighs typecheck
@@ -48,8 +50,8 @@ definePipeline({
   name: "Gate",
   short: "vp run check:changed, admitted by cores instead of the checks lock",
   help:
-    "The exit code is the verdict. Resubmitting identical inputs against the same base returns the recorded pass " +
-    "without a new log; a tree edited during the run fails instead of passing.",
+    "The exit code is the verdict. Resubmitting identical content against the same base, from any checkout run " +
+    "with the same -C, returns the recorded pass without a new log; a tree edited during the run fails instead of passing.",
   args: [
     ...checkoutArgs,
     { name: "ref", type: "string", description: "Compare against the merge base with this ref" },
@@ -64,6 +66,7 @@ definePipeline({
           "npm", "ci", "--prefix", ".sparkwing", "--ignore-scripts", "--no-audit", "--no-fund",
         ]);
       await logged(ctx, co, "pipelines-typecheck", ["npm", "--prefix", ".sparkwing", "run", "typecheck"]);
+      await logged(ctx, co, "pipelines-test", ["node", "--test", ".sparkwing/lib/checkout.test.ts"]);
     })
       .inline()
       .cores(0.25)
@@ -101,7 +104,15 @@ definePipeline({
         const co = checkout(ctx);
         const inputs = checkChangedInputs(co.root, comparisonBase(co.root, ctx.args.ref || undefined));
         NodeFS.writeFileSync(keyFile(co.evidence), JSON.stringify(inputs));
-        return memoKey("check-changed/v3", inputs.sources, inputs.generated, co.nodeVersion, CHECK_CHANGED_CONCURRENCY);
+        return memoKey(
+          "check-changed/v4",
+          inputs.sources,
+          inputs.generated,
+          co.nodeVersion,
+          toolchainVersions(co),
+          definitionDigest(NodePath.join(import.meta.dirname, "..")),
+          CHECK_CHANGED_CONCURRENCY,
+        );
       });
   },
 });

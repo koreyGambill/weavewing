@@ -134,14 +134,19 @@ export interface CheckChangedInputs {
 }
 
 /**
- * The inputs check:changed reads, hashed as scripts/check-changed.ts keys its own replay: the
- * binary diff against base, raw bytes of changed, untracked and ignored generated files, and
- * install state. Includes the checkout path because ignored caches differ per worktree.
+ * The content check:changed reads, never where it sits, so checkouts of one tree share a pass:
+ * - base: the commit check:changed compares against, which fixes every unchanged tracked file;
+ * - the binary diff against base and the raw bytes of changed files: edits, staged or not;
+ * - untracked files, including ones only a local exclude rule hides, since typecheck and tests
+ *   read them while the repository's own .gitignore files are tracked content;
+ * - ignored generated files and .env files, which checks read;
+ * - install state, without pnpm's prune timestamp, which differs per install of one lockfile;
+ * - CI, which changes test behaviour, and the host platform.
  */
 export function checkChangedInputs(root: string, base: string): CheckChangedInputs {
   const sources = NodeCrypto.createHash("sha256");
   const generated = NodeCrypto.createHash("sha256");
-  sources.update(`${root}\0${base}\0${process.env.CI ?? ""}\0`);
+  sources.update(`${base}\0${process.env.CI ?? ""}\0${process.platform}\0${process.arch}\0`);
   sources.update(
     NodeChildProcess.execFileSync(
       "git",
@@ -160,15 +165,44 @@ export function checkChangedInputs(root: string, base: string): CheckChangedInpu
   )
     .split("\n")
     .filter(Boolean);
+  const untracked = git(root, "ls-files", "--others", "--exclude-per-directory=.gitignore")
+    .split("\n")
+    .filter(Boolean);
   const add = (hash: NodeCrypto.Hash, file: string) => {
     hash.update(`\0${file}\0`);
     const path = NodePath.join(root, file);
-    if (NodeFS.statSync(path, { throwIfNoEntry: false })?.isFile()) hash.update(NodeFS.readFileSync(path));
+    if (!NodeFS.statSync(path, { throwIfNoEntry: false })?.isFile()) return;
+    const bytes = NodeFS.readFileSync(path);
+    hash.update(file === MODULES_YAML ? bytes.toString("utf8").replace(/^\s*"prunedAt":.*$/m, "") : bytes);
   };
-  for (const file of [...changedFiles(root, base), "node_modules/.modules.yaml", "node_modules/.pnpm/lock.yaml"])
-    add(sources, file);
+  const files = new Set([...changedFiles(root, base), ...untracked]);
+  for (const file of [...files].sort()) add(sources, file);
+  for (const file of [MODULES_YAML, "node_modules/.pnpm/lock.yaml"]) add(sources, file);
   for (const file of ignored) add(/(^|\/)\.env[^/]*$/.test(file) ? sources : generated, file);
   return { sources: sources.digest("hex"), generated: generated.digest("hex") };
+}
+
+const MODULES_YAML = "node_modules/.modules.yaml";
+
+/** `vp --version` in the checkout: the global and local Vite+, its bundled tools, pnpm and Node. */
+export function toolchainVersions(co: Checkout): string {
+  return NodeChildProcess.execFileSync("vp", ["--version"], {
+    cwd: co.root,
+    env: { ...process.env, ...co.env },
+    encoding: "utf8",
+  }).trim();
+}
+
+/** Hash of a pipeline directory's own files, so a changed definition never reuses older passes. */
+export function definitionDigest(dir: string): string {
+  const hash = NodeCrypto.createHash("sha256");
+  const files = NodeFS.readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => NodePath.relative(dir, NodePath.join(entry.parentPath, entry.name)))
+    .filter((file) => !file.split(NodePath.sep).includes("node_modules"))
+    .sort();
+  for (const file of files) hash.update(`\0${file}\0`).update(NodeFS.readFileSync(NodePath.join(dir, file)));
+  return hash.digest("hex");
 }
 
 interface WorkspacePackage {
