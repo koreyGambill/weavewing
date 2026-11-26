@@ -1,5 +1,5 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { Maximize2, PanelRight } from "lucide-react";
+import { Maximize2, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { readPullRequestListPreferences } from "../components/pullRequest/pullRequestListPreferences";
@@ -14,6 +14,8 @@ import {
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { WorkspaceTitlebarControls } from "../components/WorkspaceTitlebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { isElectron } from "../env";
 import { observeResize } from "../lib/observeResize";
 import { holdSideAreaThroughRoute, useToolSidebarStore } from "../toolSidebarStore";
@@ -195,11 +197,24 @@ function ViewPageBody({
         <ViewPageHeading title={definition.title} focusHeading={focusHeading} />
         <div className="min-w-0 flex-1" />
         <div ref={setActions} className="flex min-w-0 items-center" />
-        <Button size="sm" variant="ghost" onClick={openInSidePanel}>
-          <PanelRight />
-          Open in side panel
-        </Button>
       </WorkspacePageHeader>
+      <WorkspaceTitlebarControls>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Open in side panel"
+                onClick={openInSidePanel}
+              />
+            }
+          >
+            <PanelRightOpen />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Open {definition.title} in the side panel</TooltipPopup>
+        </Tooltip>
+      </WorkspaceTitlebarControls>
       <div ref={measure} className="flex min-h-0 min-w-0 flex-1 flex-col">
         {width > 0
           ? definition.render({
