@@ -5,6 +5,7 @@ import * as NodeUtil from "node:util";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  type ScheduledTaskListResult,
   type ScheduledTaskSummaryListResult,
   CommandId,
   MessageId,
@@ -28,6 +29,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
 import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
@@ -518,9 +520,20 @@ it.effect("sends task summaries again only when a summary changes", () =>
         Effect.forkChild,
       );
       yield* Deferred.await(subscribed);
+      // Each write is awaited on the full list, which every write re-sends, so the summary
+      // stream sees each change signal on its own rather than one signal for all three.
+      const fullList = yield* Queue.unbounded<ScheduledTaskListResult>();
+      yield* service.subscribeList().pipe(
+        Stream.runForEach((list) => Queue.offer(fullList, list)),
+        Effect.forkChild,
+      );
+      const awaitFullList = (matches: (list: ScheduledTaskListResult) => boolean) =>
+        Queue.take(fullList).pipe(Effect.repeat({ until: matches }));
       // Neither the prompt nor the thread's own switch is part of a summary.
       yield* service.upsert({ ...input, prompt: "Sweep the retry queue twice." });
+      yield* awaitFullList(({ tasks }) => tasks[0]?.prompt === "Sweep the retry queue twice.");
       yield* service.setThreadEnabled({ id: input.id, threadId, enabled: false });
+      yield* awaitFullList(({ tasks }) => tasks[0]?.disabledThreadIds?.includes(threadId) === true);
       yield* service.setEnabled({ id: input.id, enabled: true });
       yield* Deferred.await(enabled);
       assert.deepEqual(yield* Ref.get(emitted), [
