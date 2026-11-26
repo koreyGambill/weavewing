@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
+import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -78,6 +79,50 @@ function errorMessage(error: unknown): string {
   }
   return String(error);
 }
+
+const isWorktreeMcpFailure = Schema.is(WorktreeMcpFailure);
+
+/** What a failed handoff could not remove, for the person to remove by hand. */
+function leftovers(worktreePath: string | null, branch: string): string {
+  return worktreePath === null
+    ? `branch '${branch}'`
+    : `the worktree at '${worktreePath}' and branch '${branch}'`;
+}
+
+/**
+ * When `effect` fails, removes what it created and fails as it did. Interruption alone removes
+ * nothing, because a thread binding may already have committed. A removal that fails is named in
+ * the error, so the caller can remove what is left.
+ */
+const undoOnFailure =
+  <E>(undo: Effect.Effect<void, E>, describe: () => string) =>
+  <A, R>(effect: Effect.Effect<A, WorktreeMcpFailure, R>) =>
+    effect.pipe(
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterruptsOnly(cause),
+        (cause) =>
+          undo.pipe(
+            Effect.matchCauseEffect({
+              onSuccess: () => Effect.failCause(cause),
+              onFailure: (undoCause) => {
+                const original = Cause.squash(cause);
+                const note = `Could not remove ${describe()}: ${errorMessage(Cause.squash(undoCause))}. Remove them by hand before retrying.`;
+                return Effect.logWarning("Could not undo a failed worktree handoff", {
+                  left: describe(),
+                }).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      isWorktreeMcpFailure(original)
+                        ? failure(original.code, `${original.message} ${note}`)
+                        : failure("operation_failed", `${errorMessage(original)} ${note}`),
+                    ),
+                  ),
+                );
+              },
+            }),
+          ),
+      ),
+    );
 
 const asOperationFailed = (prefix: string) =>
   Effect.mapError((error: unknown) =>
@@ -259,6 +304,31 @@ const make = Effect.gen(function* () {
     // Mask interruption after worktree creation through setup; binding can detach and interrupt the caller.
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
+        // The branch did not exist before this call (checked above), so a branch of that name and
+        // its checkout after a failed create are this call's: Git keeps a worktree whose checkout
+        // hook failed, and its branch with it.
+        let failedCheckoutPath: string | null = null;
+        const removeFailedCreation = Effect.gen(function* () {
+          const created = (yield* gitWorkflow.listRefs({
+            cwd: projectCwd,
+            query: input.branch,
+            refKind: "local",
+          })).refs.find((ref) => ref.name === input.branch && ref.isRemote !== true);
+          if (created === undefined) return;
+          failedCheckoutPath = created.worktreePath ?? null;
+          if (failedCheckoutPath !== null) {
+            yield* gitWorkflow.removeWorktree({
+              cwd: projectCwd,
+              path: failedCheckoutPath,
+              force: true,
+            });
+          }
+          yield* gitWorkflow.deleteLocalBranch({
+            cwd: projectCwd,
+            refName: input.branch,
+            force: true,
+          });
+        });
         const worktree = yield* restore(
           gitWorkflow
             .createWorktree({
@@ -268,7 +338,12 @@ const make = Effect.gen(function* () {
               baseRefName,
               path: null,
             })
-            .pipe(asOperationFailed("Unable to create the worktree")),
+            .pipe(
+              asOperationFailed("Unable to create the worktree"),
+              undoOnFailure(removeFailedCreation, () =>
+                leftovers(failedCheckoutPath, input.branch),
+              ),
+            ),
         );
         const worktreePath = worktree.worktree.path;
 
@@ -283,18 +358,18 @@ const make = Effect.gen(function* () {
           });
 
         const removeCreatedWorktree = Effect.suspend(() =>
-          gitWorkflow.removeWorktree({ cwd: projectCwd, path: worktreePath, force: true }).pipe(
-            Effect.andThen(
-              Effect.suspend(() =>
-                gitWorkflow.deleteLocalBranch({
-                  cwd: projectCwd,
-                  refName: worktree.worktree.refName,
-                  force: true,
-                }),
-              ),
+          gitWorkflow.removeWorktree({ cwd: projectCwd, path: worktreePath, force: true }),
+        ).pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              gitWorkflow.deleteLocalBranch({
+                cwd: projectCwd,
+                refName: worktree.worktree.refName,
+                force: true,
+              }),
             ),
           ),
-        ).pipe(Effect.ignoreCause({ log: true }));
+        );
 
         const recheckAndBind = Effect.gen(function* () {
           // A concurrent UI binding may have landed during git work; do not orphan a second worktree.
@@ -341,9 +416,8 @@ const make = Effect.gen(function* () {
               ),
             );
         }).pipe(
-          // Do not remove on interruption alone; the thread binding may already have committed.
-          Effect.onError((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.void : removeCreatedWorktree,
+          undoOnFailure(removeCreatedWorktree, () =>
+            leftovers(worktreePath, worktree.worktree.refName),
           ),
         );
 

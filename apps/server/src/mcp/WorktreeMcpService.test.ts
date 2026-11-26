@@ -805,3 +805,140 @@ describe("t3_worktree_list", () => {
     });
   });
 });
+
+describe("undoing a failed handoff", () => {
+  const realGitLayer = GitVcsDriver.layer.pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "handoff-undo-git-" })),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
+
+  // A repository on `main` whose post-checkout hook fails, as a broken install hook does.
+  const makeRepository = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const git = yield* GitVcsDriver.GitVcsDriver;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "handoff-undo-" });
+    const cwd = `${directory}/repo`;
+    yield* fs.makeDirectory(cwd);
+    const command = (args: string[]) => git.execute({ operation: "handoff-test", cwd, args });
+    yield* command(["init", "-b", "main"]);
+    yield* command(["config", "user.name", "Test"]);
+    yield* command(["config", "user.email", "test@example.test"]);
+    yield* command(["commit", "--allow-empty", "-m", "base"]);
+    const hook = `${cwd}/.git/hooks/post-checkout`;
+    const breakCheckout = fs
+      .writeFileString(hook, "#!/bin/sh\necho 'install failed' >&2\nexit 1\n")
+      .pipe(Effect.andThen(fs.chmod(hook, 0o755)));
+    const fixCheckout = fs.remove(hook);
+    const worktrees = command(["worktree", "list", "--porcelain"]).pipe(
+      Effect.map(({ stdout }) =>
+        stdout
+          .split("\n")
+          .filter((line) => line.startsWith("worktree "))
+          .map((line) => line.slice("worktree ".length)),
+      ),
+    );
+    const branches = command(["branch", "--format=%(refname:short)"]).pipe(
+      Effect.map(({ stdout }) => stdout.split("\n").filter(Boolean)),
+    );
+    const harness = makeHarness({
+      git: {
+        listLocalBranchNames: () => git.listLocalBranchNames(cwd),
+        listRefs: (input) => git.listRefs({ ...input, cwd }),
+        createWorktree: (input) =>
+          git.createWorktree({
+            ...input,
+            cwd,
+            path: `${directory}/worktrees/${input.newRefName}`,
+          }),
+        removeWorktree: (input) => git.removeWorktree({ ...input, cwd }),
+        deleteLocalBranch: (input) => git.deleteLocalBranch({ ...input, cwd }),
+      },
+    });
+    return { directory, command, breakCheckout, fixCheckout, worktrees, branches, harness };
+  });
+
+  const handOff = (harness: ReturnType<typeof makeHarness>, branch: string) =>
+    WorktreeMcpService.WorktreeMcpService.pipe(
+      Effect.flatMap((service) =>
+        service.handoffThread(threadId, {
+          branch,
+          baseRef: "main",
+          startFromOrigin: false,
+          runSetupScript: false,
+        }),
+      ),
+      Effect.provide(harness.layer),
+    );
+
+  it.effect(
+    "removes the worktree and branch a failed checkout hook left, so the same name works again",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* makeRepository;
+        const before = yield* repo.worktrees;
+        yield* repo.breakCheckout;
+        const exit = yield* Effect.exit(handOff(repo.harness, "feature/hook"));
+        expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
+        expect(yield* repo.worktrees).toEqual(before);
+        expect(yield* repo.branches).toEqual(["main"]);
+        expect(repo.harness.dispatch).not.toHaveBeenCalled();
+
+        yield* repo.fixCheckout;
+        const result = yield* handOff(repo.harness, "feature/hook");
+        expect(result.branch).toBe("feature/hook");
+        expect(yield* repo.branches).toEqual(["feature/hook", "main"]);
+      }).pipe(Effect.provide(realGitLayer)),
+  );
+
+  it.effect("never removes a branch or worktree that existed before the call", () =>
+    Effect.gen(function* () {
+      const repo = yield* makeRepository;
+      const existing = `${repo.directory}/existing`;
+      yield* repo.command(["worktree", "add", "-b", "feature/existing", existing]);
+      const before = yield* repo.worktrees;
+
+      // A name already taken is refused before anything is created.
+      const taken = yield* Effect.exit(handOff(repo.harness, "feature/existing"));
+      expectTypedFailure(taken, { _tag: "WorktreeMcpFailure", code: "invalid_request" });
+      // A failure that does clean up removes only what that call created.
+      yield* repo.breakCheckout;
+      yield* Effect.exit(handOff(repo.harness, "feature/broken"));
+
+      expect(yield* repo.worktrees).toEqual(before);
+      expect(yield* repo.branches).toEqual(["feature/existing", "main"]);
+    }).pipe(Effect.provide(realGitLayer)),
+  );
+
+  it.effect("names the worktree and branch it could not remove after a failed create", () => {
+    const harness = makeHarness({
+      createWorktreeFails: true,
+      existingBranchWorktreePath: "/worktrees/project/feature/stuck",
+      removeWorktreeFails: true,
+    });
+    return Effect.gen(function* () {
+      // The branch check before creating finds no such branch; the lookup after the failure does.
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/stuck" }));
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
+      if (!Exit.isFailure(exit)) return;
+      const message = String(Cause.squash(exit.cause));
+      expect(message).toContain("Unable to create the worktree");
+      expect(message).toContain(
+        "Could not remove the worktree at '/worktrees/project/feature/stuck' and branch 'feature/stuck'",
+      );
+    });
+  });
+
+  it.effect("names the worktree and branch it could not remove after a failed binding", () => {
+    const harness = makeHarness({ dispatchFails: true, deleteLocalBranchFails: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/unbound" }));
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
+      if (!Exit.isFailure(exit)) return;
+      const message = String(Cause.squash(exit.cause));
+      expect(message).toContain("Unable to re-point the thread at the worktree");
+      expect(message).toContain(
+        "Could not remove the worktree at '/worktrees/project/feature/unbound' and branch 'feature/unbound'",
+      );
+    });
+  });
+});
