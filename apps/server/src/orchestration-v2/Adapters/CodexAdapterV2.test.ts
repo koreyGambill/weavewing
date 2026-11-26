@@ -12833,6 +12833,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       readonly entries: ReadonlyArray<CodexReplay.CodexAppServerReplayEntry>;
       readonly gates?: ReadonlyArray<string>;
       readonly resume?: boolean;
+      readonly prompt?: string;
     }) =>
       Effect.gen(function* () {
         const gates = new Map<string, Deferred.Deferred<void>>();
@@ -12857,7 +12858,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           providerThread: harness.providerThread,
           now: yield* DateTime.now,
           attemptId: RunAttemptId.make(`${input.scenario}-attempt`),
-          text: rewindPrompt,
+          text: input.prompt ?? rewindPrompt,
         });
         yield* harness.runtime.startTurn(
           input.resume === true
@@ -12953,14 +12954,50 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       NodeCrypto.layer,
     );
 
-    it.effect(
-      "interrupts the turn after the call, completes the hop, then reverts it and resends the message and its steer",
-      () =>
+    const steered = "Also check SUP-1163.";
+    const resentInput = [
+      { type: "text", text: rewindPrompt },
+      { type: "text", text: steered },
+      { type: "text", text: contextRewindTurnModelText(continuationText, true) },
+    ];
+    const continuationTails = {
+      // Codex refuses the first start; the retry resends the same input without reverting again.
+      rewound: [
+        ...exchange(
+          10,
+          "thread/revert",
+          { threadId: rewindThread, beforeTurnId: rewindTurn },
+          codexReplayThreadResult({ nativeThreadId: rewindThread, forkedFromId: null }),
+        ),
+        turnStart(11, "unused", resentInput)[0]!,
+        {
+          type: "emit_inbound",
+          label: "turn/start",
+          frame: { id: 11, error: { code: -32603, message: "Codex could not start the turn." } },
+        },
+        ...turnStart(12, "continuation-turn", resentInput),
+      ],
+      // The saved turn is no longer the latest, so nothing is reverted and the note says so.
+      replaced: [
+        ...exchange(
+          10,
+          "thread/read",
+          { threadId: rewindThread, includeTurns: false },
+          codexReplayThreadResult({ nativeThreadId: rewindThread, forkedFromId: null }),
+        ),
+        ...turnStart(11, "continuation-turn", [
+          { type: "text", text: contextRewindTurnModelText(continuationText, false) },
+        ]),
+      ],
+    } satisfies Record<string, Array<CodexReplay.CodexAppServerReplayEntry>>;
+
+    it.effect.each(["rewound", "replaced"] as const)(
+      "interrupts the turn after the call, completes the hop, then reverts it only while it is the latest turn and resends its message and steer (%s)",
+      (latest) =>
         Effect.gen(function* () {
-          const steered = "Also check SUP-1163.";
           const { harness, rewind, steer, continuation, open, delivered, awaitItem, steerSent } =
             yield* runRewind({
-              scenario: "codex-context-rewind",
+              scenario: `codex-context-rewind-${latest}`,
               gates: ["turn/steer", "rewind-call"],
               entries: [
                 ...preamble(),
@@ -12999,7 +13036,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                   {
                     data: [
                       {
-                        id: rewindTurn,
+                        id: latest === "rewound" ? rewindTurn : "other-turn",
                         items: [],
                         status: "interrupted",
                         error: null,
@@ -13008,23 +13045,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                     nextCursor: null,
                   },
                 ),
-                ...exchange(
-                  10,
-                  "thread/revert",
-                  { threadId: rewindThread, beforeTurnId: rewindTurn },
-                  codexReplayThreadResult({
-                    nativeThreadId: rewindThread,
-                    forkedFromId: null,
-                  }),
-                ),
-                ...turnStart(11, "continuation-turn", [
-                  { type: "text", text: rewindPrompt },
-                  { type: "text", text: steered },
-                  {
-                    type: "text",
-                    text: contextRewindTurnModelText(continuationText, true),
-                  },
-                ]),
+                ...continuationTails[latest],
                 turnCompleted("continuation-turn", "completed"),
               ],
             });
@@ -13064,7 +13085,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             ),
           );
 
-          yield* continuation(delivered[0]!.continuationMessageId);
+          const messageId = delivered[0]!.continuationMessageId;
+          if (latest === "rewound") {
+            // A failed start keeps the reservation, so the retry still carries the user's message.
+            assert.isTrue(Result.isFailure(yield* continuation(messageId).pipe(Effect.result)));
+          }
+          yield* continuation(messageId);
           yield* harness.awaitTerminal(2);
         }).pipe(Effect.scoped, Effect.provide(layer)),
     );
@@ -13081,22 +13107,45 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         entries: [lookup(70_000), ...terminalsList(4, ["7"])],
       },
       {
+        reason: "background_work",
+        awaitId: "search",
+        entries: [
+          lookup(70_000),
+          {
+            type: "emit_inbound",
+            label: "search",
+            frame: {
+              method: "item/started",
+              params: {
+                threadId: rewindThread,
+                turnId: rewindTurn,
+                startedAtMs: 1782622445020,
+                item: { type: "webSearch", id: "search", query: "checkout latency" },
+              },
+            },
+          },
+        ],
+      },
+      {
         reason: "legacy_history",
         entries: [lookup(70_000), ...terminalsList(4), ...historyRead(5, "legacy")],
       },
-    ] as const)(
-      "refuses a rewind of a turn it cannot rewind faithfully ($reason)",
-      ({ reason, entries }) =>
-        Effect.gen(function* () {
-          const { rewind, delivered, awaitItem } = yield* runRewind({
-            scenario: `codex-context-rewind-${reason}`,
-            entries: [...preamble(), ...entries],
-          });
-          if (entries.length > 0) yield* awaitItem(reason === "compacted" ? "c" : "lookup");
-          // The transcript ends here, so an interrupt or revert would fail the replay.
-          assert.equal(refusalOf(yield* rewind()), reason);
-          assert.isEmpty(delivered);
-        }).pipe(Effect.scoped, Effect.provide(layer)),
+    ] as const)("refuses a rewind of a turn it cannot rewind faithfully ($reason)", (row) =>
+      Effect.gen(function* () {
+        const { reason, entries } = row;
+        const { rewind, delivered, awaitItem } = yield* runRewind({
+          scenario: `codex-context-rewind-${reason}-${"awaitId" in row ? row.awaitId : "item"}`,
+          entries: [...preamble(), ...entries],
+        });
+        if (entries.length > 0) {
+          yield* awaitItem(
+            "awaitId" in row ? row.awaitId : reason === "compacted" ? "c" : "lookup",
+          );
+        }
+        // The transcript ends here, so an interrupt or revert would fail the replay.
+        assert.equal(refusalOf(yield* rewind()), reason);
+        assert.isEmpty(delivered);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
     );
 
     it.effect("refuses to rewind a turn that did not start from a message of its own", () =>
@@ -13110,6 +13159,86 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.equal(refusalOf(yield* rewind()), "message_not_rebuildable");
         assert.isEmpty(delivered);
       }).pipe(Effect.scoped, Effect.provide(layer)),
+    );
+
+    it.effect("refuses to rewind a turn whose message carries a numbered origin", () =>
+      Effect.gen(function* () {
+        // Replies resolve n="1" against the continuation's own messages, not this resent one.
+        const prompt = `<t3_origin n="1" from="thread" title="Parent">An agent, not the user.</t3_origin>\n\n${rewindPrompt}`;
+        const { rewind, delivered, awaitItem } = yield* runRewind({
+          scenario: "codex-context-rewind-numbered-origin",
+          prompt,
+          entries: [...preamble([{ type: "text", text: prompt }]), lookup(70_000)],
+        });
+        yield* awaitItem("lookup");
+        assert.equal(refusalOf(yield* rewind()), "message_not_rebuildable");
+        assert.isEmpty(delivered);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    );
+
+    it.effect.each([
+      { target: "before-rewind", reverted: "native-c" },
+      { target: "rewound-turn", reverted: "native-c" },
+    ] as const)(
+      "restores a checkpoint from $target without reverting a turn a rewind already removed",
+      ({ target, reverted }) =>
+        Effect.gen(function* () {
+          // A, then B rewound and reverted, then its continuation C: Codex now holds A and C.
+          const { harness } = yield* runRewind({
+            scenario: `codex-context-rewind-rollback-${target}`,
+            entries: [
+              ...preamble(),
+              turnCompleted(rewindTurn, "completed"),
+              ...historyRead(4, "paginated"),
+              ...exchange(
+                5,
+                "thread/turns/list",
+                {
+                  threadId: rewindThread,
+                  cursor: null,
+                  limit: target === "before-rewind" ? 2 : 1,
+                  sortDirection: "desc",
+                  itemsView: "summary",
+                },
+                {
+                  data: [
+                    { id: "native-c", items: [], status: "completed", error: null },
+                    { id: "native-a", items: [], status: "completed", error: null },
+                  ].slice(0, target === "before-rewind" ? 2 : 1),
+                  nextCursor: target === "before-rewind" ? null : "more",
+                },
+              ),
+              ...exchange(
+                6,
+                "thread/revert",
+                { threadId: rewindThread, beforeTurnId: reverted },
+                codexReplayThreadResult({ nativeThreadId: rewindThread, forkedFromId: null }),
+              ),
+            ],
+          });
+          yield* harness.awaitTerminal(1);
+          const now = yield* DateTime.now;
+          const turn = (id: string, ordinal: number) =>
+            codexReplaySourceTurn({
+              id: `provider-turn-${id}`,
+              ordinal,
+              nativeId: `native-${id}`,
+              providerThreadId: harness.providerThread.id,
+              now,
+            });
+          const turns = [turn("a", 1), turn("b", 2), turn("c", 3)];
+          const snapshot = yield* harness.runtime.rollbackThread({
+            providerThread: harness.providerThread,
+            target: {
+              type: "provider_turn",
+              checkpointId: CheckpointId.make(`checkpoint-${target}`),
+              appRunOrdinal: 1,
+              providerTurn: target === "before-rewind" ? turns[0]! : turns[1]!,
+            },
+            providerThreadTurns: turns,
+          });
+          assert.equal(snapshot.providerThread.nativeThreadRef?.nativeId, rewindThread);
+        }).pipe(Effect.scoped, Effect.provide(layer)),
     );
 
     it.effect("releases the reservation when the continuation cannot be queued", () =>
