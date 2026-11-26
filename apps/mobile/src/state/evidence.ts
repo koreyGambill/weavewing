@@ -27,6 +27,24 @@ export const evidenceThread = createEnvironmentRpcQueryAtomFamily(connectionAtom
   refreshTrigger: ({ environmentId }) => evidenceChangeSignal(environmentId),
 });
 
+/** One page of landings across threads, newest first, refetched when the revision moves. */
+export const evidenceList = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "mobile-evidence:list",
+  tag: WS_METHODS.evidenceList,
+  staleTimeMs: 0,
+  idleTtlMs: 0,
+  refreshTrigger: ({ environmentId }) => evidenceChangeSignal(environmentId),
+});
+
+/** One landing with its changes and their QA, read while its card is open. */
+export const evidenceGet = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "mobile-evidence:get",
+  tag: WS_METHODS.evidenceGet,
+  staleTimeMs: 0,
+  idleTtlMs: 0,
+  refreshTrigger: ({ environmentId }) => evidenceChangeSignal(environmentId),
+});
+
 export const evidenceSetQa = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "mobile-evidence:setQa",
   tag: WS_METHODS.evidenceSetQa,

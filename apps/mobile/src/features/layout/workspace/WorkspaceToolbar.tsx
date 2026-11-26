@@ -21,6 +21,7 @@ import { shouldRestoreNativeSearch } from "./workspace-tabs-state";
 import { useFloatingWorkspaceTabs, useSidebarWorkspaceTabs } from "./useSystemWorkspaceTabBar";
 import { WorkspaceTabToolbarButtons } from "./WorkspaceSectionToolbar";
 import { useInboxHeader } from "../../inbox/useInboxHeader";
+import { useEvidenceHeader } from "../../evidence/useEvidenceHeader";
 import { useWorkspaceConnectionState } from "../../../state/workspace";
 
 const SEARCH_LABELS = {
@@ -53,6 +54,7 @@ export function WorkspaceToolbar(props: {
   const searchRef = useRef<SearchBarCommands>(null);
   const settingsMenu = useSettingsEnvironmentMenu();
   const inbox = useInboxHeader();
+  const evidence = useEvidenceHeader();
   const { hasConnections } = useWorkspaceConnectionState();
   // The Settings list takes the selected tab's place, so search follows it.
   const selectedTab = workspace.settingsOpen ? "settings" : workspace.state.selectedTab;
@@ -228,6 +230,15 @@ export function WorkspaceToolbar(props: {
               onPress={inbox.open}
             />
           ) : null}
+          {/* Inside Inbox, so Inbox keeps its place as Evidence shows and hides. */}
+          {selectedTab === "threads" && hasConnections && evidence.available ? (
+            <Toolbar.Button
+              identifier="workspace-evidence"
+              accessibilityLabel={evidence.accessibilityLabel}
+              icon={evidence.awaiting > 0 ? "checklist.unchecked" : "checklist"}
+              onPress={evidence.open}
+            />
+          ) : null}
         </Toolbar>
       )}
       <Toolbar placement="bottom">
@@ -235,6 +246,7 @@ export function WorkspaceToolbar(props: {
         {bottomSearch && searchVisible ? <Toolbar.SearchBarSlot /> : null}
       </Toolbar>
       {inbox.sheet}
+      {evidence.sheet}
     </>
   );
 }

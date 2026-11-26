@@ -15,6 +15,7 @@ export type QaChange = EvidenceLanding["changes"][number];
 
 export type QaCardStatus =
   | "open"
+  | "quiet"
   | "in-composer"
   | "discussing"
   | "confirmed"
@@ -24,6 +25,7 @@ export type QaCardStatus =
 
 export const QA_STATUS_LABEL: Record<QaCardStatus, string> = {
   open: "Open",
+  quiet: "Nothing to check",
   "in-composer": "In composer",
   discussing: "Discussing",
   confirmed: "Confirmed by you",
@@ -46,7 +48,9 @@ export function qaCardStatus(qa: EvidenceChangeQa, inComposer: boolean): QaCardS
     case "pending":
     case "quiet":
       if (inComposer) return "in-composer";
-      return qa.discussedMessageId === undefined ? "open" : "discussing";
+      if (qa.discussedMessageId !== undefined) return "discussing";
+      // Recorded quietly: only Evidence lists it, and the user may still answer it.
+      return qa.state === "quiet" ? "quiet" : "open";
     case "problem":
       return "agent-fixing";
     case "confirmed":
