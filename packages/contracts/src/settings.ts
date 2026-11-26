@@ -760,6 +760,11 @@ export interface ProviderSettingsFormAnnotation {
   readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
   /** Which options a checklist's stored list holds; `unchecked` ticks every option not in it. */
   readonly checklistStores?: "checked" | "unchecked" | undefined;
+  /**
+   * For a select whose schema decodes any value it does not offer as its first option: the form
+   * shows that option for such a stored value instead of the value itself.
+   */
+  readonly unofferedValuesReadAsFirst?: boolean | undefined;
 }
 
 export function secretSettingsFields(schema: {
@@ -1057,6 +1062,8 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         providerSettingsForm: {
           control: "select",
           options: CLAUDE_AI_CONNECTOR_MODES,
+          // The decoder reads "inherit", from before this setting, and any other value as Off.
+          unofferedValuesReadAsFirst: true,
           clearWhenEmpty: "omit",
         },
       }),

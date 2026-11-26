@@ -121,3 +121,24 @@ it("shows the claude.ai connectors default, Off, for a value an older version sa
     .element(screen.getByRole("combobox", { name: "claude.ai connectors in new threads" }))
     .toHaveTextContent("Off");
 });
+
+it("shows a select's unsupported stored value unless its schema reads it as the default", async () => {
+  function AntigravityForm() {
+    const [value, setValue] = useState<Record<string, unknown> | undefined>({
+      authMethod: "fixture-unsupported",
+    });
+    return (
+      <ProviderSettingsForm
+        definition={providerClients.get(ProviderDriverKind.make("antigravity"))!}
+        value={value}
+        idPrefix="antigravity"
+        variant="dialog"
+        onChange={setValue}
+      />
+    );
+  }
+  await using screen = await render(<AntigravityForm />);
+  await expect
+    .element(screen.getByRole("combobox", { name: "Sign-in method" }))
+    .toHaveTextContent("fixture-unsupported");
+});

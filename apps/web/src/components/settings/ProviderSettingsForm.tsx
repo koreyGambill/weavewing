@@ -53,6 +53,8 @@ export interface ProviderSettingsFieldModel {
   readonly defaultSelection?: ReadonlyArray<string> | undefined;
   /** Which options a checklist's stored list holds: the ticked ones, or the unticked ones. */
   readonly checklistStores?: "checked" | "unchecked" | undefined;
+  /** A select whose schema reads a value it does not offer as its first option. */
+  readonly unofferedValuesReadAsFirst?: boolean | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -171,6 +173,9 @@ export function deriveProviderSettingsFields(
           ...((formAnnotation.control === "select" || formAnnotation.control === "checklist") &&
           formAnnotation.options
             ? { options: formAnnotation.options }
+            : {}),
+          ...(formAnnotation.control === "select" && formAnnotation.unofferedValuesReadAsFirst
+            ? { unofferedValuesReadAsFirst: true }
             : {}),
           ...(formAnnotation.control === "checklist" && formAnnotation.presets
             ? { presets: formAnnotation.presets }
@@ -640,8 +645,12 @@ function ProviderSettingsSelect({
   const options = field.options ?? [];
   const fallback = options[0]?.value ?? "";
   const stored = readProviderConfigString(value, field.key);
-  // A value the field no longer offers, such as one an older version saved, shows the default.
-  const current = options.some((option) => option.value === stored) ? stored : fallback;
+  // Only a field whose schema reads an unoffered value as its first option may show it so; others
+  // show the stored value, which the server rejects, rather than a default it is not using.
+  const current =
+    field.unofferedValuesReadAsFirst && !options.some((option) => option.value === stored)
+      ? fallback
+      : stored || fallback;
   const label = options.find((option) => option.value === current)?.label ?? current;
   return (
     <Select
