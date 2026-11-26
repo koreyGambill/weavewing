@@ -2101,7 +2101,7 @@ it.effect(
       Effect.gen(function* () {
         const evidence = yield* Service.EvidenceService;
         yield* seedThread({ id: "lead" });
-        for (const [index, attention] of [undefined, "note", "needs_you"].entries()) {
+        for (const [index, attention] of ([undefined, "note", "needs_you"] as const).entries()) {
           const landingId = `states-${index}`;
           yield* seedStates(landingId);
           const before = yield* storedRows(landingId);

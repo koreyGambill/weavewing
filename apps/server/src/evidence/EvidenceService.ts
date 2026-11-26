@@ -782,8 +782,8 @@ const make = Effect.gen(function* () {
     );
     // A Notes page ends at the landing that would take it past the note limit.
     let listed = 0;
-    const kept = items.filter((item, index) => {
-      listed += item.notes?.length ?? 0;
+    const kept = items.filter((_item, index) => {
+      listed += decoded[index]!.notes?.length ?? 0;
       return index === 0 || listed <= EVIDENCE_NOTES_PAGE_LIMIT;
     });
     const last = kept.at(-1);
