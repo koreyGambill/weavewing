@@ -274,11 +274,15 @@ export const EvidenceAgentQaInput = EvidenceAgentQaInputFields.check(
 export type EvidenceAgentQaInput = typeof EvidenceAgentQaInput.Type;
 
 export const EVIDENCE_THREAD_LANDING_LIMIT = 50;
+/** How many landings one thread read may ask for by id. */
+export const EVIDENCE_THREAD_REQUEST_LIMIT = 200;
 
 export const EvidenceThreadInput = Schema.Struct({
   threadId: ThreadId,
   /** Landings the loaded timeline places, read even when they are older than the newest page. */
-  landingIds: Schema.optional(Schema.Array(EvidenceSlug).check(Schema.isMaxLength(200))),
+  landingIds: Schema.optional(
+    Schema.Array(EvidenceSlug).check(Schema.isMaxLength(EVIDENCE_THREAD_REQUEST_LIMIT)),
+  ),
 });
 export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
 

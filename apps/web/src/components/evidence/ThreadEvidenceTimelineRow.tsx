@@ -4,6 +4,7 @@ import { ArrowUpRightIcon, CheckIcon } from "lucide-react";
 import { use } from "react";
 
 import { useThreadEvidence } from "../../state/evidence";
+import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Button } from "../ui/button";
 import { qaCardTitle, qaPresence } from "./qaCard.logic";
 import { ThreadEvidenceContext } from "./ThreadEvidenceContext";
@@ -18,6 +19,24 @@ function MutedLine({ children }: { children: React.ReactNode }) {
       <CheckIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
       <span className="min-w-0">{children}</span>
     </p>
+  );
+}
+
+/** A placed landing outside this thread's read: shown in Evidence, where every landing lists. */
+function OpenInEvidenceLine({ landingId }: { landingId: string }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 px-1 text-xs text-muted-foreground">
+      <CheckIcon aria-hidden className="size-3 shrink-0" />
+      <span className="min-w-0 break-words">Landing {landingId}</span>
+      <Button
+        variant="link"
+        size="micro"
+        onClick={() => useThreadContextSidebarStore.getState().show("evidence")}
+      >
+        <ArrowUpRightIcon />
+        Open in Evidence
+      </Button>
+    </div>
   );
 }
 
@@ -70,13 +89,16 @@ export function ThreadEvidenceTimelineRow({
   // The thread's timeline reads its landings once for every row; a timeline shown elsewhere reads here.
   const shared = use(ThreadEvidenceContext);
   const own = useThreadEvidence(shared === null ? threadRef : null, landingIds);
-  const { data, error, supported } = shared ?? own;
+  const { data, error, supported, requested } = shared ?? own;
   return (
     <div className="flex min-w-0 flex-col gap-2 px-1 py-0.5">
       {landingIds.map((landingId) => {
         const landing = data?.landings.find((candidate) => candidate.id === landingId);
         if (landing === undefined) {
           if (!supported) return null;
+          // A landing the read did not ask for may still exist, so it gets a way in, not a verdict.
+          if (data !== null && !requested.has(landingId))
+            return <OpenInEvidenceLine key={landingId} landingId={landingId} />;
           return (
             <p
               key={landingId}

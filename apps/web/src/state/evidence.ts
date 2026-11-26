@@ -121,7 +121,7 @@ export function useThreadEvidence(
           },
         }),
   );
-  return { ...query, supported: environmentId !== null };
+  return { ...query, supported: environmentId !== null, requested: new Set(landingIds) };
 }
 
 export function useEvidenceCounts(environmentId: EnvironmentId | null) {

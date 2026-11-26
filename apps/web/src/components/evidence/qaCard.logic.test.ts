@@ -157,6 +157,20 @@ describe("withChildLandingCards", () => {
     ).toEqual(["ask", "next-start", "next-end", "cards:l1"]);
   });
 
+  it("asks for at most 200 landings, keeping those nearest the end of the loaded timeline", () => {
+    const entries = Array.from({ length: 201 }, (_, index): TimelineEntry => ({
+      id: `call-${index}`,
+      kind: "thread-evidence",
+      createdAt: `2026-11-25T10:00:00Z`,
+      runId: null,
+      landingIds: [`landing-${String(index).padStart(3, "0")}`],
+    }));
+    const requested = placedLandingIds(entries);
+    expect(requested).toHaveLength(200);
+    expect(requested).not.toContain("landing-000");
+    expect(requested).toContain("landing-200");
+  });
+
   it("asks for every landing the timeline places at its own calls, once each", () => {
     const placed = (id: string, landingIds: ReadonlyArray<string>): TimelineEntry => ({
       id,

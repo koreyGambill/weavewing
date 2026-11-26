@@ -1,4 +1,9 @@
-import type { EvidenceChangeQa, EvidenceLanding, ThreadId } from "@t3tools/contracts";
+import {
+  EVIDENCE_THREAD_REQUEST_LIMIT,
+  type EvidenceChangeQa,
+  type EvidenceLanding,
+  type ThreadId,
+} from "@t3tools/contracts";
 
 import type { TimelineEntry } from "../../session-logic";
 
@@ -161,9 +166,18 @@ export function timelineMayHoldQa(
 }
 
 /** The landings the loaded timeline places at its own `evidence_record` calls, sorted. */
-export function placedLandingIds(entries: ReadonlyArray<TimelineEntry>): ReadonlyArray<string> {
-  const ids = new Set(
-    entries.flatMap((entry) => (entry.kind === "thread-evidence" ? entry.landingIds : [])),
-  );
-  return [...ids].toSorted();
+export function placedLandingIds(
+  entries: ReadonlyArray<TimelineEntry>,
+  limit = EVIDENCE_THREAD_REQUEST_LIMIT,
+): ReadonlyArray<string> {
+  // Newest last, so a long history keeps the landings nearest the end of what is loaded.
+  const newestLast = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind !== "thread-evidence") continue;
+    for (const id of entry.landingIds) {
+      newestLast.delete(id);
+      newestLast.add(id);
+    }
+  }
+  return [...newestLast].slice(-limit).toSorted();
 }
