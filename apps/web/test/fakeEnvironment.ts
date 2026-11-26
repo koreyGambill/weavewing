@@ -220,6 +220,10 @@ function run(
 
 export interface FakeThread {
   readonly worktreePath?: string;
+  /** Shell fields the scenario sets, such as pull request links or the starting automation. */
+  readonly shell?: Partial<
+    Pick<OrchestrationV2ThreadShell, "pullRequests" | "automationTaskId" | "branch">
+  >;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
   readonly contextArchive?: OrchestrationV2ThreadShell["lineage"]["contextArchive"];
@@ -347,6 +351,7 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
     settledAt: thread.olderSettled ? AT : null,
     lastVisitedAt: AT,
     deletedAt: null,
+    ...thread.shell,
   };
 }
 

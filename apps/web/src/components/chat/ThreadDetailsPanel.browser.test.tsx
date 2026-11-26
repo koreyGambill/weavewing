@@ -193,6 +193,9 @@ import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout } from "./chatCanvasLayout";
 import { ThreadDetailsPanel } from "./ThreadDetailsPanel";
+import { useComposerRowChipItems } from "./threadComposerRowChips";
+import { useEnvironmentQuery } from "~/state/query";
+import { vcsEnvironment } from "~/state/vcs";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("environment"),
@@ -237,6 +240,22 @@ function setup(input: {
   };
 }
 
+/** The row's pull request chip, as the composer strip shows it beside the branch. */
+function PullRequestChip() {
+  const status = useEnvironmentQuery(
+    vcsEnvironment.status({
+      environmentId: threadRef.environmentId,
+      input: { cwd: state.folder },
+    }),
+  );
+  const chip = useComposerRowChipItems({
+    threadRef,
+    branch: "feature",
+    gitStatus: status.data,
+  }).find((item) => item.id === "pull-request");
+  return chip && !chip.hidden ? chip.renderRowItem?.() : null;
+}
+
 function Panel({
   fixture,
   composerContextAvailable = true,
@@ -261,13 +280,16 @@ function Panel({
       }}
     >
       {state.git && composerContextAvailable ? (
-        <BranchToolbarBranchSelector
-          environmentId={threadRef.environmentId}
-          threadId={threadRef.threadId}
-          envLocked
-          startFromOrigin={false}
-          onStartFromOriginChange={noop}
-        />
+        <>
+          <BranchToolbarBranchSelector
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            envLocked
+            startFromOrigin={false}
+            onStartFromOriginChange={noop}
+          />
+          <PullRequestChip />
+        </>
       ) : null}
       <ThreadDetailsPanel
         anchor={fixture.anchor}

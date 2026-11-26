@@ -9,12 +9,14 @@ import {
   type OrchestrationV2Subagent,
   ORCHESTRATION_V2_WS_METHODS,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import * as DateTime from "effect/DateTime";
 import type { ReviewDiffPreviewInput } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
@@ -34,6 +36,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { getRouter } from "~/router";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { serverEnvironment } from "~/state/server";
 import { environmentThreadDetails } from "~/state/threads";
 import {
   ENVIRONMENT_ID,
@@ -50,6 +53,7 @@ import {
   threadWithHistory,
   threadWithQuestion,
   type FakeDriver,
+  type FakeThread,
 } from "../../test/fakeEnvironment";
 import { act, fakeTimers, render } from "../../test/render";
 
@@ -1078,13 +1082,23 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
   await expect.element(menuButton).toHaveFocus();
 });
 
-async function renderRowAtWidth(name: string, worktreePath: string, width: number) {
+async function renderRowAtWidth(
+  name: string,
+  worktreePath: string,
+  width: number,
+  shell?: FakeThread["shell"],
+) {
   await import("~/index.css");
   const stack = new AsyncDisposableStack();
   const initial = { width: window.innerWidth, height: window.innerHeight };
   stack.defer(() => page.viewport(initial.width, initial.height));
   await page.viewport(width, 860);
-  const thread = { ...threadWithHistory(name, 1), olderSettled: true as const, worktreePath };
+  const thread = {
+    ...threadWithHistory(name, 1),
+    olderSettled: true as const,
+    worktreePath,
+    ...(shell ? { shell } : {}),
+  };
   stack.use(
     installFakeEnvironment([thread], {
       vcsStatus: {
@@ -1132,6 +1146,95 @@ it("returns the branch from the thread menu when the row widens again", async ()
   await vi.waitFor(() => expect(branchInMenu()).toBe(true));
   await page.viewport(1280, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(false), { timeout: 3000 });
+});
+
+const inMenu = (id: string) =>
+  document.querySelector(`[data-composer-row-item="${id}"][data-in-menu]`) !== null;
+const inRow = (id: string) =>
+  document.querySelector(`[data-composer-row-item="${id}"]:not([data-in-menu])`) !== null;
+
+it("returns the chips and the branch from the thread menu when the row widens again", async () => {
+  using _tasks = answerRpc(WS_METHODS.scheduledTasksSubscribe, () =>
+    Stream.concat(
+      Stream.make({
+        tasks: [{ id: "nightly-task", title: "Nightly sweep", threadId: null }],
+      }),
+      Stream.never,
+    ),
+  );
+  // An earlier test's environment may still hold the stream, so subscribe again for this answer.
+  appAtomRegistry.refresh(
+    serverEnvironment.scheduledTasksLive({ environmentId: ENVIRONMENT_ID, input: {} }),
+  );
+  await using _row = await renderRowAtWidth("row-chips", "/w/render", 1280, {
+    automationTaskId: ScheduledTaskId.make("nightly-task"),
+    pullRequests: [
+      {
+        host: "github.com",
+        repository: "acme/render",
+        number: 42,
+        url: "https://github.com/acme/render/pull/42",
+        source: "manual",
+        linkedAt: "2026-01-01T00:00:00.000Z",
+        snapshot: {
+          state: "open",
+          title: "Show the retry count",
+          headBranch: "feature/retry-count",
+          baseBranch: "main",
+          isDraft: false,
+          updatedAt: null,
+          syncedAt: "2026-01-01T00:00:00.000Z",
+        },
+        stack: null,
+      },
+    ],
+  });
+  const pullRequest = page.getByRole("link", { name: /#42/ });
+  await expect.element(pullRequest).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: /^Automation: Nightly sweep/ }))
+    .toBeVisible();
+  await vi.waitFor(() => expect(["branch", "pull-request", "automation"].every(inRow)).toBe(true));
+
+  await page.viewport(320, 860);
+  await vi.waitFor(() => expect(["branch", "pull-request", "automation"].every(inMenu)).toBe(true));
+  // Each chip's thread menu row shows the chip's own value.
+  await page.getByRole("button", { name: "Thread menu" }).click();
+  const menu = page.getByRole("menu");
+  await expect
+    .element(menu.getByRole("menuitem", { name: /#42/ }))
+    .toHaveTextContent("#42Pull request");
+  await expect
+    .element(menu.getByRole("menuitem", { name: /^Automation: Nightly sweep/ }))
+    .toHaveTextContent("Nightly sweepAutomation");
+  await userEvent.keyboard("{Escape}");
+
+  await page.viewport(1280, 860);
+  await vi.waitFor(() => expect(["branch", "pull-request", "automation"].every(inRow)).toBe(true), {
+    timeout: 3000,
+  });
+});
+
+it("opens the location menu from the keyboard and returns focus on Escape", async () => {
+  await using _row = await renderRowAtWidth("row-location", "/w/render", 1280);
+  const location = page.getByRole("button", { name: /^Location:/ });
+  await expect.element(location).toBeVisible();
+  (await location.element()).focus();
+  await userEvent.keyboard("{Enter}");
+  const menu = page.getByRole("menu");
+  const changeFolder = menu.getByRole("menuitem", { name: /Change folder/ });
+  await expect.element(changeFolder).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(menu).not.toBeInTheDocument();
+  await expect.element(location).toHaveFocus();
+
+  await userEvent.keyboard("{Enter}");
+  await expect.element(changeFolder).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  const dialog = page.getByRole("dialog", { name: "Change folder" });
+  await expect.element(dialog).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
 });
 
 it("keeps a narrow location label's ellipsis inside the box it is given", async () => {
