@@ -385,7 +385,6 @@ export function ThreadQuestionCard({
                         ? HELP.discuss
                         : HELP.discussDisabled
                 }
-                aria-pressed={inComposer === "discuss"}
                 disabled={!usable || (inComposer !== "discuss" && notes.trim() === "")}
                 onClick={() =>
                   inComposer === "discuss"
@@ -393,7 +392,7 @@ export function ThreadQuestionCard({
                     : void toComposer("discuss")
                 }
               >
-                Discuss
+                {inComposer === "discuss" ? "Cancel" : "Discuss"}
               </HelpButton>
               <HelpButton
                 help={

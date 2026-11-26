@@ -152,3 +152,21 @@ it("puts the image in the composer with the answer and takes it out on Cancel", 
   await expect.element(screen.getByRole("img", { name: "[Q1 image 1]" })).toBeVisible();
   await expect.element(note).toHaveValue("[Q1 image 1]");
 });
+
+it("turns Discuss into Cancel while the note is in the composer", async () => {
+  using _drafts = freshDrafts();
+  // router: false because the card never navigates.
+  await using screen = await render(<SavedQuestionCard />, { router: false });
+  await userEvent.fill(screen.getByRole("textbox", { name: "Note for Q1" }), "Why a sidebar?");
+  const composerChips = () =>
+    (useComposerDraftStore.getState().getComposerDraft(threadRef)?.artifactAnswers ?? []).length;
+
+  await userEvent.tab();
+  await userEvent.click(screen.getByRole("button", { name: "Discuss" }));
+  await vi.waitFor(() => expect(composerChips()).toBe(1));
+  await expect.element(screen.getByRole("button", { name: "Discuss" })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await vi.waitFor(() => expect(composerChips()).toBe(0));
+  await expect.element(screen.getByRole("button", { name: "Discuss" })).toBeVisible();
+});
