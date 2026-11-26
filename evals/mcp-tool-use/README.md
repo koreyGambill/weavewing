@@ -91,16 +91,16 @@ On the parent-folder case, Haiku's absolute share rose from 17% to 62% and Sonne
 
 ## Resumed-session cases
 
-`cases/resumed-instructions.ndjson` checks the notice T3 sends a resumed Claude session whose instructions changed since it started. Passes per case through `--transport claude-cli` on 2026-11-26, with `--without-instruction-notice` (4 samples) → without it:
+`cases/resumed-instructions.ndjson` checks the notice T3 sends a resumed Claude session whose instructions changed since it started. Passes per case through `--transport claude-cli` on 2026-11-26, with `--without-instruction-notice` → with the notice that says "Apply these sections from now on":
 
-| Case                             | Kind    | Haiku 5.5  | Sonnet 5.5 |
-| -------------------------------- | ------- | ---------- | ---------- |
-| resumed-changed-section-new-form | bad     | 0/4 → 5/12 | 0/4 → 4/4  |
-| resumed-qa-notice-confirms       | guard   | 4/4 → 4/4  | 4/4 → 4/4  |
-| resumed-notice-not-recapped      | guard   | 4/4 → 3/3  | 4/4 → 4/4  |
-| resumed-no-change-control        | control | 4/4 → 4/4  | 4/4 → 4/4  |
+| Case                             | Kind    | Haiku 5.5 | Sonnet 5.5 |
+| -------------------------------- | ------- | --------- | ---------- |
+| resumed-changed-section-new-form | bad     | 0/4 → 5/8 | 0/4 → 4/4  |
+| resumed-qa-notice-confirms       | guard   | 4/4 → 4/4 | 4/4 → 4/4  |
+| resumed-notice-not-recapped      | guard   | 4/4 → 4/4 | 4/4 → 4/4  |
+| resumed-no-change-control        | control | 4/4 → 4/4 | 4/4 → 4/4  |
 
-Haiku follows a changed section about half the time; the same 8 samples without the notice's marker line also passed 4 of 8. A session that never saw the QA section still records "that works", because `evidence_qa_update`'s own description carries that rule; the case guards that the notice leaves it intact. One Haiku sample errored in the shell simulator. A run of the four cases costs about $0.10 on Haiku and $0.60 on Sonnet, as the CLI reported.
+The earlier wording, which called the notice ambient context, passed the changed-section case 5 of 12 times on Haiku. A session that never saw the QA section still records "that works", because `evidence_qa_update`'s own description carries that rule; the case guards that the notice leaves it intact. A run of the four cases costs about $0.10 on Haiku and $0.90 on Sonnet, as the CLI reported.
 
 ## Where T3's text lives
 
