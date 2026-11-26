@@ -9,9 +9,10 @@ import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTa
 import {
   claudeAppendSections,
   claudeInstructionRecord,
-  claudeInstructionRecordBeforeNotices,
   claudeInstructionUpdate,
   claudeSectionDigest,
+  claudeSectionLabel,
+  CLAUDE_CUSTOM_APPEND_SECTION,
   sameClaudeInstructionRecord,
   type ClaudeAppendSection,
   type ClaudeInstructionRecord,
@@ -2350,18 +2351,20 @@ const subagentDeviceInstructions: HookCallback = () =>
     },
   });
 
+const CLAUDE_KNOWN_APPEND_ENTRIES = [
+  { key: "t3_code_runtime", text: buildRuntimeInstructions({ harness: "Claude Code" }) },
+  { key: "t3_code_orchestration", text: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
+  { key: "t3_code_background", text: CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS },
+  { key: "t3_code_send_to_user", text: CLAUDE_SEND_TO_USER_INSTRUCTIONS },
+  { key: "t3_code_devices", text: T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH },
+  { key: "t3_code_questions", text: T3_CODE_QUESTION_TOOL_INSTRUCTIONS },
+];
+
 /** Partitions the actual SDK append into generated and custom text without changing its total byte count. */
 export function claudePreparedContextEntries(
   append: string,
 ): ReadonlyArray<{ readonly key: string; readonly text: string }> {
-  const known = [
-    { key: "t3_code_runtime", text: buildRuntimeInstructions({ harness: "Claude Code" }) },
-    { key: "t3_code_orchestration", text: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
-    { key: "t3_code_background", text: CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS },
-    { key: "t3_code_send_to_user", text: CLAUDE_SEND_TO_USER_INSTRUCTIONS },
-    { key: "t3_code_devices", text: T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH },
-    { key: "t3_code_questions", text: T3_CODE_QUESTION_TOOL_INSTRUCTIONS },
-  ];
+  const known = CLAUDE_KNOWN_APPEND_ENTRIES;
   let remainder = append;
   const entries: { key: string; text: string }[] = [];
   for (const entry of known) {
@@ -2435,9 +2438,25 @@ function claudeResumedPreparedContext(input: {
     ]),
   );
   const start = input.record?.start ?? null;
-  const known = (start ?? []).flatMap((section) => {
+  // A start section is known when its current copy matches it to the byte.
+  const knownText = (section: NonNullable<typeof start>[number]) => {
     const match = current.get(section.name);
-    return match?.digest === section.digest ? [match.section.text] : [];
+    return match?.digest === section.digest &&
+      Buffer.byteLength(match.section.text, "utf8") === section.bytes
+      ? match.section.text
+      : undefined;
+  };
+  // Each section is grouped on its own, so one changed section leaves the others' labels intact.
+  const known = (start ?? []).flatMap((section) => {
+    const text = knownText(section);
+    if (text === undefined) return [];
+    const body = text.trim();
+    const key =
+      section.name === CLAUDE_CUSTOM_APPEND_SECTION
+        ? "custom_claude_append"
+        : (CLAUDE_KNOWN_APPEND_ENTRIES.find((entry) => entry.text.includes(body))?.key ??
+          "t3_code_orchestration");
+    return [{ key, text }];
   });
   return {
     source:
@@ -2445,14 +2464,14 @@ function claudeResumedPreparedContext(input: {
         ? "Claude Code replays this session's first systemPrompt.append, which predates T3's record, so its size is unknown; T3's update notice is counted separately; preset harness text unavailable"
         : "Claude SDK systemPrompt.append as this session started with it, which Claude Code replays on resume; T3's update notice is counted separately; preset harness text unavailable",
     entries: [
-      ...claudePreparedContextEntries(known.join("")),
+      ...known,
       ...(input.notice === null ? [] : [{ key: "t3_update_notice", text: input.notice }]),
     ],
     sizedEntries: (start ?? [])
-      .filter((section) => current.get(section.name)?.digest !== section.digest)
+      .filter((section) => knownText(section) === undefined)
       .map(({ name, bytes }) => ({
-        key: "t3:earlier-copy",
-        label: `Earlier copy of ${name}`,
+        key: `t3:earlier-copy:${name}`,
+        label: `Earlier copy of ${claudeSectionLabel(name)}`,
         bytes,
       })),
   };
@@ -5506,6 +5525,15 @@ interface ClaudeLiveQueryContext {
   readonly taskOutputRoot: string | undefined;
   // The append this process was opened with, which compaction and /clear make the session's own.
   readonly appendSections: ReadonlyArray<ClaudeAppendSection>;
+  // The instruction context this process uses, with the notice of the turn that reports it.
+  readonly preparedContext: (
+    notice: string | null,
+    injectedTools?: ReadonlyArray<string>,
+  ) => Parameters<NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["onContextPrepared"]>>[0];
+  injectedTools: ReadonlyArray<string> | undefined;
+  readonly openedForAttempt: string;
+  // The notice the turn that opened this process carries, once that turn decides to send one.
+  openingNotice: string | null;
 }
 
 interface ActiveClaudeToolCall {
@@ -9584,8 +9612,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly threadDisposition?: "reusable" | "broken";
           readonly result?: SDKResultMessage;
         }) {
-          // CLIs that neither echo nor report the prompt's lifecycle confirm it by completing.
-          if (requested.status === "completed") yield* recordInstructionUpdate(requested.context);
           // A turn stopped by the retry budget settles as failed with the retry's error.
           const retryBudgetFailure = requested.context.retryBudgetFailure;
           const input =
@@ -13344,7 +13370,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   instructionRecords.get(nativeThreadId) ??
                   turnInput.providerThread.nativeMetadata?.claudeInstructions,
                 sections: appendSections,
-                cut: resumeSessionAt !== undefined,
+                // A context rewind keeps the turn's prompt, every later user message and any
+                // compaction, so only a rollback cut leaves the session at another point.
+                cut: rewindCut === undefined && resumeSessionAt !== undefined,
               })
             : { notice: null, next: claudeInstructionRecord(appendSections) };
           if (instructionUpdate.notice === null) {
@@ -13353,13 +13381,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           } else {
             pendingInstructionUpdates.set(nativeThreadId, instructionUpdate);
           }
-          const preparedContext = (injectedTools?: ReadonlyArray<string>) =>
+          // The notice counts toward the turn whose prompt carries it, which startTurn decides.
+          const preparedContext = (notice: string | null, injectedTools?: ReadonlyArray<string>) =>
             shouldResume
               ? {
                   ...claudeResumedPreparedContext({
                     record: instructionUpdate.next,
                     sections: appendSections,
-                    notice: instructionUpdate.notice,
+                    notice,
                   }),
                   ...(injectedTools === undefined ? {} : { injectedTools }),
                 }
@@ -13375,7 +13404,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     injectedTools,
                   };
           if (turnInput.onContextPrepared) {
-            yield* turnInput.onContextPrepared(preparedContext());
+            yield* turnInput.onContextPrepared(preparedContext(null));
           }
           const resolvedTurnCwd = yield* fileSystem
             .realPath(turnInput.runtimePolicy.cwd ?? ".")
@@ -13462,6 +13491,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               hostPlatform,
             ),
             appendSections,
+            preparedContext,
+            injectedTools: undefined,
+            openedForAttempt: turnInput.attemptId,
+            openingNotice: null,
           };
           // One step, so the replaced process cannot exit between the install and the handoff.
           yield* Ref.update(queryContext, (replaced) => {
@@ -13489,8 +13522,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       message.permissionMode ?? context.openedPermissionMode;
                     context.receivedInit = true;
                     context.capabilities = new Set(message.capabilities ?? []);
+                    context.injectedTools = message.tools;
                     if (turnInput.onContextPrepared) {
-                      yield* turnInput.onContextPrepared(preparedContext(message.tools));
+                      yield* turnInput.onContextPrepared(
+                        preparedContext(context.openingNotice, message.tools),
+                      );
                     }
                     context.claudeCodeVersion = message.claude_code_version;
                   }
@@ -13737,6 +13773,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const bytes = Buffer.byteLength(instructionUpdate.notice, "utf8");
               pdfReservation.budget.pending.bytes += bytes;
               pdfReservation.bytes += bytes;
+              // The opening turn's init report would otherwise overwrite this one without it.
+              if (querySession.openedForAttempt === turnInput.attemptId) {
+                querySession.openingNotice = instructionUpdate.notice;
+              }
+              if (turnInput.onContextPrepared) {
+                yield* turnInput.onContextPrepared(
+                  querySession.preparedContext(
+                    instructionUpdate.notice,
+                    querySession.injectedTools,
+                  ),
+                );
+              }
             }
             yield* applySessionTitle(querySession.query, nativeThreadId, turnInput.appThread.title);
             const autoCompactWindow = yield* resolveAutoCompactWindow(
@@ -15199,13 +15247,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               // usage even at an earlier fork point; this is conservative.
               const claudeAttachmentBudget =
                 forkInput.sourceProviderThread.nativeMetadata?.claudeAttachmentBudget;
-              // The fork replays the source's system prompt and the notices before its cut.
+              // A head fork holds what its source holds; an earlier one holds an unknown mix.
               const sourceInstructions =
                 instructionRecords.get(sourceNativeThreadId) ??
                 forkInput.sourceProviderThread.nativeMetadata?.claudeInstructions;
               const claudeInstructions = claudeForkIsAtHead(forkInput)
                 ? sourceInstructions
-                : claudeInstructionRecordBeforeNotices(sourceInstructions);
+                : undefined;
               return makeProviderThread({
                 idAllocator,
                 providerInstanceId: adapterOptions.instanceId,

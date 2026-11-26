@@ -4247,6 +4247,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       hasT3Mcp: false,
       deviceTools: false,
     });
+    const PR = "t3:0:<pull_request_linking>";
+    type PreparedContext = Parameters<
+      NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["onContextPrepared"]>
+    >[0];
     const startedWithout = (name: string) =>
       ClaudeInstructionUpdates.claudeInstructionRecord(
         sections.filter((section) => section.name !== name),
@@ -4269,10 +4273,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         readonly providerThread: OrchestrationV2ProviderThread;
         readonly text?: string;
         readonly resumed?: boolean;
+        readonly prepared?: Array<PreparedContext>;
       },
     ) {
-      yield* harness.runtime.startTurn(
-        makeClaudeTestTurnInput({
+      const prepared = input.prepared;
+      yield* harness.runtime.startTurn({
+        ...makeClaudeTestTurnInput({
           threadId: harness.threadId,
           providerThread: input.providerThread,
           now: yield* DateTime.now,
@@ -4282,13 +4288,37 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           attachments: [],
           nativeThreadHasTurns: input.resumed ?? true,
         }),
-      );
+        ...(prepared === undefined
+          ? {}
+          : { onContextPrepared: (context) => Effect.sync(() => void prepared.push(context)) }),
+      });
       return harness.offeredMessages.at(-1)?.message.content;
     });
-    const finishTurn = Effect.fnUntraced(function* (harness: Harness, ordinal: number) {
-      yield* harness.offerAndWait(
-        makeResultFrame({ uuid: `instruction-update-result-${ordinal}`, result: "Done." }),
-      );
+    // Claude Code acknowledges the prompt by echoing its uuid or reporting that it started.
+    const finishTurn = Effect.fnUntraced(function* (
+      harness: Harness,
+      ordinal: number,
+      acknowledge: "started" | "echo" = "started",
+    ) {
+      const promptUuid = harness.offeredMessages.at(-1)!.uuid!;
+      if (acknowledge === "started") {
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: promptUuid,
+            state: "started",
+            uuid: `00000000-0000-4000-8000-00000000${String(9100 + ordinal)}`,
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+      }
+      yield* harness.offerAndWait({
+        ...makeResultFrame({
+          uuid: `00000000-0000-4000-8000-00000000${String(9200 + ordinal)}`,
+          result: "Done.",
+        }),
+        ...(acknowledge === "echo" ? { user_message_uuids: [promptUuid] } : {}),
+      } as SDKMessage);
       yield* Queue.take(harness.terminalReceipts);
     });
     const failTurn = Effect.fnUntraced(function* (harness: Harness, ordinal: number) {
@@ -4316,7 +4346,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     const noticeOf = (content: unknown) =>
       Array.isArray(content) &&
       content[0]?.type === "text" &&
-      content[0].text.startsWith("<system-reminder>")
+      content[0].text.startsWith(
+        `<system-reminder>\n${ClaudeInstructionUpdates.CLAUDE_INSTRUCTION_NOTICE_MARKER}\n`,
+      )
         ? (content[0].text as string)
         : null;
 
@@ -4325,10 +4357,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const harness = yield* makeWakeHarness;
         const first = yield* startTurn(harness, {
           ordinal: 1,
-          providerThread: withRecord(
-            harness.providerThread,
-            startedWithout("<pull_request_linking>"),
-          ),
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
         });
         assert.include(noticeOf(first), '<section name="<pull_request_linking>" change="added">');
         assert.notInclude(noticeOf(first), "<runtime_info>");
@@ -4336,7 +4365,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.isTrue(
           Array.isArray(first) && isPlainPrompt(first[1]?.type === "text" ? first[1].text : null),
         );
-        yield* finishTurn(harness, 1);
+        yield* finishTurn(harness, 1, "echo");
         assert.deepEqual(
           persisted(harness).nativeMetadata?.claudeInstructions?.sections,
           ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
@@ -4418,7 +4447,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     it.effect("sends a notice again when Claude never accepted the prompt that carried it", () =>
       Effect.gen(function* () {
         const harness = yield* makeWakeHarness;
-        const record = startedWithout("<pull_request_linking>");
+        const record = startedWithout(PR);
         const first = yield* startTurn(harness, {
           ordinal: 1,
           providerThread: withRecord(harness.providerThread, record),
@@ -4450,18 +4479,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const harness = yield* makeWakeHarness;
         const command = yield* startTurn(harness, {
           ordinal: 1,
-          providerThread: withRecord(
-            harness.providerThread,
-            startedWithout("<pull_request_linking>"),
-          ),
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
           text: "/context",
         });
         assert.isTrue(typeof command === "string" && command.endsWith("/context"));
         yield* finishTurn(harness, 1);
-        assert.deepEqual(
-          persisted(harness).nativeMetadata?.claudeInstructions,
-          startedWithout("<pull_request_linking>"),
-        );
+        assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, startedWithout(PR));
         const next = yield* startTurn(harness, { ordinal: 2, providerThread: persisted(harness) });
         assert.include(noticeOf(next), "<pull_request_linking>");
       }).pipe(Effect.scoped, Effect.provide(layers)),
@@ -4472,10 +4495,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const harness = yield* makeWakeHarness;
         const content = yield* startTurn(harness, {
           ordinal: 1,
-          providerThread: withRecord(
-            harness.providerThread,
-            startedWithout("<pull_request_linking>"),
-          ),
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
           text: "/compact",
         });
         assert.isNull(noticeOf(content));
@@ -4503,10 +4523,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const harness = yield* makeWakeHarness;
         yield* startTurn(harness, {
           ordinal: 1,
-          providerThread: withRecord(
-            harness.providerThread,
-            startedWithout("<pull_request_linking>"),
-          ),
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
           text: "/clear",
         });
         yield* harness.offerAndWait(
@@ -4527,13 +4544,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       }).pipe(Effect.scoped, Effect.provide(layers)),
     );
 
-    it.effect("keeps notices in a fork at the head and drops them from an earlier fork", () =>
+    it.effect("keeps a fork at the head current and leaves an earlier fork unknown", () =>
       Effect.gen(function* () {
         const harness = yield* makeWakeHarnessWithOptions({
           forkSession: () => Effect.succeed({ sessionId: "forked-native-session" }),
         });
         const delivered = {
-          ...startedWithout("<pull_request_linking>"),
+          ...startedWithout(PR),
           sections: ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
         };
         const source = withRecord(harness.providerThread, delivered);
@@ -4555,10 +4572,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           },
           targetThreadId: ThreadId.make("thread-claude-fork-earlier"),
         });
-        assert.deepEqual(
-          earlier.nativeMetadata?.claudeInstructions,
-          ClaudeInstructionUpdates.claudeInstructionRecordBeforeNotices(delivered),
-        );
+        assert.isUndefined(earlier.nativeMetadata?.claudeInstructions);
       }).pipe(Effect.scoped, Effect.provide(layers)),
     );
 
@@ -4572,7 +4586,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         > = [];
         const changed = ClaudeInstructionUpdates.claudeInstructionRecord(
           sections.map((section) =>
-            section.name === "<pull_request_linking>"
+            section.name === PR
               ? { ...section, text: "\n\n<pull_request_linking>\nOLD\n</pull_request_linking>" }
               : section,
           ),
@@ -4598,12 +4612,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         assert.deepEqual(context.sizedEntries, [
           {
-            key: "t3:earlier-copy",
+            key: `t3:earlier-copy:${PR}`,
             label: "Earlier copy of <pull_request_linking>",
-            bytes: changed.start!.find((section) => section.name === "<pull_request_linking>")!
-              .bytes,
+            bytes: changed.start!.find((section) => section.name === PR)!.bytes,
           },
         ]);
+        // The unchanged runtime section keeps its own label when its neighbour changed.
+        assert.deepEqual(
+          context.entries.map((entry) => entry.key),
+          ["t3_code_runtime", "t3_update_notice"],
+        );
         const sent =
           context.entries.reduce((total, entry) => total + Buffer.byteLength(entry.text), 0) +
           (context.sizedEntries ?? []).reduce((total, entry) => total + entry.bytes, 0);
@@ -4613,6 +4631,75 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             Buffer.byteLength(notice),
         );
       }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("keeps a notice owed when a background result settles the turn that carried it", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const record = startedWithout(PR);
+        const first = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(harness.providerThread, record),
+        });
+        assert.isNotNull(noticeOf(first));
+        yield* harness.offerAndWait(wakeResult);
+        yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, record);
+        const next = yield* startTurn(harness, { ordinal: 2, providerThread: persisted(harness) });
+        assert.equal(noticeOf(next), noticeOf(first));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("sends the complete current set to a session resumed at a rollback cut", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const content = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: {
+            ...withRecord(
+              harness.providerThread,
+              ClaudeInstructionUpdates.claudeInstructionRecord(sections),
+            ),
+            nativeConversationHeadRef: {
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeId: "rolled-back-head",
+              strength: "weak",
+            },
+          },
+        });
+        assert.include(noticeOf(content), "here is the complete current set");
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect(
+      "charges the notice to the turn that carries it, not a slash command that opened",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const opener: Array<PreparedContext> = [];
+          yield* startTurn(harness, {
+            ordinal: 1,
+            providerThread: withRecord(harness.providerThread, startedWithout(PR)),
+            text: "/context",
+            prepared: opener,
+          });
+          yield* harness.offerAndWait(wakeTurnInit);
+          yield* finishTurn(harness, 1);
+          const carrier: Array<PreparedContext> = [];
+          const content = yield* startTurn(harness, {
+            ordinal: 2,
+            providerThread: persisted(harness),
+            prepared: carrier,
+          });
+          const hasNotice = (context: PreparedContext) =>
+            context.entries.some((entry) => entry.key === "t3_update_notice");
+          assert.isAbove(opener.length, 0);
+          assert.isFalse(opener.some(hasNotice));
+          assert.equal(
+            carrier.at(-1)?.entries.find((entry) => entry.key === "t3_update_notice")?.text,
+            noticeOf(content),
+          );
+        }).pipe(Effect.scoped, Effect.provide(layers)),
     );
   });
 
@@ -9930,6 +10017,40 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.include(prompt, "Your last 2 tool calls and their results were removed");
           assert.include(prompt, "SUP-1047 belongs to Imani Okafor.");
         }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect("keeps the instruction record across a rewind that only drops tool calls", () =>
+      Effect.gen(function* () {
+        const rewind = yield* makeRewindHarness;
+        const sections = ClaudeAdapterV2.claudeSystemPromptSections({
+          append: ClaudeAdapterV2.claudeSystemPromptAppend({ hasT3Mcp: false, deviceTools: false }),
+          hasT3Mcp: false,
+          deviceTools: false,
+        });
+        // The session started without the PR section and accepted a notice that added it.
+        const record = {
+          ...ClaudeInstructionUpdates.claudeInstructionRecord(
+            sections.filter((section) => section.name !== "t3:0:<pull_request_linking>"),
+          ),
+          sections: ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
+        };
+        const providerThread = {
+          ...rewind.harness.providerThread,
+          nativeMetadata: { claudeInstructions: record },
+        };
+        yield* rewind.start({ ...rewind.turn(1), providerThread, nativeThreadHasTurns: true });
+        yield* rewind.rewind();
+        yield* rewind.endTurn("00000000-0000-4000-8000-000000038091");
+        yield* rewind.harness.runtime.startTurn({
+          ...rewind.continuation(2, rewind.delivered[0]!.continuationMessageId),
+          providerThread,
+        });
+        assert.equal(rewind.harness.getOpenedOptions()?.resumeSessionAt, "attachment");
+        assert.notInclude(
+          contentText(rewind.harness.offeredMessages.at(-1)),
+          ClaudeInstructionUpdates.CLAUDE_INSTRUCTION_NOTICE_MARKER,
+        );
+      }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
 
     it.effect(
