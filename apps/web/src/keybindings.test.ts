@@ -807,7 +807,8 @@ describe("composer and pull request shortcuts", () => {
       ]),
     ]);
     for (const [key, command] of [
-      ["k", "pullRequest.copyNumber"],
+      // Copy Number has no default key; K moves between threads.
+      ["k", "thread.previous"],
       ["8", "thread.copyReference"],
       ["c", null],
       ["y", null],
