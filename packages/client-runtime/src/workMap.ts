@@ -7,12 +7,6 @@ import {
 
 import type { EnvironmentThreadShell } from "./state/models.ts";
 
-/**
- * The work map: changes in stage columns, a swimlane per lead, the shared resources the changes
- * wait on, and the one resource holding the most blocked change-hours. Everything here is derived
- * from what the client already holds; the optional inputs are facts no surface reports yet.
- */
-
 export type WorkMapStage =
   | "briefed"
   | "implementing"
@@ -84,6 +78,7 @@ export type WorkMapThread = Pick<
   EnvironmentThreadShell,
   | "environmentId"
   | "id"
+  | "projectId"
   | "title"
   | "branch"
   | "worktreePath"
@@ -96,10 +91,8 @@ export type WorkMapThread = Pick<
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "pendingUserInputAt"
-  | "waiting"
   | "waitingCounts"
   | "pendingBackgroundTasks"
-  | "createdAt"
   | "updatedAt"
   | "archivedAt"
   | "deletedAt"
@@ -120,15 +113,15 @@ export interface WorkMapEnvironment {
   };
 }
 
-/** A landing summary from `evidence.list`, scoped to the environment that recorded it. */
+/**
+ * A landing summary from `evidence.list`, scoped to the environment that recorded it. A summary
+ * names only its recording thread, so it joins the change that thread belongs to; one a lead
+ * recorded shows as its own landed batch.
+ */
 export type WorkMapLanding = Pick<
   EvidenceLandingSummary,
-  "id" | "title" | "threadId" | "landedAt" | "qa"
-> & {
-  readonly environmentId: EnvironmentId;
-  /** Present on full landings; lets a landing recorded by a lead find the change it landed. */
-  readonly changes?: ReadonlyArray<{ readonly branch?: string | undefined }>;
-};
+  "id" | "title" | "threadId" | "landedAt" | "qa" | "changeCount"
+> & { readonly environmentId: EnvironmentId };
 
 /** What a lead declares about a change. No surface declares these yet. */
 export interface WorkMapDeclaration {
@@ -147,7 +140,10 @@ export interface WorkMapInput {
   readonly main?: { readonly red: boolean; readonly knownFailures?: number };
   /** Declarations keyed by `WorkMapItem.key`. */
   readonly declared?: ReadonlyMap<string, WorkMapDeclaration>;
-  /** When each background task last wrote output, keyed `${environmentId}:${threadId}:${taskId}`. */
+  /**
+   * When each background task last wrote output, keyed `${environmentId}:${threadId}:${taskId}`.
+   * No surface reports it yet; without it a run can be stalled but never silent.
+   */
   readonly taskOutputAt?: ReadonlyMap<string, string>;
   /** Work-like processes no thread or environment owns. No surface reports them yet. */
   readonly darkWork?: ReadonlyArray<WorkMapDarkWork>;
@@ -206,7 +202,6 @@ export interface WorkMapResource {
   readonly openItems?: number;
   readonly lastSeenAt?: string | null;
   readonly knownFailures?: number;
-  readonly darkCores?: number;
 }
 
 export interface WorkMapWaitingThread {
@@ -235,7 +230,7 @@ export interface WorkMap {
   readonly lanes: ReadonlyArray<WorkMapLane>;
   readonly stageCounts: Readonly<Record<WorkMapStage, number>>;
   readonly resources: ReadonlyArray<WorkMapResource>;
-  /** Blocked items, longest blocked first. */
+  /** Blocked items, longest blocked first. Stalled items are not blocked: no dependency is known. */
   readonly blocked: ReadonlyArray<WorkMapItem>;
   readonly bottleneck: WorkMapBottleneck | null;
   /** The one sentence at the top of the map. */
@@ -278,10 +273,12 @@ function parentKey(thread: WorkMapThread): string | null {
   return null;
 }
 
+// The server keeps a run `running` while it waits on another thread, so the flag wins.
 const isRunning = (thread: WorkMapThread) => {
   const status = thread.runtime?.status;
   return (
-    status === "preparing" || status === "queued" || status === "starting" || status === "running"
+    thread.blockedOnThreadWait !== true &&
+    (status === "preparing" || status === "queued" || status === "starting" || status === "running")
   );
 };
 
@@ -311,23 +308,20 @@ const completedMs = (thread: WorkMapThread) => parse(thread.latestRun?.completed
 const startedMs = (thread: WorkMapThread) =>
   parse(thread.latestRun?.startedAt) ?? parse(thread.latestRun?.requestedAt);
 
+const awaitedCommands = (thread: WorkMapThread) =>
+  thread.pendingBackgroundTasks.filter(
+    (task) =>
+      (task.kind === "command" || task.kind === "background_task") && task.awaited !== false,
+  );
+
+/** When a run's awaited command last wrote output, if it has been silent for 15 minutes. */
 function silentSinceMs(thread: WorkMapThread, input: WorkMapInput): number | null {
   if (isRunning(thread)) return null;
-  // A monitor waits for a condition by design, so only commands count as silent runs.
-  const commands = thread.pendingBackgroundTasks.filter(
-    (task) => task.kind === "command" || task.kind === "background_task",
-  );
-  if (commands.length === 0) return null;
-  // Without per-task output times, the thread's last update is the last progress it saw.
-  const progress = Math.max(
-    ...commands.map(
-      (task) =>
-        parse(input.taskOutputAt?.get(`${threadKey(refOf(thread))}:${task.taskId}`)) ??
-        parse(thread.updatedAt) ??
-        0,
-    ),
-  );
-  return input.now - progress >= SILENT_RUN_MS ? progress : null;
+  const silent = awaitedCommands(thread).flatMap((task) => {
+    const outputMs = parse(input.taskOutputAt?.get(`${threadKey(refOf(thread))}:${task.taskId}`));
+    return outputMs !== null && input.now - outputMs >= SILENT_RUN_MS ? [outputMs] : [];
+  });
+  return silent.length === 0 ? null : Math.min(...silent);
 }
 
 function formatWorkMapDuration(ms: number): string {
@@ -339,11 +333,24 @@ function formatWorkMapDuration(ms: number): string {
 
 interface ChangeGroup {
   key: string;
+  projectId: string;
   branch: string | null;
   implementers: WorkMapThread[];
   reviewers: WorkMapThread[];
   landing: WorkMapLanding | null;
 }
+
+const sameChange = (change: ChangeGroup, thread: WorkMapThread) =>
+  (thread.branch !== null &&
+    change.branch === thread.branch &&
+    change.projectId === thread.projectId) ||
+  (thread.worktreePath !== null &&
+    change.implementers.some((other) => other.worktreePath === thread.worktreePath));
+
+type EnvState = (environmentId: EnvironmentId) => {
+  readonly connected: boolean;
+  readonly lastSeenAt: string | null;
+};
 
 interface LaneDraft {
   key: string;
@@ -403,15 +410,11 @@ export function deriveWorkMap(input: WorkMapInput): WorkMap {
   };
 
   const changeFor = (lane: LaneDraft, thread: WorkMapThread): ChangeGroup => {
-    const match = lane.changes.find(
-      (change) =>
-        (thread.branch !== null && change.branch === thread.branch) ||
-        (thread.worktreePath !== null &&
-          change.implementers.some((other) => other.worktreePath === thread.worktreePath)),
-    );
+    const match = lane.changes.find((change) => sameChange(change, thread));
     if (match !== undefined) return match;
     const change: ChangeGroup = {
-      key: `${lane.key}:${thread.branch ?? thread.id}`,
+      key: `${lane.key}:${thread.projectId}:${thread.branch ?? thread.id}`,
+      projectId: thread.projectId,
       branch: thread.branch,
       implementers: [],
       reviewers: [],
@@ -434,13 +437,10 @@ export function deriveWorkMap(input: WorkMapInput): WorkMap {
 
   for (const lane of lanes.values()) {
     for (const reviewer of lane.children.filter((child) => child.delegateRole === "review")) {
+      const anonymous = reviewer.branch === null && reviewer.worktreePath === null;
       const match =
-        lane.changes.find(
-          (change) =>
-            (reviewer.branch !== null && change.branch === reviewer.branch) ||
-            (reviewer.worktreePath !== null &&
-              change.implementers.some((impl) => impl.worktreePath === reviewer.worktreePath)),
-        ) ?? (lane.changes.length === 1 ? lane.changes[0] : undefined);
+        lane.changes.find((change) => sameChange(change, reviewer)) ??
+        (anonymous && lane.changes.length === 1 ? lane.changes[0] : undefined);
       (match ?? changeFor(lane, reviewer)).reviewers.push(reviewer);
     }
     // A lead with no implementation children that works on a branch is its own change.
@@ -459,20 +459,19 @@ export function deriveWorkMap(input: WorkMapInput): WorkMap {
     const recordedBy = byKey.get(recorder);
     if (recordedBy === undefined) continue;
     const lane = laneFor(rootKey(recordedBy), recordedBy);
-    const branches = new Set(landing.changes?.flatMap((change) => change.branch ?? []) ?? []);
     const match = lane.changes.find(
       (change) =>
         change.landing === null &&
-        ((change.branch !== null && branches.has(change.branch)) ||
-          [...change.implementers, ...change.reviewers].some(
-            (thread) => threadKey(refOf(thread)) === recorder,
-          )),
+        [...change.implementers, ...change.reviewers].some(
+          (thread) => threadKey(refOf(thread)) === recorder,
+        ),
     );
     if (match !== undefined) {
       match.landing = landing;
     } else {
       lane.changes.push({
         key: `${lane.key}:landing:${landing.id}`,
+        projectId: recordedBy.projectId,
         branch: null,
         implementers: [],
         reviewers: [],
@@ -515,8 +514,12 @@ export function deriveWorkMap(input: WorkMapInput): WorkMap {
     });
   }
 
-  const waitingOnYou = rankWaitingOnYou(threads, items, input.now);
-  const resources = deriveResources(input, items, builtLanes, waitingOnYou, envState);
+  const waitingOnYou = rankWaitingOnYou(
+    threads.filter((thread) => envState(thread.environmentId).connected),
+    items,
+    input.now,
+  );
+  const resources = deriveResources(input, items, waitingOnYou, envState);
   const bottleneckResource = resources
     .filter((resource) => resource.blockedChangeHours > 0)
     .sort((a, b) => b.blockedChangeHours - a.blockedChangeHours)[0];
@@ -556,9 +559,8 @@ function deriveItem(
   lane: LaneDraft,
   change: ChangeGroup,
   input: WorkMapInput,
-  envState: (id: EnvironmentId) => { connected: boolean; lastSeenAt: string | null },
+  envState: EnvState,
 ): WorkMapItem {
-  const members = [...change.implementers, ...change.reviewers];
   const primary = change.implementers[0] ?? change.reviewers[0];
   const environmentId = primary?.environmentId ?? lane.leadRef.environmentId;
   const declared = input.declared?.get(change.key);
@@ -568,7 +570,7 @@ function deriveItem(
     environmentId,
     title: primary?.title ?? change.landing?.title ?? lane.title,
     branch: change.branch,
-    threads: members.map(refOf),
+    threads: [...change.implementers, ...change.reviewers].map(refOf),
   };
   const make = (
     stage: WorkMapStage,
@@ -592,160 +594,122 @@ function deriveItem(
 
   if (change.landing !== null) {
     const landedMs = parse(change.landing.landedAt);
+    const reason =
+      primary === undefined
+        ? `landed ${plural(change.landing.changeCount, "change", "changes")}`
+        : null;
     return change.landing.qa.pending > 0
-      ? make("your_qa", "evidence", "waits_on_you", "you", landedMs)
-      : make("landed", "evidence", "done", null, landedMs);
+      ? make("your_qa", "evidence", "waits_on_you", "you", landedMs, reason)
+      : make("landed", "evidence", "done", null, landedMs, reason);
   }
 
-  const stage = declared?.stage ?? inferStage(change);
+  // Cached threads from an unreachable environment say nothing current about the change.
+  const live = {
+    implementers: change.implementers.filter((t) => envState(t.environmentId).connected),
+    reviewers: change.reviewers.filter((t) => envState(t.environmentId).connected),
+  };
+  const members = [...live.implementers, ...live.reviewers];
+  const stage = declared?.stage ?? inferStage(live);
   const stageSource = declared?.stage === undefined ? "inferred" : "declared";
-  const env = envState(environmentId);
-  if (!env.connected) {
-    return make(stage, stageSource, "unknown", null, null, null, env.lastSeenAt);
+  if (primary === undefined || !envState(primary.environmentId).connected) {
+    // The column is where the change was last seen; the state never claims it is current.
+    const lastSeen = declared?.stage ?? inferStage(change);
+    const lastSeenAt = envState(environmentId).lastSeenAt;
+    return make(lastSeen, stageSource, "unknown", null, null, null, lastSeenAt);
   }
 
-  const askingUser = members.filter((thread) => userWaitCount(thread) > 0);
-  if (askingUser.length > 0) {
-    return make(
-      stage,
-      stageSource,
-      "waits_on_you",
-      "you",
-      Math.min(...askingUser.map(userWaitSince)),
-    );
+  if (members.some(isRunning)) {
+    const startedAt = Math.max(...members.filter(isRunning).map((t) => startedMs(t) ?? 0));
+    return make(stage, stageSource, "working", null, startedAt);
   }
   if (members.some(isFailed)) {
     const failedAt = Math.max(...members.filter(isFailed).map((t) => completedMs(t) ?? 0));
     return make(stage, stageSource, "failing", null, failedAt);
   }
-  const silent = members.map((thread) => silentSinceMs(thread, input)).filter((ms) => ms !== null);
+  const askingUser = members.filter((thread) => userWaitCount(thread) > 0);
+  if (askingUser.length > 0) {
+    const since = Math.min(...askingUser.map(userWaitSince));
+    return make(stage, stageSource, "waits_on_you", "you", since);
+  }
+  const silent = members.flatMap((thread) => silentSinceMs(thread, input) ?? []);
   if (silent.length > 0) {
     const since = Math.min(...silent);
-    return make(
-      stage,
-      stageSource,
-      "blocked",
-      `test_slots:${environmentId}`,
-      since,
-      `silent ${formatWorkMapDuration(input.now - since)}`,
-    );
+    const reason = `silent ${formatWorkMapDuration(input.now - since)}`;
+    return make(stage, stageSource, "blocked", `test_slots:${environmentId}`, since, reason);
   }
   const lastMs = Math.max(0, ...members.map((thread) => parse(thread.updatedAt) ?? 0));
+  const declaredReadyMs = parse(declared?.readyAt);
   if (declared?.blockedOn !== undefined) {
-    return make(
-      stage,
-      stageSource,
-      "blocked",
-      declared.blockedOn,
-      parse(declared.readyAt) ?? lastMs,
-    );
-  }
-  if (members.some(isRunning)) {
-    return make(
-      stage,
-      stageSource,
-      "working",
-      null,
-      Math.max(...members.map((t) => startedMs(t) ?? 0)),
-    );
+    return make(stage, stageSource, "blocked", declared.blockedOn, declaredReadyMs ?? lastMs);
   }
   if (stage === "ready_to_land") {
-    const readyMs =
-      parse(declared?.readyAt) ?? Math.max(...members.map((thread) => completedMs(thread) ?? 0));
-    const waited = input.now - readyMs;
-    return make(
-      stage,
-      stageSource,
-      waited > READY_TO_LAND_MS ? "blocked" : "waiting",
-      "landing",
-      readyMs,
-      `waited ${formatWorkMapDuration(waited)} to land`,
-    );
+    const readyMs = declaredReadyMs ?? Math.max(...members.map((t) => completedMs(t) ?? 0));
+    const late = input.now - readyMs > READY_TO_LAND_MS;
+    // Only a declared ready time says the change waits on landing rather than on its lead.
+    const state = !late ? "waiting" : declaredReadyMs !== null ? "blocked" : "stalled";
+    const reason = `waited ${formatWorkMapDuration(input.now - readyMs)} to land`;
+    return make(stage, stageSource, state, "landing", readyMs, reason);
   }
   if (stage === "batch_and_verify" && input.main?.red === true) {
-    return make(
-      stage,
-      stageSource,
-      "blocked",
-      "main",
-      parse(declared?.readyAt) ?? lastMs,
-      "main is red",
-    );
+    return make(stage, stageSource, "blocked", "main", declaredReadyMs ?? lastMs, "main is red");
   }
+  const stalled = input.now - lastMs > STALLED_MS;
+  const quiet =
+    stalled && members.some((thread) => awaitedCommands(thread).length > 0)
+      ? `quiet ${formatWorkMapDuration(input.now - lastMs)} with a command pending`
+      : null;
   if (stage === "briefed") {
-    return make(
-      stage,
-      stageSource,
-      input.now - lastMs > STALLED_MS ? "stalled" : "not_started",
-      null,
-      lastMs,
-    );
+    return make(stage, stageSource, stalled ? "stalled" : "not_started", null, lastMs);
   }
   const waitsOn = stage === "in_review" ? "reviewers" : null;
-  return make(
-    stage,
-    stageSource,
-    input.now - lastMs > STALLED_MS ? "stalled" : "waiting",
-    waitsOn,
-    lastMs,
-  );
+  return make(stage, stageSource, stalled ? "stalled" : "waiting", waitsOn, lastMs, quiet);
 }
 
-function inferStage(change: ChangeGroup): WorkMapStage {
+function inferStage(change: Pick<ChangeGroup, "implementers" | "reviewers">): WorkMapStage {
   const { implementers, reviewers } = change;
   const reviewDoneMs = Math.max(0, ...reviewers.map((thread) => completedMs(thread) ?? 0));
   if (implementers.some(isRunning)) {
     const restartedMs = Math.max(...implementers.map((thread) => startedMs(thread) ?? 0));
     return reviewDoneMs > 0 && reviewDoneMs <= restartedMs ? "fixing" : "implementing";
   }
-  if (reviewers.some((thread) => hasRun(thread) && !isFinished(thread) && !isFailed(thread))) {
-    return "in_review";
-  }
-  if (implementers.length > 0 && !implementers.some(hasRun)) return "briefed";
-  const members = [...implementers, ...reviewers];
-  if (members.length > 0 && members.every(isFinished)) return "ready_to_land";
   if (implementers.length === 0) return "in_review";
-  return reviewDoneMs > 0 ? "fixing" : "implementing";
+  if (!implementers.some(hasRun)) return "briefed";
+  if (!implementers.every(isFinished)) return reviewDoneMs > 0 ? "fixing" : "implementing";
+  const implDoneMs = Math.max(...implementers.map((thread) => completedMs(thread) ?? 0));
+  // Ready only once a review finished after the implementer's last run; until then it awaits one.
+  return reviewDoneMs >= implDoneMs ? "ready_to_land" : "in_review";
 }
 
 function deriveLaneState(
   lane: LaneDraft,
   items: ReadonlyArray<WorkMapItem>,
   input: WorkMapInput,
-  envState: (id: EnvironmentId) => { connected: boolean; lastSeenAt: string | null },
+  envState: EnvState,
 ): Pick<WorkMapLane, "state" | "sinceMs" | "lastSeenAt"> {
   const env = envState(lane.leadRef.environmentId);
   const lead = lane.lead;
   if (lead === null || !env.connected) {
     return { state: "unknown", sinceMs: null, lastSeenAt: env.lastSeenAt };
   }
+  if (isRunning(lead)) return { state: "working", sinceMs: startedMs(lead), lastSeenAt: null };
   if (userWaitCount(lead) > 0) {
     return { state: "waits_on_you", sinceMs: userWaitSince(lead), lastSeenAt: null };
   }
-  if (isRunning(lead)) return { state: "working", sinceMs: startedMs(lead), lastSeenAt: null };
   if (isFailed(lead)) return { state: "failing", sinceMs: completedMs(lead), lastSeenAt: null };
 
-  const pendingChildKeys = lead.pendingBackgroundTasks.flatMap((task) =>
-    task.kind === "subagent" && task.childThreadId !== undefined
-      ? [threadKey({ environmentId: lead.environmentId, threadId: task.childThreadId })]
-      : [],
-  );
   const leadWaits =
     lead.runtime?.status === "waiting" ||
     lead.blockedOnThreadWait === true ||
-    pendingChildKeys.length > 0;
+    lead.pendingBackgroundTasks.some((task) => task.kind === "subagent");
+  const anyWorking = lane.children.some(isRunning);
   if (!leadWaits) {
-    return {
-      state: items.some((item) => item.state === "working") ? "working" : "idle",
-      sinceMs: null,
-      lastSeenAt: null,
-    };
+    return { state: anyWorking ? "working" : "idle", sinceMs: null, lastSeenAt: null };
   }
-  // A pending child the shell omits counts as waiting, because shells keep only live children.
+  // Every child the client holds is checked; a pending child it lacks is idle, because the
+  // server sends only live child shells.
   const lastUpdateMs = Math.max(
     ...[lead, ...lane.children].map((thread) => parse(thread.updatedAt) ?? 0),
   );
-  const anyWorking = lane.children.some(isRunning);
   if (!anyWorking && input.now - lastUpdateMs >= IDLE_TREE_MS) {
     return { state: "idle_tree", sinceMs: lastUpdateMs, lastSeenAt: null };
   }
@@ -784,9 +748,8 @@ function rankWaitingOnYou(
 function deriveResources(
   input: WorkMapInput,
   items: ReadonlyArray<WorkMapItem>,
-  lanes: ReadonlyArray<WorkMapLane>,
   waitingOnYou: ReadonlyArray<WorkMapWaitingThread>,
-  envState: (id: EnvironmentId) => { connected: boolean; lastSeenAt: string | null },
+  envState: EnvState,
 ): ReadonlyArray<WorkMapResource> {
   const load = (key: WorkMapResourceKey) => {
     const waiting = items.filter((item) => item.waitsOn === key);
@@ -798,20 +761,6 @@ function deriveResources(
     return { waiting: waiting.length, blocked: blocked.length, blockedChangeHours: hours };
   };
 
-  const you = load("you");
-  // A lead waiting on the user holds its lane's changes, so it counts once beside them.
-  const heldLeads = lanes.filter(
-    (lane) =>
-      lane.state === "waits_on_you" &&
-      lane.items.length > 0 &&
-      !lane.items.some((item) =>
-        item.threads.some((ref) => threadKey(ref) === threadKey(lane.lead)),
-      ),
-  );
-  const leadHours = heldLeads.reduce(
-    (sum, lane) => sum + Math.max(0, input.now - (lane.sinceMs ?? input.now)) / HOUR,
-    0,
-  );
   const openItems = waitingOnYou.reduce((sum, thread) => sum + thread.count, 0);
   const resources: WorkMapResource[] = [
     {
@@ -819,9 +768,7 @@ function deriveResources(
       kind: "you",
       label: "You",
       state: openItems > 0 ? "busy" : "ok",
-      waiting: you.waiting + heldLeads.length,
-      blocked: you.blocked + heldLeads.length,
-      blockedChangeHours: you.blockedChangeHours + leadHours,
+      ...load("you"),
       openItems,
     },
     {
@@ -854,9 +801,6 @@ function deriveResources(
 
   for (const env of input.environments) {
     const state = envState(env.environmentId);
-    const darkCores = (input.darkWork ?? [])
-      .filter((dark) => dark.environmentId === env.environmentId)
-      .reduce((sum, dark) => sum + dark.cores, 0);
     resources.push({
       key: `machine:${env.environmentId}`,
       kind: "machine",
@@ -870,7 +814,6 @@ function deriveResources(
             : "ok",
       ...load(`machine:${env.environmentId}`),
       lastSeenAt: state.lastSeenAt,
-      ...(darkCores > 0 ? { darkCores } : {}),
     });
     const slotsKey = `test_slots:${env.environmentId}` as const;
     const slots = load(slotsKey);
@@ -881,9 +824,7 @@ function deriveResources(
       label: `Test slots on ${env.label}`,
       state:
         env.load?.testSlots === undefined
-          ? slots.waiting > 0
-            ? "busy"
-            : "not_measured"
+          ? "busy"
           : env.load.testSlots.busy >= env.load.testSlots.total
             ? "saturated"
             : "ok",
@@ -917,9 +858,12 @@ function headline(
     .join("; ");
 
   if (bottleneck === undefined) {
-    const inFlight = items.filter((item) => item.state !== "done").length;
     if (lanes.length === 0) return "No work in flight.";
-    const base = `Nothing is blocked: ${plural(inFlight, "change", "changes")} in flight.`;
+    const inFlight = items.filter((item) => item.state !== "done").length;
+    const stalled = items.filter((item) => item.state === "stalled").length;
+    const base = `Nothing is blocked: ${plural(inFlight, "change", "changes")} in flight${
+      stalled === 0 ? "" : `, ${stalled} stalled with no known cause`
+    }.`;
     return unreachableClause === "" ? base : `${base} ${unreachableClause}.`;
   }
 
