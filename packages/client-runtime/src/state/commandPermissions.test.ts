@@ -130,7 +130,7 @@ describe("command permissions", () => {
       const registry = yield* setup;
       const handoff = createCommandPermissions(runtime, WS_METHODS.threadsHandoffToWorktree);
       const input = { threadId: ThreadId.make("thread-1"), branch: "feature/handoff" };
-      const withScopes = (scopes: AuthSessionState["scopes"]) =>
+      const withScopes = (scopes: NonNullable<AuthSessionState["scopes"]>) =>
         AsyncResult.success({ ...grant(false), scopes, permissions: scopes });
       // Operate alone moves threads but cannot make the worktree and branch.
       registry.set(sessions(env), withScopes([AuthOrchestrationOperateScope]));
