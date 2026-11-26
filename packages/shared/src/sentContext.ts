@@ -85,16 +85,8 @@ function artifactAnswerSections(
  */
 const SENT_CONTEXT_EXPANSIONS: { readonly [K in KnownComposerContextKind]: Expansion<K> } = {
   "artifact-answer": { display: "open", sections: artifactAnswerSections },
-  terminal: {
-    display: "expandable",
-    sections: (record) => [
-      section(
-        `${record.terminalLabel}, lines ${record.lineStart}–${record.lineEnd}`,
-        record.text,
-        true,
-      ),
-    ],
-  },
+  // The block header already names the terminal and its lines.
+  terminal: { display: "expandable", sections: (record) => [section(null, record.text, true)] },
   element: {
     display: "expandable",
     sections: (record) => [

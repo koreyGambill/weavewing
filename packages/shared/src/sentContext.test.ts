@@ -187,7 +187,7 @@ describe("sentContextBlocks", () => {
       "a terminal shows its output with leading indentation",
       RECORDS.terminal,
       "expandable",
-      [["Terminal 1, lines 3–4", "  build ok\n  tests ok"]],
+      [[null, "  build ok\n  tests ok"]],
     ],
     [
       "an element shows its page, selector, source and markup",
