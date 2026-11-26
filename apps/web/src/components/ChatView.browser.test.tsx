@@ -1386,15 +1386,25 @@ it("refuses a branch name Git would reject without asking the server", async () 
 });
 
 it("returns focus to the location when the handoff dialog closes", async () => {
-  const { row, location, dialog } = await openHandoffDialog("row-handoff-focus");
-  await using _row = row;
+  await using _row = await renderRowAtWidth("row-handoff-focus", null, 1280);
+  const location = page.getByRole("button", { name: /^Location:/ });
+  const dialog = page.getByRole("dialog", { name: "Hand off to a worktree" });
+  // Entirely by keyboard: the handoff is the menu's last item.
+  const openByKeyboard = async () => {
+    await openLocationMenuByKeyboard(location);
+    await userEvent.keyboard("{End}");
+    await expect
+      .element(page.getByRole("menuitem", { name: /Hand off to a worktree/ }))
+      .toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    await expect.element(dialog.getByRole("textbox", { name: "New branch" })).toHaveFocus();
+  };
+  await openByKeyboard();
   await userEvent.keyboard("{Escape}");
   await expect.element(dialog).not.toBeInTheDocument();
   await expect.element(location).toHaveFocus();
 
-  await userEvent.keyboard("{Enter}");
-  await page.getByRole("menuitem", { name: /Hand off to a worktree/ }).click();
-  await expect.element(dialog).toBeVisible();
+  await openByKeyboard();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect.element(dialog).not.toBeInTheDocument();
   await expect.element(location).toHaveFocus();
