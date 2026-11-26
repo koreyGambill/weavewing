@@ -60,7 +60,7 @@ const base = {
 };
 
 describe("orchestration V2 wire projection", () => {
-  it("keeps copied handoff transcripts out of activity items and live events", () => {
+  it("keeps copied handoff transcripts out of activity items and live events, but not a rewind summary", () => {
     const item = {
       ...base,
       type: "handoff" as const,
@@ -84,6 +84,15 @@ describe("orchestration V2 wire projection", () => {
     };
     expect(JSON.stringify(projectDomainEventForWire(event))).not.toContain(item.summary);
     expect(item.summary).toBe("PRIVATE_HANDOFF_TRANSCRIPT");
+    const rewindSummary = {
+      ...item,
+      strategy: "checkpoint_summary" as const,
+      summary: "Changed a.ts",
+    };
+    expect(projectTurnItemForWire(rewindSummary)).toMatchObject({ summary: "Changed a.ts" });
+    expect(
+      JSON.stringify(projectDomainEventForWire({ ...event, payload: rewindSummary })),
+    ).toContain("Changed a.ts");
   });
 
   it("preserves image metadata through wire and JSON contracts while redacting output", () => {

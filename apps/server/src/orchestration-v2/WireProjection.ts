@@ -161,6 +161,8 @@ export function projectTurnItemForWire(item: OrchestrationV2TurnItem): Orchestra
     case "checkpoint":
       return capCheckpointFiles(item);
     case "handoff": {
+      // A rewind summary is the agent's own reply, shown in the thread; other summaries copy history.
+      if (item.strategy === "checkpoint_summary") return item;
       const { summary: _summary, ...projected } = item;
       return projected;
     }
