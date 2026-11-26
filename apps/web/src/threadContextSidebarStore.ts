@@ -53,6 +53,8 @@ export interface AutomationSelection {
   readonly taskId: string;
 }
 
+type EvidenceShow = "all" | "needs-qa" | "notes";
+
 interface ThreadContextSidebarState {
   view: SidebarView;
   lastTool: ThreadContextSection;
@@ -72,8 +74,9 @@ interface ThreadContextSidebarState {
   automationSelection: AutomationSelection | null;
   /** Null follows the context: Thread with a thread open, else All. */
   evidenceScope: "thread" | "all" | null;
-  evidenceNeedsQa: boolean;
-  setEvidenceView: (view: { scope?: "thread" | "all"; needsQa?: boolean }) => void;
+  /** Every landing, those waiting on QA, or those with a note. */
+  evidenceShow: EvidenceShow;
+  setEvidenceView: (view: { scope?: "thread" | "all"; show?: EvidenceShow }) => void;
   /** `${environmentId}:${projectId}` → the branch head whose uncovered-merges banner was dismissed. */
   evidenceCoverageDismissed: Record<string, string>;
   dismissEvidenceCoverage: (key: string, head: string | null) => void;
@@ -111,17 +114,17 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       inboxSelection: null,
       automationSelection: null,
       evidenceScope: null,
-      evidenceNeedsQa: false,
+      evidenceShow: "all",
       evidenceCoverageDismissed: {},
       dismissEvidenceCoverage: (key, head) =>
         set((state) => {
           const { [key]: _previous, ...rest } = state.evidenceCoverageDismissed;
           return { evidenceCoverageDismissed: head === null ? rest : { ...rest, [key]: head } };
         }),
-      setEvidenceView: ({ scope, needsQa }) =>
+      setEvidenceView: ({ scope, show }) =>
         set((state) => ({
           evidenceScope: scope ?? state.evidenceScope,
-          evidenceNeedsQa: needsQa ?? state.evidenceNeedsQa,
+          evidenceShow: show ?? state.evidenceShow,
         })),
       selectAutomation: (automationSelection) => set({ automationSelection }),
       selectView: (view) =>

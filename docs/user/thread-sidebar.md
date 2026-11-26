@@ -145,13 +145,16 @@ thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#wai
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
 Agents record a landing with `evidence_record` after they merge work.
 
-A change that has something only you can judge, such as captures, a waived review
-or one that asked for changes, a failed or skipped check, or a gap, shows a
-**QA card** in the thread where the agent recorded it. An approval alone raises no
-card, because no review verdict is checked yet; a card that is raised still shows it
-as an unverified review. A landing a delegated agent recorded shows in
-its lead's thread, where the delegated work reported back. A change with nothing
-to check leaves one quiet line instead. Each card has three buttons:
+A change with captures, a waived review or one that asked for changes, or a failed
+or skipped check always shows a **QA card** in the thread where the agent recorded
+it. The agent marks each other change: **needs you** when you must look at or
+decide something the agent could not, such as a layout nobody has seen, which also
+shows a card, or a **note** when its gaps are routine, such as no run on a device.
+An approval alone raises no card, because no review verdict is checked yet; a card
+that is raised still shows it as an unverified review. A landing a delegated agent
+recorded shows in its lead's thread, where the delegated work reported back. A
+change with nothing to check leaves one quiet line instead, and a note's line ends
+in "noted". Each card has three buttons:
 
 - **Looks good** marks it confirmed.
 - **Dismiss** closes it without checking. Open the closed card to add why, if you want to.
@@ -164,7 +167,10 @@ agent**. A problem it records shows as **Agent fixing** until a later landing na
 fix. **Reopen** on any settled card makes it open again.
 
 The Evidence tool lists the same landings. Pick **Thread** for this thread's landings
-or **All** for every thread on this server, and filter to the ones that still need QA.
+or **All** for every thread on this server, and filter to the ones that still need QA
+or to **Notes**. Notes lists each noted change with its gaps, newest landing first;
+open a landing to see all of it, or choose **Needs me** to show a note as a QA card.
+A later record of that landing keeps the card.
 Open a landing to see its changes and load their captures; click a capture to view it
 full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
 change it at any time. Changes waiting for your QA count in each thread's
