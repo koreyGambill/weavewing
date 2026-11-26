@@ -14,6 +14,7 @@ import {
   NetworkIcon,
   RefreshCwIcon,
 } from "lucide-react";
+import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -25,7 +26,7 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { getClientSettings } from "../hooks/useSettings";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { useRightPanelStore } from "../rightPanelStore";
-import { threadEnvironment } from "../state/threads";
+import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { cn } from "../lib/utils";
@@ -135,7 +136,7 @@ export function ThreadToolSection({
           ref={detailsRef}
           className="@container group/details-destination mx-auto w-full max-w-4xl overflow-y-auto py-1"
         >
-          <div className="text-xs group-has-[[data-context-thread-details]]/details-destination:hidden">
+          <div className="px-2.5 text-xs group-has-[[data-context-thread-details]]/details-destination:hidden">
             <ThreadSummary threadRef={threadRef} />
           </div>
         </div>
@@ -1102,11 +1103,17 @@ function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
 
 function ThreadSummary({ threadRef }: { threadRef: ScopedThreadRef }) {
   const shell = useThreadShell(threadRef);
+  // Archived threads leave the shell list, so only then read the thread itself.
+  const detail = useEnvironmentThread(
+    shell ? null : threadRef.environmentId,
+    shell ? null : threadRef.threadId,
+  );
+  const thread = shell ?? Option.getOrNull(detail.data)?.thread ?? null;
   return (
     <div className="space-y-2 break-words">
-      <p>{shell?.title ?? "Thread unavailable"}</p>
-      <p className="text-muted-foreground">{shell?.worktreePath}</p>
-      <p>{shell?.branch}</p>
+      <p>{thread?.title ?? "Thread unavailable"}</p>
+      <p className="text-muted-foreground">{thread?.worktreePath}</p>
+      <p>{thread?.branch}</p>
       <Link
         to="/$environmentId/$threadId"
         params={buildThreadRouteParams(threadRef)}
