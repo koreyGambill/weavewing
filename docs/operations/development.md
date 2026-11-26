@@ -227,10 +227,12 @@ Sparkwing pipelines in `.sparkwing/` run these checks under the machine's admiss
 checks started from several checkouts queue instead of overloading the machine.
 `sparkwing run gate -C <main checkout> -- --worktree <checkout>` runs `check:changed` and returns
 the recorded pass when a checkout with identical content already passed through the same `-C`. Its
-key does not read installed package files, so pass `--no-memo` after editing inside `node_modules`.
+key does not read installed package files or files under ignored build, cache and state directories
+such as `dist`; run `vp i` after editing inside `node_modules`, and pass `--no-memo` when a check
+reads one of the others.
 `sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web|server|packages` runs one
-full suite as CI does, when someone needs one, and reports every failing file or package. `sparkwing run gate --help`
-and `sparkwing run suite --help` list their arguments.
+full suite as CI does, when someone needs one, and reports every failing file or package.
+`sparkwing run gate --help` and `sparkwing run suite --help` list their arguments.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB
 of available memory. On a large machine a run takes about as long as its slowest step, usually

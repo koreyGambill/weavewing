@@ -137,15 +137,18 @@ export interface CheckChangedInputs {
   readonly sources: string;
   /** Ignored files, which the checks may regenerate themselves (astro check, mobile generators). */
   readonly generated: string;
-  /** False when a tracked symlink leads outside the checkout, whose target the key cannot see. */
+  /** False when a tracked symlink leads where the key cannot see: outside the checkout or under IGNORED_SKIP. */
   readonly memoizable: boolean;
 }
 
-// Ignored dependencies, build outputs, caches and dev state that checks do not read as sources.
-// Installed packages count through the lockfile and install metadata instead.
+// Ignored dependencies, build outputs, caches and dev state. They are not inputs: installed packages
+// count through the lockfile and install metadata, and a check that reads a file under the others
+// needs `--no-memo`.
 const IGNORED_SKIP = /(^|\/)(node_modules|dist|dist-[^/]+|target|\.t3|\.alchemy|\.turbo|\.cache)(\/|$)|\.tsbuildinfo$/;
-// Variables that the checks, their configs or the tests read to decide behaviour.
-const CHECK_ENV = /^(CI|CHECK_CHANGED_\w+|NODE_\w+|VITE_\w+|VITEST_\w+|T3CODE_\w+|T3_\w+|EFFECT_\w+|PLAYWRIGHT_\w+|VERCEL_\w+|GITHUB_REPOSITORY|APP_VERSION|PORT|HOST)$/;
+// Variables that the checks, their configs or the tests read to decide behaviour, and the locale
+// and time zone that date and text tests format with. The cache locations change no result.
+const CHECK_ENV = /^(CI|CHECK_CHANGED_\w+|NODE_\w+|VITE_\w+|VITEST_\w+|T3CODE_\w+|T3_\w+|EFFECT_\w+|PLAYWRIGHT_\w+|VERCEL_\w+|GITHUB_REPOSITORY|APP_VERSION|PORT|HOST|TZ|LANG|LC_\w+)$/;
+const CACHE_LOCATIONS = new Set(["NODE_COMPILE_CACHE", "VITE_CACHE_PATH"]);
 
 /**
  * The content check:changed reads, never where it sits, so checkouts of one tree share a pass:
@@ -153,11 +156,13 @@ const CHECK_ENV = /^(CI|CHECK_CHANGED_\w+|NODE_\w+|VITE_\w+|VITEST_\w+|T3CODE_\w
  * - the selection: the changed and untracked paths check:changed itself will check;
  * - the binary diff against base and the bytes of changed and untracked files, including files
  *   only a local exclude rule hides, since typecheck and tests read them;
- * - ignored files outside IGNORED_SKIP, and .env files, which checks read;
+ * - ignored files outside IGNORED_SKIP, and .env files, which checks read. Files under
+ *   IGNORED_SKIP are not inputs, so a check that reads one must run with `--no-memo`;
  * - install state, without pnpm's prune timestamp, which differs per install of one lockfile.
  *   Installed package files themselves are not hashed: an edit inside node_modules that keeps
  *   the lockfile and install metadata goes unseen, and `vp i` or `--no-memo` is the remedy;
  * - the CHECK_ENV variables of `env`, and the host platform.
+ * A tracked symlink that resolves outside the checkout or under IGNORED_SKIP makes it unmemoizable.
  * Every path and content is a length-prefixed record, so no two input sets hash alike.
  */
 export function checkChangedInputs(
@@ -184,7 +189,9 @@ export function checkChangedInputs(
   };
 
   for (const part of [base, process.platform, process.arch]) record(sources, part);
-  for (const [name, value] of Object.entries(env).filter(([name]) => CHECK_ENV.test(name)).sort())
+  for (const [name, value] of Object.entries(env)
+    .filter(([name]) => CHECK_ENV.test(name) && !CACHE_LOCATIONS.has(name))
+    .sort())
     record(sources, `${name}=${value}`);
   const selected = changedFiles(root, base);
   record(sources, `selected:${selected.length}`);
@@ -223,8 +230,11 @@ export function checkChangedInputs(
   })
     .split("\0")
     .filter((entry) => entry.startsWith("120000 "))
-    .every((entry) => {
-      const link = NodePath.join(realRoot, entry.slice(entry.indexOf("\t") + 1));
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1))
+    // .repos holds vendored references that no check reads.
+    .filter((file) => !file.startsWith(".repos/"))
+    .every((file) => {
+      const link = NodePath.join(realRoot, file);
       if (!NodeFS.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) return true;
       let target = NodePath.resolve(NodePath.dirname(link), NodeFS.readlinkSync(link));
       try {
@@ -232,7 +242,9 @@ export function checkChangedInputs(
       } catch {
         // A dangling link is judged by where it points.
       }
-      return target === realRoot || target.startsWith(realRoot + NodePath.sep);
+      const inside = NodePath.relative(realRoot, target);
+      const outside = inside === ".." || inside.startsWith(`..${NodePath.sep}`) || NodePath.isAbsolute(inside);
+      return !outside && !IGNORED_SKIP.test(inside.split(NodePath.sep).join("/"));
     });
   return { sources: sources.digest("hex"), generated: generated.digest("hex"), memoizable };
 }

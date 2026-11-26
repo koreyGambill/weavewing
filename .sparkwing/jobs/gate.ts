@@ -56,7 +56,9 @@ definePipeline({
   help:
     "The exit code is the verdict. Resubmitting identical content against the same base, from any checkout run " +
     "with the same -C, returns the recorded pass without a new log; a tree edited during the run fails instead of passing. " +
-    "The key does not read installed package files: after editing inside node_modules, run vp i or pass --no-memo.",
+    "The key does not read installed package files or files under ignored build, cache and state directories " +
+    "(dist, dist-*, target, .t3, .alchemy, .turbo, .cache, *.tsbuildinfo): after editing inside node_modules run " +
+    "vp i, and run a check that reads the others with --no-memo.",
   args: [
     ...checkoutArgs,
     { name: "ref", type: "string", description: "Compare against the merge base with this ref" },
