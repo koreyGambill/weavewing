@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRouterState } from "@tanstack/react-router";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import {
   ChevronDownIcon,
   LockIcon,
@@ -21,6 +22,8 @@ import { cn } from "../lib/utils";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { useThreadShell } from "../state/entities";
+import { DeferEnvironmentQueries } from "../state/query";
+import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { takeSideAreaFocusRequest, useToolSidebarStore } from "../toolSidebarStore";
@@ -35,12 +38,16 @@ import { useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { SideAreaSlots, useSideAreaThreadRef } from "./threadToolsHost";
 import {
+  SIDE_AREA_WIDE_MEDIA_QUERY,
+  describeLockedThread,
   resolveSideAreaWidth,
   resolveViewLayout,
+  type LockedThreadState,
   SIDE_AREA_MAX_WIDTH,
   SIDE_AREA_MIN_WIDTH,
 } from "./ToolSidebar.logic";
 import { Button } from "./ui/button";
+import { Empty, EmptyDescription } from "./ui/empty";
 import {
   Menu,
   MenuGroup,
@@ -52,12 +59,10 @@ import {
   MenuTrigger,
 } from "./ui/menu";
 import { useMobileSidebarSheetMounted } from "./ui/sidebar";
-import { Skeleton } from "./ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
 
-const WIDE_MEDIA_QUERY = "(min-width: 981px)";
-/** A thread view mounts once the selection has rested this long, so quick switches load nothing. */
+/** A thread view starts its requests once the selection has rested this long. */
 export const SIDE_AREA_SETTLE_MS = 250;
 const SIDE_AREA_COVER_VARIABLE = "--side-area-cover-right";
 // Popups and dialogs portal outside the side area, and the drop-down terminal sits beside it;
@@ -76,6 +81,10 @@ function isEditableTarget(target: EventTarget | null) {
       'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .cm-editor, .xterm',
     ) !== null
   );
+}
+
+function isEditorTarget(target: EventTarget | null) {
+  return target instanceof Element && target.closest(".monaco-editor, .cm-editor, .xterm") !== null;
 }
 
 function openLayerVisible() {
@@ -100,7 +109,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const [availableWidth, setAvailableWidth] = useState(1280);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
-  const isWide = useMediaQuery(WIDE_MEDIA_QUERY);
+  const isWide = useMediaQuery(SIDE_AREA_WIDE_MEDIA_QUERY);
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const [titlebarControlsHost, setTitlebarControlsHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
@@ -142,16 +151,20 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       {
         onKeyDown: (event) => {
           const state = useToolSidebarStore.getState();
-          if (event.key !== "Escape" || event.defaultPrevented || !state.open) return false;
+          if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !state.open)
+            return false;
           const inside =
             event.target instanceof Element && event.target.closest("[data-side-area]") !== null;
           // Outside it, Escape belongs to whatever has focus; a pinned side area ignores it there.
           if (!inside && (state.pinned || isEditableTarget(event.target))) return false;
-          if (inside && isEditableTarget(event.target)) return false;
+          // Inside it, a field that uses Escape (clearing a filter) consumes it before it gets here.
+          if (inside && isEditorTarget(event.target)) return false;
           if (openLayerVisible()) return false;
           state.dispatch({
             type:
-              state.maximized && window.matchMedia(WIDE_MEDIA_QUERY).matches ? "restore" : "close",
+              state.maximized && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
+                ? "restore"
+                : "close",
           });
           event.preventDefault();
           event.stopPropagation();
@@ -260,6 +273,8 @@ function SideArea({
   const dispatch = useToolSidebarStore((state) => state.dispatch);
   const definition = viewDefinition(view);
   const threadRef = useSideAreaThreadRef();
+  const lockedState = useLockedThreadState(locked);
+  const unlock = () => dispatch({ type: "lock", thread: null });
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<HTMLElement | null>(null);
   const insideClicks = useRef(new WeakSet<Event>());
@@ -434,15 +449,26 @@ function SideArea({
           </Tooltip>
         </div>
       </header>
-      {locked && definition.scope === "thread" ? <LockedThreadBar threadRef={locked} /> : null}
-      <SideAreaSlots actions={actions} setActions={setActions}>
-        <SideAreaBody
-          definition={definition}
-          target={target}
-          layout={layout}
-          width={maximized ? fullWidth : width}
-        />
-      </SideAreaSlots>
+      {lockedState && definition.scope === "thread" ? (
+        <LockedThreadBar state={lockedState} onUnlock={unlock} />
+      ) : null}
+      {lockedState?.kind === "deleted" && definition.scope === "thread" ? (
+        <Empty size="compact">
+          <EmptyDescription>This thread was deleted.</EmptyDescription>
+          <Button size="sm" variant="outline" onClick={unlock}>
+            Unlock and follow the selected thread
+          </Button>
+        </Empty>
+      ) : (
+        <SideAreaSlots actions={actions} setActions={setActions}>
+          <SideAreaBody
+            definition={definition}
+            target={target}
+            layout={layout}
+            width={maximized ? fullWidth : width}
+          />
+        </SideAreaSlots>
+      )}
     </aside>
   );
 }
@@ -476,25 +502,64 @@ function HeaderToggle(props: {
   );
 }
 
-function LockedThreadBar({ threadRef }: { threadRef: ScopedThreadRef }) {
+function useLockedThreadState(threadRef: ScopedThreadRef | null): LockedThreadState | null {
   const shell = useThreadShell(threadRef);
-  const title = shell?.title ?? "Thread";
+  // Archived and deleted threads leave the shell list, so only then read the thread itself.
+  const readDetail = threadRef !== null && shell === null;
+  const detail = useEnvironmentThread(
+    readDetail ? threadRef.environmentId : null,
+    readDetail ? threadRef.threadId : null,
+  );
+  if (threadRef === null) return null;
+  const thread = Option.getOrNull(detail.data)?.thread ?? null;
+  return describeLockedThread({
+    shellTitle: shell?.title ?? null,
+    detail: readDetail
+      ? {
+          status: detail.status,
+          title: thread?.title ?? null,
+          archived: thread?.archivedAt != null,
+        }
+      : null,
+  });
+}
+
+function LockedThreadBar({ state, onUnlock }: { state: LockedThreadState; onUnlock: () => void }) {
+  const label =
+    state.kind === "deleted"
+      ? "The locked thread was deleted"
+      : state.kind === "loading"
+        ? "Locked to a thread that is loading"
+        : `Locked to ${state.title}${state.archived ? " (archived)" : ""}`;
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1.5 border-b bg-muted/40 px-3 text-xs text-muted-foreground">
+    <div className="flex h-8 shrink-0 items-center gap-1.5 border-b bg-muted/40 ps-3 pe-2 text-xs text-muted-foreground">
       <LockIcon aria-hidden className="size-3.5 shrink-0" />
       <Tooltip>
-        <TooltipTrigger render={<span className="min-w-0 truncate" />}>
-          Locked to <span className="text-foreground">{title}</span>
+        <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+          {state.kind === "named" ? (
+            <>
+              Locked to <span className="text-foreground">{state.title}</span>
+              {state.archived ? " (archived)" : null}
+            </>
+          ) : (
+            label
+          )}
         </TooltipTrigger>
-        <TooltipPopup>Locked to {title}</TooltipPopup>
+        <TooltipPopup>{label}</TooltipPopup>
       </Tooltip>
+      {state.kind === "deleted" ? (
+        <Button size="xs" variant="ghost" onClick={onUnlock}>
+          Unlock
+        </Button>
+      ) : null}
     </div>
   );
 }
 
 /**
- * The view for its target. A thread switch unmounts the old thread's view at once and mounts the
- * new one only after the selection rests, so walking down the thread list starts one load.
+ * The view for its target. A thread switch unmounts the old thread's view, cancelling its
+ * requests, and mounts the new one at once from what the client already holds; its own requests
+ * wait until the selection rests, so walking down the thread list starts one load.
  */
 function SideAreaBody({
   definition,
@@ -515,31 +580,18 @@ function SideAreaBody({
     const timer = window.setTimeout(() => setSettledKey(key), SIDE_AREA_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [key, settledKey]);
-  if (settledKey !== key) {
-    return <SideAreaPlaceholder threadRef={target.threadRef} />;
-  }
   return (
-    <Fragment
-      key={
-        definition.scope === "thread" && definition.id !== "evidence"
-          ? `${key}:${definition.id}`
-          : definition.id
-      }
-    >
-      {definition.render({ target, layout, host: "panel", width })}
-    </Fragment>
-  );
-}
-
-/** What the thread list already knows about the thread, while its view waits to load. */
-function SideAreaPlaceholder({ threadRef }: { threadRef: ScopedThreadRef | null }) {
-  const shell = useThreadShell(threadRef);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 p-3" aria-busy="true">
-      <p className="truncate text-sm text-foreground">{shell?.title ?? "Loading thread"}</p>
-      <Skeleton className="h-4 w-3/4" />
-      <Skeleton className="h-4 w-1/2" />
-    </div>
+    <DeferEnvironmentQueries value={settledKey !== key}>
+      <Fragment
+        key={
+          definition.scope === "thread" && definition.id !== "evidence"
+            ? `${key}:${definition.id}`
+            : definition.id
+        }
+      >
+        {definition.render({ target, layout, host: "panel", width })}
+      </Fragment>
+    </DeferEnvironmentQueries>
   );
 }
 

@@ -51,6 +51,7 @@ import {
 import { isElectron } from "../env";
 import { useDefaultFolderEnvironmentId } from "../hooks/useScratchProject";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -70,7 +71,9 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../state/session";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { CONVERSATION_TAB_ID } from "../threadTileLayout";
+import { makeRoomForDropdownTerminal, useToolSidebarStore } from "../toolSidebarStore";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
+import { SIDE_AREA_WIDE_MEDIA_QUERY } from "./ToolSidebar.logic";
 import type { TileSurfaceActions } from "./SurfaceTabContent";
 import { useMoveToThreadMenu } from "./terminal/useTerminalMoveMenus";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
@@ -353,6 +356,11 @@ function CloseDropdownTabButton(props: {
 
 function DropdownTerminalPanel() {
   const expanded = useDropdownTerminalStore((state) => state.expanded);
+  const sideAreaOpen = useToolSidebarStore((state) => state.open);
+  const sideAreaBeside = useMediaQuery(SIDE_AREA_WIDE_MEDIA_QUERY);
+  const sideSheetOpen = sideAreaOpen && !sideAreaBeside;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Opening the drop-down asks the side area, a separate store, to make room for it.
+  useEffect(() => makeRoomForDropdownTerminal(), []);
   const [pinned, setPinned] = useLocalStorage(PIN_STORAGE_KEY, false, Schema.Boolean);
   const togglePinFromShortcut = useEffectEvent(() => setPinned((value) => !value));
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the pin command is available while the panel is open
@@ -453,18 +461,19 @@ function DropdownTerminalPanel() {
     if (pinned) return;
     let pending: number | undefined;
     const isOutside = (event: MouseEvent) =>
-      !event
-        .composedPath()
-        .some(
-          (node) =>
-            node === panelRef.current ||
-            (node instanceof Element &&
-              (node.matches("[data-dropdown-terminal-toggle], [data-context-menu]") ||
-                (isTerminalCloseConfirmPending() &&
-                  node.matches(
-                    '[data-slot="alert-dialog-viewport"], [data-slot="alert-dialog-backdrop"]',
-                  )))),
-        );
+      !event.composedPath().some(
+        (node) =>
+          node === panelRef.current ||
+          (node instanceof Element &&
+            // The side area sits beside the drop-down, or over it as a narrow sheet.
+            (node.matches(
+              "[data-dropdown-terminal-toggle], [data-context-menu], [data-side-area]",
+            ) ||
+              (isTerminalCloseConfirmPending() &&
+                node.matches(
+                  '[data-slot="alert-dialog-viewport"], [data-slot="alert-dialog-backdrop"]',
+                )))),
+      );
     const onPointerDown = (event: PointerEvent) => {
       pointerStartedOutside.current = event.isPrimary && event.button === 0 && isOutside(event);
     };
@@ -508,11 +517,16 @@ function DropdownTerminalPanel() {
       data-dropdown-terminal
       onPointerDownCapture={() => {
         pointerStartedOutside.current = false;
+        makeRoomForDropdownTerminal();
       }}
+      onFocusCapture={makeRoomForDropdownTerminal}
       onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
+      // The side area's full-width sheet hides the drop-down until the sheet closes.
+      inert={sideSheetOpen || undefined}
       className={cn(
         "fixed left-0 right-[var(--side-area-cover-right,0px)] top-[var(--workspace-topbar-height)] z-50 flex max-h-[calc(100dvh-var(--workspace-topbar-height)-2rem)] flex-col border-b bg-background shadow-xl transition-transform duration-150 ease-out starting:-translate-y-full motion-reduce:transition-none [-webkit-app-region:no-drag]",
         expanded && "bottom-0 max-h-none",
+        sideSheetOpen && "invisible",
       )}
       style={
         expanded ? undefined : { height: clampDropdownTerminalHeight(height, window.innerHeight) }

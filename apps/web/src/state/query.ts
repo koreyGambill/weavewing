@@ -2,7 +2,7 @@ import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-reac
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useContext } from "react";
+import { createContext, useContext } from "react";
 
 const EMPTY_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
   Atom.withLabel("web-environment-query:empty"),
@@ -33,11 +33,37 @@ function queryUpdatedAt(result: AsyncResult.AsyncResult<unknown, unknown>): numb
       : 0;
 }
 
+const DEFERRED_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(true)).pipe(
+  Atom.withLabel("web-environment-query:deferred"),
+);
+
+/**
+ * While true, queries below it start no request: each reads only what another reader already
+ * holds, and otherwise reports pending. A host sets it while a selection is still changing.
+ */
+export const DeferEnvironmentQueries = createContext(false);
+
+/** The atom to subscribe to, and while deferred, what another reader already holds for `atom`. */
+function useQuerySource<A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null) {
+  const deferred = useContext(DeferEnvironmentQueries);
+  const registry = useContext(RegistryContext);
+  if (atom === null) return { subscribed: EMPTY_ASYNC_RESULT_ATOM, held: Option.none() };
+  if (!deferred) return { subscribed: atom, held: Option.none() };
+  // Peeking a node never mounts it, so nothing fetches or revalidates.
+  const held = registry.getNodes().get(atom)?.valueOption() ?? Option.none();
+  return {
+    subscribed: DEFERRED_ASYNC_RESULT_ATOM,
+    held: held as Option.Option<AsyncResult.AsyncResult<A, E>>,
+  };
+}
+
 export function useEnvironmentQuery<A, E>(
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null,
 ): EnvironmentQueryView<A, E> {
-  const selectedAtom = atom ?? EMPTY_ASYNC_RESULT_ATOM;
-  const result = useAtomValue(selectedAtom);
+  const source = useQuerySource(atom);
+  const selectedAtom = source.subscribed;
+  const live = useAtomValue(selectedAtom);
+  const result = Option.getOrElse(source.held, () => live);
   const refresh = useAtomRefresh(selectedAtom);
   return {
     data: AsyncResult.getOrElse(result, () => null),
@@ -56,7 +82,9 @@ export function useEnvironmentQuerySelector<A, E, B>(
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null,
   select: (result: AsyncResult.AsyncResult<A, E>) => B,
 ): B {
-  return useAtomValue(atom ?? EMPTY_ASYNC_RESULT_ATOM, select);
+  const source = useQuerySource(atom);
+  const live = useAtomValue(source.subscribed, select);
+  return Option.match(source.held, { onNone: () => live, onSome: select });
 }
 
 type QueryResultAtom = Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>;

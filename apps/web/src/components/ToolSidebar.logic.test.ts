@@ -1,7 +1,9 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  describeLockedThread,
   INITIAL_SIDE_AREA,
+  resolveDetailsDestination,
   resolveSideAreaThread,
   resolveSideAreaWidth,
   resolveViewLayout,
@@ -116,26 +118,79 @@ describe("side area", () => {
     expect(restoreSideArea(null)).toEqual(INITIAL_SIDE_AREA);
   });
 
-  it("migrates the tools sidebar's stored state", () => {
-    expect(restoreSideArea({ visible: true, activeTool: "status", width: 360 })).toEqual({
-      ...INITIAL_SIDE_AREA,
-      open: true,
-      view: "status",
-      width: 360,
-    });
-    // The rail alone, with no page open, has no side area equivalent.
-    expect(restoreSideArea({ visible: true, activeTool: null, width: 320 })).toMatchObject({
-      open: false,
-      view: "details",
-      width: 320,
-    });
-    expect(restoreSideArea({ visible: false, activeTool: "calendar", width: 1000 })).toMatchObject({
-      open: false,
-      view: "calendar",
-      width: 640,
-    });
+  it.each([
+    [
+      { visible: true, activeTool: null, width: 470 },
+      { open: true, view: "status", width: 470 },
+    ],
+    [
+      { visible: true, activeTool: "status", width: 590 },
+      { open: true, view: "status", width: 590 },
+    ],
+    [
+      { visible: true, activeTool: "calendar", width: 300 },
+      { open: true, view: "calendar", width: 300 },
+    ],
+    [
+      { visible: false, activeTool: "calendar", width: 1000 },
+      { open: false, view: "calendar", width: 640 },
+    ],
+    [
+      { visible: false, activeTool: "status", width: 10 },
+      { open: false, view: "status", width: 280 },
+    ],
+    [
+      { visible: false, activeTool: null, width: 300 },
+      { open: false, view: "details", width: 300 },
+    ],
+  ])("migrates the tools sidebar's stored %o", (stored, expected) => {
+    expect(restoreSideArea(stored)).toEqual({ ...INITIAL_SIDE_AREA, ...expected });
+  });
+
+  it("starts fresh from a tools sidebar state it cannot read", () => {
     expect(restoreSideArea({ visible: true, activeTool: "missing", width: 300 })).toEqual(
       INITIAL_SIDE_AREA,
     );
+    expect(restoreSideArea({ visible: true, activeTool: null })).toEqual(INITIAL_SIDE_AREA);
+    expect(restoreSideArea({ visible: "yes", activeTool: null, width: 300 })).toEqual(
+      INITIAL_SIDE_AREA,
+    );
+  });
+
+  it("gives the details card to the host showing the selected thread, the side area on a tie", () => {
+    const side = { threadRef: threadA, element: "side" };
+    const rail = { threadRef: threadB, element: "rail" };
+    expect(resolveDetailsDestination({ side, rail, selected: threadB })).toBe(rail);
+    expect(resolveDetailsDestination({ side, rail, selected: threadA })).toBe(side);
+    const railOnA = { threadRef: threadA, element: "rail" };
+    expect(resolveDetailsDestination({ side, rail: railOnA, selected: threadA })).toBe(side);
+    expect(resolveDetailsDestination({ side: null, rail, selected: threadA })).toBe(rail);
+    expect(resolveDetailsDestination({ side: null, rail: null, selected: threadA })).toBeNull();
+  });
+
+  it("names a locked thread from its shell, then its own read, and reports a deletion", () => {
+    expect(describeLockedThread({ shellTitle: "Live", detail: null })).toEqual({
+      kind: "named",
+      title: "Live",
+      archived: false,
+    });
+    expect(
+      describeLockedThread({
+        shellTitle: null,
+        detail: { status: "live", title: "Old work", archived: true },
+      }),
+    ).toEqual({ kind: "named", title: "Old work", archived: true });
+    expect(
+      describeLockedThread({
+        shellTitle: null,
+        detail: { status: "deleted", title: "Gone", archived: false },
+      }),
+    ).toEqual({ kind: "deleted" });
+    expect(
+      describeLockedThread({
+        shellTitle: null,
+        detail: { status: "synchronizing", title: null, archived: false },
+      }),
+    ).toEqual({ kind: "loading" });
   });
 });

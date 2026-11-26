@@ -23,7 +23,9 @@ Select Text shows the visible output, where you can copy text or tap a link.
 ## Choosing a machine
 
 Open the drop-down terminal with Ctrl+J or Cmd+J. Click outside it to hide it
-while its shells keep running. Use **Run on** to choose a
+while its shells keep running. With the side panel open, the drop-down stops at
+the panel's edge and returns a maximized panel to its width; on narrow screens
+the panel's sheet hides the drop-down until the sheet closes. Use **Run on** to choose a
 connected machine or switch to the current thread's machine. Your choice stays
 selected as you switch threads. Return to a machine to resume its terminals.
 If it disconnects, the drop-down waits for it to reconnect or for you to pick

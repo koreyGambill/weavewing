@@ -80,6 +80,9 @@ export type SideAreaAction =
   | { type: "restore" }
   | { type: "resize"; width: number };
 
+/** At and above this width the side area sits beside content; below it, it is a full sheet. */
+export const SIDE_AREA_WIDE_MEDIA_QUERY = "(min-width: 981px)";
+
 export const SIDE_AREA_MIN_WIDTH = 280;
 export const SIDE_AREA_MAX_WIDTH = 640;
 // The content keeps at least this much visible beside a side area at its stored width.
@@ -112,8 +115,9 @@ export function restoreSideArea(value: unknown): SideAreaState {
     const { visible, activeTool, width } = legacy.value;
     return {
       ...INITIAL_SIDE_AREA,
-      open: visible && activeTool !== null,
-      view: activeTool ?? INITIAL_SIDE_AREA.view,
+      // A visible strip with no page open becomes an open panel on Status, the strip's live tool.
+      open: visible,
+      view: activeTool ?? (visible ? "status" : INITIAL_SIDE_AREA.view),
       width: clampSideAreaWidth(width),
     };
   }
@@ -167,4 +171,46 @@ export function resolveSideAreaThread(
   selected: ScopedThreadRef | null,
 ): ScopedThreadRef | null {
   return locked ?? selected;
+}
+
+interface DetailsHost<Element> {
+  readonly threadRef: ScopedThreadRef;
+  readonly element: Element;
+}
+
+/**
+ * Where the conversation's details card renders. Only the selected thread's conversation has a
+ * card, so the host showing that thread gets it; the side area wins only when both show it.
+ */
+export function resolveDetailsDestination<Element>(input: {
+  readonly side: DetailsHost<Element> | null;
+  readonly rail: DetailsHost<Element> | null;
+  readonly selected: ScopedThreadRef | null;
+}): DetailsHost<Element> | null {
+  const { side, rail, selected } = input;
+  if (side && sameThread(side.threadRef, selected)) return side;
+  if (rail && sameThread(rail.threadRef, selected)) return rail;
+  return side ?? rail;
+}
+
+export type LockedThreadState =
+  | { readonly kind: "named"; readonly title: string; readonly archived: boolean }
+  | { readonly kind: "deleted" }
+  | { readonly kind: "loading" };
+
+/** What the side area says about its locked thread, from its shell or else its own detail read. */
+export function describeLockedThread(input: {
+  readonly shellTitle: string | null;
+  readonly detail: {
+    readonly status: string;
+    readonly title: string | null;
+    readonly archived: boolean;
+  } | null;
+}): LockedThreadState {
+  if (input.shellTitle !== null) return { kind: "named", title: input.shellTitle, archived: false };
+  if (input.detail?.status === "deleted") return { kind: "deleted" };
+  if (input.detail?.title) {
+    return { kind: "named", title: input.detail.title, archived: input.detail.archived };
+  }
+  return { kind: "loading" };
 }

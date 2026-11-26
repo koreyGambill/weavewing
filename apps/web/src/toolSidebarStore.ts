@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import {
   INITIAL_SIDE_AREA,
+  SIDE_AREA_WIDE_MEDIA_QUERY,
   restoreSideArea,
   transitionSideArea,
   type SideAreaAction,
@@ -65,3 +66,14 @@ export const useToolSidebarStore = create<SideAreaStore>()(
     },
   ),
 );
+
+/**
+ * Gives the drop-down terminal room when it opens or is used: a maximized side area returns to
+ * its width beside the terminal, and a full-width sheet closes.
+ */
+export function makeRoomForDropdownTerminal() {
+  const state = useToolSidebarStore.getState();
+  if (!state.open) return;
+  if (!window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches) state.dispatch({ type: "close" });
+  else if (state.maximized) state.dispatch({ type: "restore" });
+}

@@ -6,7 +6,7 @@ import { selectContextThread } from "../threadContextSidebar";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useToolSidebarStore } from "../toolSidebarStore";
-import { resolveSideAreaThread } from "./ToolSidebar.logic";
+import { resolveDetailsDestination, resolveSideAreaThread } from "./ToolSidebar.logic";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -54,11 +54,11 @@ const SideAreaDetails = createContext<(element: Slot) => void>(() => {});
 
 /**
  * Holds the places the open tool renders into outside its own panel: its heading row's button slot,
- * and the Details view that the conversation's details card moves into. The card shows in one
- * place at a time, so the side area's Details takes it over the rail's.
+ * and the Details view that the conversation's details card moves into.
  */
 export function ThreadToolsHost({ children }: { children: ReactNode }) {
   const threadRef = useThreadToolsTarget();
+  const selected = useSelectedThreadRef();
   const view = useThreadContextSidebarStore((state) => state.view);
   const sideThreadRef = useSideAreaThreadRef();
   const sideOpen = useToolSidebarStore((state) => state.open);
@@ -66,12 +66,14 @@ export function ThreadToolsHost({ children }: { children: ReactNode }) {
   const [details, setDetails] = useState<Slot>(null);
   const [sideDetails, setSideDetails] = useState<Slot>(null);
   const [actions, setActions] = useState<Slot>(null);
-  const destination =
-    sideOpen && sideView === "details" && sideThreadRef && sideDetails
-      ? { threadRef: sideThreadRef, element: sideDetails }
-      : view === "details" && threadRef && details
-        ? { threadRef, element: details }
-        : null;
+  const destination = resolveDetailsDestination({
+    side:
+      sideOpen && sideView === "details" && sideThreadRef && sideDetails
+        ? { threadRef: sideThreadRef, element: sideDetails }
+        : null,
+    rail: view === "details" && threadRef && details ? { threadRef, element: details } : null,
+    selected,
+  });
   return (
     <Slots value={{ setDetails, actions, setActions }}>
       <SideAreaDetails value={setSideDetails}>
