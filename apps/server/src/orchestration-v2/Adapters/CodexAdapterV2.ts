@@ -2224,7 +2224,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         };
         // Codex has no end-turn result, so once the rewind call's result reached the model the
         // adapter interrupts the turn before the model samples again.
-        const endContextRewindTurn = Effect.fnUntraced(function* (
+        const endContextRewindTurn = Effect.fn("CodexAdapterV2.endContextRewindTurn")(function* (
           context: ActiveCodexTurnContext,
           nativeThreadId: string,
           nativeTurnId: string,
