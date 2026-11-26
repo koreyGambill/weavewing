@@ -187,11 +187,31 @@ describe("isAutoSettlementCandidate", () => {
   });
 
   it.each([
-    { waitingCounts: { question: 2, qa: 0, task: 0 }, waitingCardsEnabled: true, expected: false },
-    { waitingCounts: { question: 0, qa: 1, task: 0 }, waitingCardsEnabled: true, expected: false },
-    { waitingCounts: { question: 0, qa: 0, task: 1 }, waitingCardsEnabled: true, expected: false },
-    { waitingCounts: { question: 2, qa: 1, task: 1 }, waitingCardsEnabled: false, expected: true },
-    { waitingCounts: { question: 0, qa: 0, task: 0 }, waitingCardsEnabled: true, expected: true },
+    {
+      waitingCounts: { question: 2, qa: 0, task: 0, discussing: 0, liveQuestions: 2, live: 2 },
+      waitingCardsEnabled: true,
+      expected: false,
+    },
+    {
+      waitingCounts: { question: 0, qa: 1, task: 0, discussing: 0, liveQuestions: 0, live: 1 },
+      waitingCardsEnabled: true,
+      expected: false,
+    },
+    {
+      waitingCounts: { question: 0, qa: 0, task: 1, discussing: 0, liveQuestions: 0, live: 1 },
+      waitingCardsEnabled: true,
+      expected: false,
+    },
+    {
+      waitingCounts: { question: 2, qa: 1, task: 1, discussing: 0, liveQuestions: 2, live: 4 },
+      waitingCardsEnabled: false,
+      expected: true,
+    },
+    {
+      waitingCounts: { question: 0, qa: 0, task: 0, discussing: 0, liveQuestions: 0, live: 0 },
+      waitingCardsEnabled: true,
+      expected: true,
+    },
   ])(
     "holds a thread with items waiting on the user only while waiting cards are on: %j",
     ({ waitingCounts, waitingCardsEnabled, expected }) => {

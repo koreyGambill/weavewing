@@ -227,16 +227,23 @@ it.effect(
       expect(yield* h.service.reconcile).toBe(4);
 
       expect(openQuestions()).toBe(2);
-      expect(h.threads.get(asked)?.waitingCounts).toEqual({ question: 1, qa: 1, task: 0 });
+      expect(h.threads.get(asked)?.waitingCounts).toEqual({
+        question: 1,
+        qa: 1,
+        task: 0,
+        discussing: 0,
+        liveQuestions: 2,
+        live: 3,
+      });
       expect(h.threads.get(asked)?.waiting?.map((item) => [item.ref, item.state])).toEqual([
         ["Q1", "open"],
         ["Q2", "deferred"],
         ["QA1", "open"],
       ]);
-      expect(h.threads.get(shrunk)?.waitingCounts).toEqual({ question: 1, qa: 0, task: 0 });
+      expect(h.threads.get(shrunk)?.waitingCounts).toMatchObject({ question: 1, qa: 0, task: 0 });
       expect(h.threads.get(gone)?.waiting).toEqual([]);
-      expect(h.threads.get(gone)?.waitingCounts).toEqual({ question: 0, qa: 0, task: 0 });
-      expect(h.threads.get(tasked)?.waitingCounts).toEqual({ question: 0, qa: 0, task: 1 });
+      expect(h.threads.get(gone)?.waitingCounts).toMatchObject({ question: 0, qa: 0, task: 0 });
+      expect(h.threads.get(tasked)?.waitingCounts).toMatchObject({ question: 0, qa: 0, task: 1 });
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
@@ -253,7 +260,7 @@ it.effect("rebuilds a thread whenever its questions, tasks or QA change", () =>
 
     yield* h.workspace.questionAsk({ threadId, questions: [{ prompt: "Cache size?" }] });
     yield* settle;
-    expect(counts()).toEqual({ question: 1, qa: 0, task: 0 });
+    expect(counts()).toMatchObject({ question: 1, qa: 0, task: 0 });
 
     yield* h.workspace.update({
       threadId,
@@ -261,14 +268,14 @@ it.effect("rebuilds a thread whenever its questions, tasks or QA change", () =>
       changes: [{ text: "Approve the vendor account", owner: "you" }],
     });
     yield* settle;
-    expect(counts()).toEqual({ question: 1, qa: 0, task: 1 });
+    expect(counts()).toMatchObject({ question: 1, qa: 0, task: 1 });
 
     h.qa.set(threadId, [
       { kind: "qa", ref: "QA1", key: "landing-1/toast", title: "Toast count", state: "open" },
     ]);
     yield* Queue.offer(h.qaChanges, threadId);
     yield* settle;
-    expect(counts()).toEqual({ question: 1, qa: 1, task: 1 });
+    expect(counts()).toMatchObject({ question: 1, qa: 1, task: 1 });
 
     // A QA problem waits on the agent, so it stays listed but leaves the user's count.
     h.qa.set(threadId, [
@@ -276,7 +283,7 @@ it.effect("rebuilds a thread whenever its questions, tasks or QA change", () =>
     ]);
     yield* Queue.offer(h.qaChanges, threadId);
     yield* settle;
-    expect(counts()).toEqual({ question: 1, qa: 0, task: 1 });
+    expect(counts()).toMatchObject({ question: 1, qa: 0, task: 1 });
     expect(h.threads.get(threadId)?.waiting?.map((item) => item.ref)).toEqual(["Q1", "QA1", "T1"]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );

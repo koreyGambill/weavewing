@@ -637,7 +637,7 @@ it.effect("dates the user's previous own message only while a question has a use
       lastVisitedAt: null,
       deletedAt: null,
       waiting: [{ kind: "question", ref: "Q1", key: "Q1", title: "Ship?", state: "open" }],
-      waitingCounts: { question: 1, qa: 0, task: 0 },
+      waitingCounts: { question: 1, qa: 0, task: 0, discussing: 0, liveQuestions: 1, live: 1 },
     };
     const putThread = (value: OrchestrationV2AppThread, key: string) =>
       store.apply({
