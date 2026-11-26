@@ -122,9 +122,19 @@ In the picker, open **Hide a view** and choose the view to hide. Use **Show** un
 back. Shortcuts and links still open hidden views. At least one thread view
 stays in the picker. These choices are saved in this browser.
 
+To keep a view open without the panel covering the chat, make it a tile: choose
+**Open as tile** in the panel's header, or drag the grip at the header's left edge
+onto a tile. Dropping on a tile's edge splits it; dropping on its tab strip adds
+a tab. A thread view in a tile keeps showing that thread. When you move a view
+from a panel locked to another thread, its tab names that thread, as in
+"Links · Release notes". To send a view back, choose **Move to side panel** from
+the tile's actions menu. A narrow tile shows a view's compact layout with
+**Open full size**, which maximizes the tile. Saved tile layouts keep views of
+the thread itself and global views; a view locked to another thread is left out.
+
 Calendar, Status and Pull requests also open as full pages beside the thread list.
-In the side panel, the expand button next to **Pin** opens Calendar or Status as a
-page; for a thread view it maximizes the panel instead. The command palette offers
+In the side panel, the expand button opens Calendar or Status as a page. For
+a thread view, it maximizes the panel. The command palette offers
 **Open Calendar as a page** and **Open Status as a page**, and **Open pull requests**
 as before. On the Calendar and Status pages, **Open in side panel** moves the view back
 into the panel and returns you to where you were. Pull requests opens only on its own
