@@ -74,11 +74,13 @@ starts, which includes an existing thread resuming after a restart or an idle pe
 
 ## claude.ai connectors
 
-**claude.ai connectors** in the Claude provider settings decides whether threads load the
-connectors on your Claude account. **Leave to Claude Code**, the default, changes nothing.
-**Off** keeps them out of every thread and saves an estimated 3,200 tokens of context; a single
-thread can still switch them on with its **Tools** control. A change applies when a thread's
-Claude process next starts.
+**claude.ai connectors in new threads** in the Claude provider settings decides whether threads
+load the connectors on your Claude account, an estimated 3,200 tokens of context. **Off**, the
+default, keeps them out; **On** loads them. Each thread can switch them on or off for itself with
+its **Tools** control, and a thread that has not follows this setting, including when you change
+it later. Weavewing always decides for its own threads, so `~/.claude/settings.json` no longer
+does; Claude Code in a terminal is unaffected. This replaces the earlier **Leave to Claude Code**
+default, which now reads as **Off**. A change applies when a thread's Claude process next starts.
 
 ## Tools for one thread
 
@@ -92,12 +94,11 @@ The popover also lists the MCP servers the thread's session can load, read when 
 marks the ones the current session has not loaded. Switching a server off keeps its tools out of
 the model's context; the server may still connect. T3 Code's own server always stays in.
 
-The claude.ai connectors form a group. When the provider setting is **Off**, the group's switch
-brings them all into this thread, and switching on one connector brings in that connector alone.
-When it is **Leave to Claude Code**, the group reads "Left to Claude Code" and the thread can turn
-them on; otherwise Claude Code decides, and a connector the session loaded can be left out. Only
-the connectors as a whole have a token estimate, so the popover shows no total when some of them
-may be left out.
+The claude.ai connectors form a group with one switch, which shows whether the thread has them
+and says whether that follows the provider setting or is set for this thread. Switching it to
+match the provider setting goes back to following it. With the group off, switching on one
+connector turns the group on for that connector alone. Only the connectors as a whole have a
+token estimate, so the popover shows no total when some of them may be left out.
 
 **Reload session** saves the tools, and the thread's Claude session restarts before the next
 message, keeping the conversation. The change applies from that message, which can carry more
