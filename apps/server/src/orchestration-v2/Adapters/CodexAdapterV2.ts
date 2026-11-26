@@ -2207,7 +2207,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             readonly confirmed?: {
               readonly nativeTurnId: string;
               readonly continuationMessageId: MessageId;
-              readonly removedToolCalls: number;
               readonly resentInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
             };
             interruptRequested?: boolean;
@@ -8332,7 +8331,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       confirmed: {
                         nativeTurnId: turn.nativeTurnId,
                         continuationMessageId,
-                        removedToolCalls: record.toolCalls,
                         resentInput,
                       },
                     });

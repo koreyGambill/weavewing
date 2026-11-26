@@ -8,6 +8,7 @@ import {
   ProjectId,
   ThreadId,
   type ChatAttachment,
+  type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -257,7 +258,7 @@ const runRewindScenario = Effect.gen(function* () {
       readonly id: string;
       readonly text: string;
       readonly dispatchMode: Extract<
-        Orchestrator.OrchestratorV2Command,
+        OrchestrationV2Command,
         { readonly type: "message.dispatch" }
       >["dispatchMode"];
       readonly attachments?: ReadonlyArray<ChatAttachment>;

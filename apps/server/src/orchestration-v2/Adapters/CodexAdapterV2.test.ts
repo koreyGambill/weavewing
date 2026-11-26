@@ -12859,12 +12859,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           attemptId: RunAttemptId.make(`${input.scenario}-attempt`),
           text: rewindPrompt,
         });
-        yield* input.resume === true
-          ? harness.runtime.resumeTurn({
-              ...turnInput,
-              messageId: turnInput.message.messageId,
-            })
-          : harness.runtime.startTurn(turnInput);
+        yield* harness.runtime.startTurn(
+          input.resume === true
+            ? ProviderAdapter.resumeTurnInput({
+                ...turnInput,
+                messageId: turnInput.message.messageId,
+              })
+            : turnInput,
+        );
         yield* harness.until(() =>
           harness.events.some(
             (event) =>

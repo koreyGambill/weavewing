@@ -619,8 +619,10 @@ export const layerWithOptions = (
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable &&
                     resolved.capabilities.has("questions") === questionTools &&
-                    resolved.capabilities.has("context-rewind") === (contextRewind === "tool_calls") &&
-                    resolved.capabilities.has("context-rewind-turn") === (contextRewind === "turn") &&
+                    resolved.capabilities.has("context-rewind") ===
+                      (contextRewind === "tool_calls") &&
+                    resolved.capabilities.has("context-rewind-turn") ===
+                      (contextRewind === "turn") &&
                     // A credential issued while the lineage read failed is replaced once it works.
                     (resolved.thread.subagent === true) === subagent
                   ) {
