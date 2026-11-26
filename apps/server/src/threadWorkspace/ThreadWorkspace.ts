@@ -45,6 +45,12 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import {
+  changeUserTask,
+  removedOpenTasks,
+  TASK_LEAVES_ONLY_CLOSED,
+  type ListActor,
+} from "./userTasks.ts";
 import * as TicketTracker from "../ticketTracker/TicketTracker.ts";
 import { LegacyWorkspace, migrateWorkspace, cleanMigratedDetails } from "./workspaceMigration.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -71,11 +77,14 @@ export class ThreadWorkspace extends Context.Service<
     readonly listRead: (
       input: ThreadListReadInput,
     ) => Effect.Effect<ReadonlyArray<ThreadListEntry>, ThreadWorkspaceError>;
+    /** The agent closes a user task only from the user's message in its turn; see `userTasks.ts`. */
     readonly update: (
       input: ThreadListUpdateInput,
+      actor: ListActor,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
     readonly rewrite: (
       input: ThreadListRewriteInput,
+      actor: ListActor,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
     readonly artifactWrite: (
       input: ThreadArtifactWriteInput,
@@ -102,12 +111,30 @@ export class ThreadWorkspace extends Context.Service<
       input: ThreadQuestionDraftInput,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
     /**
+     * Marks the waiting questions and open user tasks a user's message took into chat through
+     * their cards' Discuss, so they show as discussing until the user changes them again.
+     */
+    readonly markDiscussed: (input: {
+      readonly threadId: ThreadId;
+      readonly messageId: MessageId;
+      readonly questionIds: ReadonlyArray<string>;
+      readonly taskIds: ReadonlyArray<string>;
+    }) => Effect.Effect<void, ThreadWorkspaceError>;
+    /**
      * The thread's questions and user tasks as waiting items: every waiting one, plus questions
      * the user withdrew. Repairs answer delivery first and numbers tasks that have no ref yet.
      */
     readonly waitingItems: (
       threadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, ThreadWorkspaceError>;
+    /** The thread's questions and user tasks, for the lines ahead of an agent's turn. */
+    readonly waitingWork: (threadId: ThreadId) => Effect.Effect<
+      {
+        readonly questions: ReadonlyArray<ThreadQuestion>;
+        readonly tasks: ReadonlyArray<ListItem>;
+      },
+      ThreadWorkspaceError
+    >;
     /** Threads whose workspace file holds questions or tasks for the user, archived included. */
     readonly waitingThreads: Effect.Effect<ReadonlyArray<ThreadId>, ThreadWorkspaceError>;
     /** Each thread whose workspace file was written, as it is written. */
@@ -189,7 +216,7 @@ const taskWaitingItems = (workspace: Pick<Workspace, "items">): ReadonlyArray<Wa
             ref: item.ref ?? "T",
             key: item.id,
             title: threadQuestionTitle(item.text),
-            state: "open" as const,
+            state: item.discussedInMessageId ? ("discussing" as const) : ("open" as const),
           },
         ]
       : [],
@@ -581,11 +608,25 @@ const make = Effect.gen(function* () {
       }),
     });
   });
-  const apply = (current: Workspace, changes: ThreadListUpdateInput["changes"], now: string) => {
+  const apply = Effect.fnUntraced(function* (
+    current: Workspace,
+    changes: ThreadListUpdateInput["changes"],
+    now: string,
+    actor: ListActor,
+    // A rewrite applies to an empty list but keeps the user-task fields of items it keeps by id.
+    previous: ReadonlyArray<ListItem> = current.items,
+  ) {
     const items = [...current.items];
-    for (const change of changes) {
+    for (const requested of changes) {
+      // A user task's ref, such as T2, names it as well as its id.
+      const byRef =
+        requested.id === undefined || previous.some((item) => item.id === requested.id)
+          ? undefined
+          : previous.find((item) => item.ref === requested.id);
+      const change = byRef === undefined ? requested : { ...requested, id: byRef.id };
       const index = change.id === undefined ? -1 : items.findIndex((item) => item.id === change.id);
       const old = items[index];
+      const before = old ?? previous.find((item) => item.id === change.id);
       const item = {
         id: change.id ?? old?.id ?? NodeCrypto.randomUUID(),
         text: change.text ?? old?.text ?? "",
@@ -608,11 +649,13 @@ const make = Effect.gen(function* () {
           )
           .map((target) => ({ type: "ticket" as const, target })),
       ];
-      if (index < 0) items.push(item);
-      else items[index] = item;
+      const task = changeUserTask(before, item, change, actor, now);
+      if (typeof task === "string") return yield* invalid(task);
+      if (index < 0) items.push(task);
+      else items[index] = task;
     }
     return items;
-  };
+  });
   // The orchestrator dedupes a command id, so a retry after a failed save with the same key
   // replays the send instead of posting a second message.
   const sendAnswers = Effect.fn("ThreadWorkspace.sendAnswers")(function* (
@@ -719,9 +762,14 @@ const make = Effect.gen(function* () {
   }, lock.withPermit);
   return ThreadWorkspace.of({
     get,
-    update: Effect.fn("ThreadWorkspace.update")(function* (input) {
+    update: Effect.fn("ThreadWorkspace.update")(function* (input, actor) {
       const current = yield* read(input.threadId);
-      let items = apply(current, input.changes, DateTime.formatIso(yield* DateTime.now));
+      let items = yield* apply(
+        current,
+        input.changes,
+        DateTime.formatIso(yield* DateTime.now),
+        actor,
+      );
       if (input.order !== undefined) {
         if (
           new Set(input.order).size !== items.length ||
@@ -743,7 +791,7 @@ const make = Effect.gen(function* () {
         input.expectedRevision,
       );
     }, lock.withPermit),
-    rewrite: Effect.fn("ThreadWorkspace.rewrite")(function* (input) {
+    rewrite: Effect.fn("ThreadWorkspace.rewrite")(function* (input, actor) {
       const current = yield* read(input.threadId);
       const retained = current.items.filter((item) => item.state !== "open");
       if (
@@ -752,12 +800,23 @@ const make = Effect.gen(function* () {
         )
       )
         return yield* invalid("Rewrite cannot change finished or handed-off history.");
+      const keptIds = new Set(
+        input.items.flatMap((change) =>
+          change.id === undefined
+            ? []
+            : [current.items.find((item) => item.ref === change.id)?.id ?? change.id],
+        ),
+      );
+      if (actor.by === "agent" && removedOpenTasks(current.items, keptIds).length > 0)
+        return yield* invalid(TASK_LEAVES_ONLY_CLOSED);
       // A task kept by id keeps its number.
-      const replacements = apply(
+      const replacements = (yield* apply(
         { ...current, items: [] },
         input.items,
         DateTime.formatIso(yield* DateTime.now),
-      ).map((item) => {
+        actor,
+        current.items,
+      )).map((item) => {
         const ref = current.items.find((entry) => entry.id === item.id)?.ref;
         return ref === undefined || item.ref !== undefined ? item : { ...item, ref };
       });
@@ -773,6 +832,28 @@ const make = Effect.gen(function* () {
         { ...current, items: [...history, ...replacements] },
         input.expectedRevision,
       );
+    }, lock.withPermit),
+    waitingWork: Effect.fn("ThreadWorkspace.waitingWork")(function* (threadId) {
+      const workspace = yield* read(threadId);
+      return { questions: workspace.questions, tasks: workspace.items.filter(isUserTask) };
+    }, lock.withPermit),
+    markDiscussed: Effect.fn("ThreadWorkspace.markDiscussed")(function* (input) {
+      const current = yield* load(input.threadId);
+      const questionIds = new Set(input.questionIds);
+      const taskIds = new Set(input.taskIds);
+      let changed = false;
+      const questions = current.questions.map((question) => {
+        if (!questionIds.has(question.id) || !isWaiting(question)) return question;
+        changed = true;
+        return { ...question, discussedInMessageId: input.messageId };
+      });
+      const items = current.items.map((item) => {
+        if (!taskIds.has(item.id) || !isUserTask(item) || item.state !== "open") return item;
+        changed = true;
+        return { ...item, discussedInMessageId: input.messageId };
+      });
+      // Like answer delivery, nothing the user or agent wrote changed, so the revision stays.
+      if (changed) yield* write({ ...current, questions, items });
     }, lock.withPermit),
     listRead: Effect.fn("ThreadWorkspace.listRead")(function* (input) {
       if (!input.allThreads && input.threadId === undefined)

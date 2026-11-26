@@ -88,8 +88,9 @@ export type ThreadQuestionStatus =
   | "replaced";
 
 /**
- * Where a question's answer or comment is; `inComposer` is what this device's composer holds for
- * it. A sent comment outranks the draft it leaves, so a chosen option still reads as discussing.
+ * Where a question's answer or discussion is; `inComposer` is what this device's composer holds
+ * for it: its answer, or a Discuss reference (an older draft may hold a comment instead). A sent
+ * discussion outranks the draft, so a chosen option still reads as discussing.
  */
 export function threadQuestionStatus(
   question: Pick<

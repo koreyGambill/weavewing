@@ -35,6 +35,7 @@ import {
   mcpAppFromToolItem,
   questionIdsFromToolItem,
   evidenceLandingIdFromToolItem,
+  filedTasksFromToolItem,
   sentMessageFromToolItem,
 } from "@t3tools/shared/toolOutput";
 import {
@@ -159,6 +160,14 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly questionIds: ReadonlyArray<string>;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "thread-tasks";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      /** The refs of the user tasks a `list_update` or `list_rewrite` call filed. */
+      readonly taskRefs: ReadonlyArray<string>;
     }
   | {
       readonly id: string;
@@ -730,6 +739,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         createdAt,
         runId: item.runId,
         questionIds,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const taskRefs =
+      input.waitingCards === true && item.type === "dynamic_tool" && item.status === "completed"
+        ? filedTasksFromToolItem(item)
+        : [];
+    if (taskRefs.length > 0) {
+      entries.push({
+        id: item.id,
+        kind: "thread-tasks",
+        createdAt,
+        runId: item.runId,
+        taskRefs,
         ...attemptMetadata,
       });
       continue;

@@ -552,8 +552,9 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
 
 /** What a Discuss reference tells the agent, ahead of the user's own words. */
 function waitingItemAboutLine(record: WaitingItemContextRecord): string {
+  if (record.itemKind !== "qa") return `About ${record.ref} (${record.itemKind}): ${record.title}`;
   const changeId = record.key.slice(record.key.indexOf("/") + 1);
-  return `About ${record.ref} (landing ${record.sha}, change ${changeId}): ${record.title}`;
+  return `About ${record.ref} (landing ${record.sha ?? "unknown"}, change ${changeId}): ${record.title}`;
 }
 
 function formatEnvelopeEntry(

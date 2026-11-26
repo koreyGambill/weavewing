@@ -1,7 +1,16 @@
-import type { WaitingCounts, WaitingItemSummary } from "@t3tools/contracts";
+import {
+  ComposerContextId,
+  MessageId,
+  type ListItem,
+  type ThreadQuestion,
+  type WaitingCounts,
+  type WaitingItemContextRecord,
+  type WaitingItemSummary,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  discussesStillWaiting,
   groupWaitingItems,
   hasLiveQuestions,
   qaKeyParts,
@@ -133,5 +142,47 @@ describe("waitingChipLabel", () => {
     expect(waitingChipLabel(counts({ question: 1, qa: 2 }))).toBe(
       "3 waiting on you: 1 question, 2 changes to check",
     );
+  });
+});
+
+describe("discussesStillWaiting", () => {
+  const reference = (itemKind: WaitingItemContextRecord["itemKind"], key: string) =>
+    ({
+      version: 1,
+      kind: "waiting-item",
+      contextId: ComposerContextId.make(`waiting-item_${key.replace(/[^a-z0-9_-]/gi, "-")}`),
+      label: key,
+      itemKind,
+      key,
+      ref: key,
+      title: key,
+    }) satisfies WaitingItemContextRecord;
+  const question = (id: string, patch: Partial<ThreadQuestion> = {}) =>
+    ({ id, state: "open", ...patch }) as ThreadQuestion;
+  const task = (id: string, patch: Partial<ListItem> = {}) =>
+    ({ id, owner: "you", state: "open", ...patch }) as ListItem;
+
+  it("drops references to questions and tasks that no longer wait, and keeps QA", () => {
+    const records = [
+      reference("question", "Q1"),
+      reference("question", "Q2"),
+      reference("question", "Q3"),
+      reference("task", "t1"),
+      reference("task", "t2"),
+      reference("qa", "landing/change"),
+    ];
+    expect(
+      discussesStillWaiting(records, {
+        questions: [
+          question("Q1", { state: "deferred" }),
+          question("Q2", { state: "answered" }),
+          question("Q3", { sentInMessageId: MessageId.make("m") }),
+        ],
+        items: [task("t1"), task("t2", { state: "done" })],
+      })?.map((record) => record.key),
+    ).toEqual(["Q1", "t1", "landing/change"]);
+    expect(
+      discussesStillWaiting([reference("task", "t1")], { questions: [], items: [task("t1")] }),
+    ).toBeNull();
   });
 });

@@ -20,13 +20,12 @@ import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { evidenceSetQa } from "../../state/evidence";
-import { useSaveQuestionDraft } from "../../state/threadQuestions";
-import { threadListUpdate } from "../../state/threadWorkspace";
+import { threadTaskUpdate, useSaveQuestionDraft } from "../../state/threadQuestions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
-import { removeQaDiscuss, useQaInComposer } from "../evidence/qaComposer";
 import { QaStatusBadge } from "../evidence/ThreadQaCard";
+import { TaskStatusBadge } from "../tasks/ThreadTaskCard";
 import {
   addQuestionAnswersToComposer,
   removeQuestionAnswerFromComposer,
@@ -34,11 +33,16 @@ import {
 } from "../questions/questionComposer";
 import { questionAnswerForComposer } from "../questions/questionComposer.logic";
 import { questionDraftWriter } from "../questions/questionDraftWriter";
-import { revealQuestionInChat, revealQaInChat } from "../questions/questionReveal";
-import { CardStatusBadge, QuestionStatusBadge } from "../questions/QuestionStatusBadge";
+import {
+  revealQuestionInChat,
+  revealQaInChat,
+  revealTaskInChat,
+} from "../questions/questionReveal";
+import { QuestionStatusBadge } from "../questions/QuestionStatusBadge";
 import { HelpButton } from "../questions/ThreadCardShell";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { removeWaitingItemDiscuss, useWaitingItemsInComposer } from "./waitingItemComposer";
 import { WAITING_KIND_HEADING, qaKeyParts } from "./waitingStrip.logic";
 
 export const WAITING_KIND_ICON: Record<WaitingItemKind, LucideIcon> = {
@@ -159,7 +163,10 @@ function WaitingItemRow({
   const show = () => {
     if (item.kind === "question") revealQuestionInChat(threadKey, item.key);
     else if (item.kind === "qa") revealQaInChat(threadKey, item);
-    else useThreadContextSidebarStore.getState().show("todos", { thread: threadRef });
+    else
+      revealTaskInChat(threadKey, item.ref, () =>
+        useThreadContextSidebarStore.getState().show("todos", { thread: threadRef }),
+      );
   };
   return (
     <li
@@ -206,6 +213,7 @@ function QuestionRowControls({
   readonly workspace: ThreadWorkspace | null;
 }) {
   const inComposer = useQuestionsInComposer(threadRef).get(item.key);
+  const discussing = useWaitingItemsInComposer(threadRef, "question").has(item.key);
   const saveDraft = useSaveQuestionDraft(threadRef);
   const [busy, setBusy] = useState(false);
   const question = workspace?.questions.find((entry) => entry.id === item.key);
@@ -218,7 +226,7 @@ function QuestionRowControls({
       saveDraft,
     );
     setBusy(false);
-    const record = questionAnswerForComposer(threadRef.threadId, question, flushed, "answer");
+    const record = questionAnswerForComposer(threadRef.threadId, question, flushed);
     if (record !== null) addQuestionAnswersToComposer(threadRef, [record]);
     else if (flushed === null)
       toastManager.add({
@@ -231,7 +239,12 @@ function QuestionRowControls({
     <>
       {question === undefined ? null : (
         <span className={badgeSlot}>
-          <QuestionStatusBadge status={threadQuestionStatus(question, inComposer)} />
+          <QuestionStatusBadge
+            status={threadQuestionStatus(
+              question,
+              inComposer === "answer" ? "answer" : discussing ? "discuss" : undefined,
+            )}
+          />
         </span>
       )}
       <HelpButton
@@ -266,7 +279,7 @@ function QaRowControls({
 }) {
   const canAct = useAtomValue(evidenceSetQa.permissionAtom(threadRef.environmentId));
   const setQa = useAtomCommand(evidenceSetQa, { label: "QA" });
-  const inComposer = useQaInComposer(threadRef).has(item.key);
+  const inComposer = useWaitingItemsInComposer(threadRef, "qa").has(item.key);
   const [busy, setBusy] = useState(false);
   const parts = qaKeyParts(item.key);
   const fixing = item.state === "problem";
@@ -279,7 +292,7 @@ function QaRowControls({
     });
     setBusy(false);
     if (result._tag !== "Success") return;
-    removeQaDiscuss(threadRef, item.key);
+    removeWaitingItemDiscuss(threadRef, "qa", item.key);
     keepFocusInList(from);
   };
   return (
@@ -324,8 +337,9 @@ function TaskRowControls({
   readonly item: WaitingItemSummary;
   readonly workspace: ThreadWorkspace | null;
 }) {
-  const canAct = useAtomValue(threadListUpdate.permissionAtom(threadRef.environmentId));
-  const update = useAtomCommand(threadListUpdate, { label: "Task" });
+  const canAct = useAtomValue(threadTaskUpdate.permissionAtom(threadRef.environmentId));
+  const update = useAtomCommand(threadTaskUpdate, { label: "Task" });
+  const inComposer = useWaitingItemsInComposer(threadRef, "task").has(item.key);
   const [busy, setBusy] = useState(false);
   const done = async (from: HTMLElement) => {
     if (workspace === null) return;
@@ -339,21 +353,18 @@ function TaskRowControls({
       },
     });
     setBusy(false);
-    if (result._tag === "Success") keepFocusInList(from);
+    if (result._tag !== "Success") return;
+    removeWaitingItemDiscuss(threadRef, "task", item.key);
+    keepFocusInList(from);
   };
   const usable = canAct && !busy && workspace !== null;
   return (
     <>
       <span className={badgeSlot}>
-        {item.state === "discussing" ? (
-          <CardStatusBadge
-            label="Discussing"
-            variant="warning-outline"
-            help="You sent a message about this task. The agent records what it settled."
-          />
-        ) : (
-          <CardStatusBadge label="Open" variant="outline" help="Only you can do this." />
-        )}
+        <TaskStatusBadge
+          status={inComposer ? "in-composer" : item.state === "discussing" ? "discussing" : "open"}
+          note=""
+        />
       </span>
       <HelpButton
         help="You did it. Nothing is sent to the agent."

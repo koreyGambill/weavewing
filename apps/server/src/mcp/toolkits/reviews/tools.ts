@@ -19,6 +19,7 @@ import {
   EvidenceRecordInput,
   EvidenceRecordResult,
   EvidenceSlug,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
@@ -45,8 +46,11 @@ const listMutationResult = Schema.Struct({
       owner: ListItem.fields.owner,
       links: ListItem.fields.links,
       doneAt: ListItem.fields.doneAt,
+      ref: ListItem.fields.ref,
     }),
   ),
+  /** The refs of user tasks this call filed, so clients place each task's card at the call. */
+  filedTasks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 const artifactWriteResult = Schema.Struct({
   threadId: ThreadId,
@@ -65,14 +69,14 @@ export const ReviewToolkit = Toolkit.make(
   Tool.make("list_update", {
     ...common,
     description:
-      "Batch add or edit list items using the read revision. Omit id to create; omitted fields stay unchanged. owner you is the human's work. Use handed_off for linked work in progress. Moving an item keeps its subtree; parent state changes leave children alone. childPreamble applies to future delegates. Omit threadId for this thread.",
+      "Batch add or edit list items using the read revision. Omit id to create; omitted fields stay unchanged. owner you is a task only the user can do, filed once and never also asked in your reply; the user sees it as a card, and its ref, such as T2, works as its id. Mark one done only from the user's message in this turn, with settledFromUser and the user's words as note; drop one that no longer matters with note saying why. Use handed_off for linked work in progress. Moving an item keeps its subtree; parent state changes leave children alone. childPreamble applies to future delegates. Omit threadId for this thread.",
     parameters: Schema.Struct({ ...ThreadListUpdateInput.fields, ...optionalThread }),
     success: listMutationResult,
   }).annotate(Tool.Readonly, true),
   Tool.make("list_rewrite", {
     ...common,
     description:
-      "Replace open list items using the read revision. Finished and handed-off history stays at every depth; children of removed items attach to the nearest surviving ancestor. Omit threadId for this thread.",
+      "Replace open list items using the read revision. Finished and handed-off history stays at every depth; children of removed items attach to the nearest surviving ancestor. Keep every open owner you task; close one with list_update. Omit threadId for this thread.",
     parameters: Schema.Struct({ ...ThreadListRewriteInput.fields, ...optionalThread }),
     success: listMutationResult,
   }).annotate(Tool.Readonly, true),

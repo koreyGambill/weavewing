@@ -45,21 +45,6 @@ describe("questionAnswerForComposer", () => {
     ).toMatchObject({ choice: "Postgres", answerRevision: 2 });
   });
 
-  it("discusses with the note the newest save returned, and never sends the choice", () => {
-    const shown = question({ ...draft(["pg"], 2), notes: "old" });
-    const saved = workspace([question({ ...draft(["lite"], 5), notes: "Two writers?" })]);
-    expect(questionAnswerForComposer("t1", shown, { saved }, "discuss")).toMatchObject({
-      artifactId: "thread-question-comments",
-      choice: "",
-      note: "Two writers?",
-      answerRevision: 5,
-    });
-    expect(
-      questionAnswerForComposer("t1", question(draft(["pg"], 2)), { saved: null }, "discuss"),
-    ).toBeNull();
-    expect(questionAnswerForComposer("t1", shown, null, "discuss")).toBeNull();
-  });
-
   it("adds nothing when the save failed or the draft is empty", () => {
     expect(questionAnswerForComposer("t1", question(draft(["pg"], 2)), null)).toBeNull();
     expect(

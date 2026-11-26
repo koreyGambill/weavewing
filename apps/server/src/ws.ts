@@ -1471,6 +1471,7 @@ export const layerWsRpc = (
         | ServerSettings.ServerSettingsService
         | DocumentText.DocumentText
         | EvidenceService.EvidenceService
+        | ThreadWorkspace.ThreadWorkspace
       >();
       const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
       const projectStore = yield* ProjectStore.ProjectStoreV2;
@@ -3243,8 +3244,8 @@ export const layerWsRpc = (
         [WS_METHODS.threadListRead]: (input) => threadWorkspace.listRead(input),
         [WS_METHODS.threadArtifactRead]: (input) => threadWorkspace.artifactRead(input),
         [WS_METHODS.threadArtifactList]: (input) => threadWorkspace.artifactList(input),
-        [WS_METHODS.threadListUpdate]: (input) => threadWorkspace.update(input),
-        [WS_METHODS.threadListRewrite]: (input) => threadWorkspace.rewrite(input),
+        [WS_METHODS.threadListUpdate]: (input) => threadWorkspace.update(input, { by: "user" }),
+        [WS_METHODS.threadListRewrite]: (input) => threadWorkspace.rewrite(input, { by: "user" }),
         [WS_METHODS.threadArtifactWrite]: (input) => threadWorkspace.artifactWrite(input),
         [WS_METHODS.threadArtifactAnswer]: (input) => threadWorkspace.artifactAnswer(input),
         [WS_METHODS.threadArtifactSubmit]: (input) => threadWorkspace.artifactSubmit(input),

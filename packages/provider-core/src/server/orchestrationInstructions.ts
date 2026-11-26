@@ -20,13 +20,18 @@ T3 agent tool reference.
 - Another machine: \`t3_environment_links\` lists linked ones. Pass its \`environmentId\` to a T3 tool to act there; ids are then that machine's, so pass \`threadId\`. An unlinked machine the user names: \`t3_environment_link\` with a \`hint\` from their words, not a pairing code in chat. No link tools: say to enable Settings → Labs → Linked environments.
 - A login, token, PIN, pairing code or sudo password only the user can give: call \`request_secret\`, not a chat ask or a handoff. Not for access you have. Sudo: if \`sudo -n <cmd>\` says a password is required, use \`delivery: "file"\` and run \`sudo -S -p '' <cmd> < "$file"\`; the password takes stdin, so give other input as a file argument. When asked only to schedule, \`schedule_task\` without running its prompt.
 - T3 tools may load late. Try the name once before you call it absent.`,
-  `- Use \`list_read\`, \`list_update\` and \`list_rewrite\` for thread commitments and human tasks; \`artifact_write\`, \`artifact_read\` and \`artifact_list\` keep versioned Markdown or sandboxed HTML. Read only when needed; keep routine questions in chat. Landed work and the user's QA of it live in evidence: \`evidence_record\` after a land; \`evidence_read\` answers what awaits QA or needs a fix, not lists or the repo.`,
+  `- Use \`list_read\`, \`list_update\` and \`list_rewrite\` for your checklist and for tasks only the user can do; \`artifact_write\`, \`artifact_read\` and \`artifact_list\` keep versioned Markdown or sandboxed HTML. Read only when needed; keep routine questions in chat. Landed work and the user's QA of it live in evidence: \`evidence_record\` after a land; \`evidence_read\` answers what awaits QA or needs a fix, not lists or the repo.`,
   `## T3 Code QA
 
 - Call \`evidence_record\` in the turn that lands work. The user sees a QA card for a change with something only they can judge; other landings are recorded quietly. Mark a change \`attention: needs_you\` when the user should look at it, such as a visual change, or check asked-for behavior you could not run; otherwise \`note\`, even with routine gaps, and its captures are not shown in chat.
 - The user sees QA cards in the thread. Never list or recap them in a reply unless the user's message is about one.
 - When the user's message settles a QA change, such as "that works" or "the count still overlaps the button", call \`evidence_qa_update\`: \`confirmed\`, \`problem\` with what is wrong, or \`dismissed\`. A message that does neither leaves it as it is. A message that carries a QA reference is about that change; record what it settled, or reply and leave it open.
 - A problem is work you owe. Fix it, then record the fix with \`evidence_record\`, naming the change in \`fixes\`.`,
+  `## T3 Code tasks for the user
+
+- Work only the user can do, such as granting access, rotating a secret or approving an account, goes to \`list_update\` as an item with \`owner: "you"\`, once. The user sees it as a card. Never also ask for it in your reply.
+- When the user's message says such a task is done or no longer needed, update it with \`list_update\`: \`state: "done"\` or \`"dropped"\`, \`settledFromUser: true\`, and the user's words as \`note\`. Only the user's message marks a task done. Drop a task that no longer matters with \`note\` saying why.
+- Your own checklist uses \`owner: "agent"\` and never reaches the user.`,
   `### Visuals and preview
 
 - Answer data with a trend or comparison with a chart and show any visual the user asks for here: pass an HTML file path or inline HTML to \`html_preview\`, then \`html_render\`. A screenshot on disk or a text description doesn't show it. Never start a server for it. Page tools write only on user request. Never use them to show results. Asked for an image to post, send or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
@@ -74,68 +79,128 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 - A comment on a question is not its answer. Reply in chat; then ask it again with \`question_ask\` \`replaces\` if the decision is still open, record the answer if the comment settled it, or withdraw the question if the comment made it moot.
 - Reopen a deferred question with \`question_update\` \`open\`, once, as soon as your current task would settle or describe its outcome, such as code, tests or docs about it; then keep working on your current default. Never answer or withdraw a deferred question yourself, and otherwise leave it alone.`;
 
-/** The line ahead of a user's message that lists the agent's waiting questions; empty for none. */
-export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLine>): string {
-  const waiting = questions.filter(
-    (question) => question.state !== "withdrawn" && question.sent !== true,
-  );
-  if (waiting.length === 0) return "";
-  const list = waiting
-    .map((question) => {
-      const notes = [
-        ...(question.state === "deferred"
-          ? ["deferred; reopen it if this task settles or describes it"]
-          : []),
-        ...(question.discussing === true
-          ? [
-              "discussing; once you have replied, ask it again with replaces while the decision is still open",
-            ]
-          : []),
-      ];
-      return notes.length === 0
-        ? `${question.id} ${question.title}`
-        : `${question.id} ${question.title} (${notes.join("; ")})`;
-    })
-    .join("; ");
-  return `Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: ${list}`;
+export type WaitingContextKind = "question" | "qa" | "task";
+
+/** Something waiting on the user, as the agent's turn context names it. */
+export interface WaitingContextItem {
+  readonly kind: WaitingContextKind;
+  readonly ref: string;
+  readonly title: string;
+  readonly state: "open" | "deferred" | "discussing";
+  /** A discussing question that the user had deferred. */
+  readonly deferred?: true | undefined;
+  /** A question whose answer rides a user message that has not reached the agent yet. */
+  readonly sent?: true | undefined;
 }
 
-type ThreadQuestionLine = {
-  readonly id: string;
+/** What the user did to a waiting item since their previous message. */
+export interface WaitingContextChange {
+  readonly kind: WaitingContextKind;
+  readonly ref: string;
   readonly title: string;
-  readonly state: "open" | "deferred" | "withdrawn";
-  readonly userChangedAt?: string | undefined;
-  readonly sent?: true | undefined;
-  readonly discussing?: true | undefined;
+  readonly change:
+    | "withdrew"
+    | "deferred"
+    | "reopened"
+    | "confirmed"
+    | "dismissed"
+    | "done"
+    | "cancelled";
+}
+
+/** A QA change the user reported a problem with, which the agent owes a fix for. */
+export interface WaitingContextProblem {
+  readonly ref: string;
+  readonly title: string;
+  readonly note: string;
+}
+
+const WAITING_CONTEXT_LIST_LIMIT = 10;
+
+const capped = (entries: ReadonlyArray<string>, separator: string) =>
+  entries.length <= WAITING_CONTEXT_LIST_LIMIT
+    ? entries.join(separator)
+    : `${entries.slice(0, WAITING_CONTEXT_LIST_LIMIT).join(separator)}${separator}and ${entries.length - WAITING_CONTEXT_LIST_LIMIT} more`;
+
+const waitingEntry = (item: WaitingContextItem) => {
+  const notes =
+    item.kind === "question"
+      ? [
+          ...(item.state === "deferred" || item.deferred === true
+            ? ["deferred; reopen it if this task settles or describes it"]
+            : []),
+          ...(item.state === "discussing"
+            ? [
+                "discussing; once you have replied, ask it again with replaces while the decision is still open",
+              ]
+            : []),
+        ]
+      : item.state === "discussing"
+        ? ["discussing"]
+        : [];
+  return notes.length === 0
+    ? `${item.ref} ${item.title}`
+    : `${item.ref} ${item.title} (${notes.join("; ")})`;
+};
+
+const CHANGE_ORDER: ReadonlyArray<WaitingContextChange["change"]> = [
+  "confirmed",
+  "dismissed",
+  "done",
+  "cancelled",
+  "withdrew",
+  "deferred",
+  "reopened",
+];
+
+const sinceLine = (changes: ReadonlyArray<WaitingContextChange>) => {
+  // The first ten items keep their verbs; the rest are only counted.
+  const shown = changes
+    .toSorted((a, b) => CHANGE_ORDER.indexOf(a.change) - CHANGE_ORDER.indexOf(b.change))
+    .slice(0, WAITING_CONTEXT_LIST_LIMIT);
+  const named = (change: WaitingContextChange) =>
+    change.change === "withdrew" || change.change === "cancelled"
+      ? `${change.ref} (${change.title})`
+      : change.ref;
+  const parts = CHANGE_ORDER.flatMap((verb) => {
+    const refs = shown.filter((change) => change.change === verb).map(named);
+    if (refs.length === 0) return [];
+    const list = refs.join(", ");
+    return [verb === "done" ? `marked ${list} done` : `${verb} ${list}`];
+  });
+  const more = changes.length - shown.length;
+  return `Since your last message the user ${parts.join("; ")}${more > 0 ? `; and ${more} more` : ""}.`;
 };
 
 /**
- * The line naming questions the user withdrew, deferred or reopened after `sinceMs`, so a
- * dismissal reaches the agent with the next message; empty for none. Null `sinceMs` takes all.
+ * The lines ahead of the agent's turn about what waits on the user: what the user changed since
+ * their previous message and what still waits, both only on a turn carrying the user's own
+ * message, then the QA problems the agent owes a fix for, on every turn. Empty for none.
  */
-export function t3QuestionChangesContext(
-  questions: ReadonlyArray<ThreadQuestionLine>,
-  sinceMs: number | null,
-): string {
-  const changed = questions.filter((question) => {
-    const at =
-      question.userChangedAt === undefined ? Number.NaN : Date.parse(question.userChangedAt);
-    return !Number.isNaN(at) && (sinceMs === null || at > sinceMs);
-  });
-  const named = (state: ThreadQuestionLine["state"], verb: string) => {
-    const ids = changed
-      .filter((question) => question.state === state)
-      .map((question) =>
-        state === "withdrawn" ? `${question.id} (${question.title})` : question.id,
-      );
-    return ids.length === 0 ? [] : [`${verb} ${ids.join(", ")}`];
-  };
-  const parts = [
-    ...named("withdrawn", "withdrew"),
-    ...named("deferred", "deferred"),
-    ...named("open", "reopened"),
-  ];
-  return parts.length === 0 ? "" : `Since your last turn the user ${parts.join("; ")}.`;
+export function t3WaitingContext(input: {
+  readonly waiting?: ReadonlyArray<WaitingContextItem> | undefined;
+  readonly changes?: ReadonlyArray<WaitingContextChange> | undefined;
+  readonly problems?: ReadonlyArray<WaitingContextProblem> | undefined;
+}): string {
+  const waiting = (input.waiting ?? []).filter((item) => item.sent !== true);
+  const changes = input.changes ?? [];
+  const problems = input.problems ?? [];
+  return [
+    changes.length === 0 ? "" : sinceLine(changes),
+    waiting.length === 0
+      ? ""
+      : `Waiting on the user, who already sees these, so leave them out of your reply unless this message is about one: ${capped(waiting.map(waitingEntry), "; ")}`,
+    problems.length === 0
+      ? ""
+      : `QA problems you owe a fix for: ${capped(
+          problems.map(
+            (problem) => `${problem.ref} ${problem.title}: ${JSON.stringify(problem.note)}`,
+          ),
+          "; ",
+        )}`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 // ACP only: some ACP agents accept the injected MCP server but never expose

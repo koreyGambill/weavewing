@@ -16,7 +16,7 @@ import { useEnvironmentQuery } from "./query";
 import { useAtomCommand } from "./use-atom-command";
 import { serverEnvironment } from "./server";
 import { useEnvironmentScope } from "./session";
-import { threadWorkspaceGet } from "./threadWorkspace";
+import { sidebarWorkspaceGet, threadWorkspaceGet } from "./threadWorkspace";
 
 /** Environments that show waiting-on-you cards; one atom for every sidebar row to share. */
 export const waitingCardsEnvironmentIdsAtom = Atom.make((get) => {
@@ -54,6 +54,25 @@ export const threadQuestionUpdate = createEnvironmentRpcCommand(connectionAtomRu
   label: "question:update",
   tag: WS_METHODS.threadQuestionUpdate,
   onSuccess: remember,
+});
+/** A list write from a task card or the strip, shown on every card before the query refetches. */
+export const threadTaskUpdate = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "task:update",
+  tag: WS_METHODS.threadListUpdate,
+  onSuccess: (target, registry, workspace) =>
+    remember(target, registry, workspace).pipe(
+      // The left strip's Todos badge counts open items from its own workspace query.
+      Effect.andThen(
+        Effect.sync(() =>
+          registry.refresh(
+            sidebarWorkspaceGet({
+              environmentId: target.environmentId,
+              input: { threadId: target.input.threadId },
+            }),
+          ),
+        ),
+      ),
+    ),
 });
 export const threadQuestionDraft = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "question:draft",

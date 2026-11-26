@@ -8,6 +8,8 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { MessageId } from "@t3tools/contracts";
+import type { ListActor } from "../../../threadWorkspace/userTasks.ts";
 import { McpSchema, McpServer } from "effect/ai";
 import { ThreadWorkspace, emptyWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -58,7 +60,11 @@ const workspace = {
   ],
 };
 const mutationWorkspace = (
-  changes: ReadonlyArray<{ readonly id?: string | undefined; readonly text?: string | undefined }>,
+  changes: ReadonlyArray<{
+    readonly id?: string | undefined;
+    readonly text?: string | undefined;
+    readonly owner?: "agent" | "you" | undefined;
+  }>,
 ) => ({
   ...workspace,
   revision: 4,
@@ -69,6 +75,7 @@ const mutationWorkspace = (
         ...workspace.items[0]!,
         id: `created-${index}`,
         text: item.text ?? "",
+        ...(item.owner === "you" ? { owner: "you" as const, ref: "T7" } : {}),
       })),
     ...workspace.items,
   ],
@@ -99,7 +106,10 @@ const client = McpSchema.McpServerClient.of({
 });
 
 // Echoes what the handler resolved, so tests see the thread and project it passed.
+// The calling thread's current turn carries this user message, when set.
+let turnMessage: MessageId | null = null;
 const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
+  turnUserMessage: () => Effect.succeed(turnMessage),
   record: (input) =>
     Effect.succeed({
       landingId: input.id,
@@ -118,6 +128,7 @@ const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
     ),
 });
 
+const actors: ListActor[] = [];
 const call = (
   name: string,
   args: Record<string, unknown>,
@@ -151,8 +162,8 @@ const call = (
                   childPreamble: "",
                 },
               ]),
-            update: ({ threadId, expectedRevision, changes }) =>
-              expectedRevision === 3
+            update: ({ threadId, expectedRevision, changes }, actor) =>
+              (actors.push(actor), expectedRevision === 3)
                 ? Effect.succeed({ ...mutationWorkspace(changes), threadId })
                 : Effect.fail(
                     new ThreadWorkspaceError({ code: "conflict", message: "Read again." }),
@@ -361,6 +372,48 @@ it.effect.each(["list_update", "list_rewrite"])(
       });
       expect(JSON.stringify(created.structuredContent)).not.toContain("details");
     }),
+);
+
+it.effect(
+  "settles a user task with the user message of the calling thread's turn, when it has one",
+  () =>
+    Effect.gen(function* () {
+      const settle = {
+        expectedRevision: 3,
+        changes: [{ id: "item-1", state: "done", settledFromUser: true }],
+      };
+      actors.length = 0;
+      turnMessage = null;
+      yield* call("list_update", settle);
+      turnMessage = MessageId.make("message-user");
+      yield* call("list_update", settle);
+      // The message is read only when a change claims it.
+      yield* call("list_update", {
+        expectedRevision: 3,
+        changes: [{ id: "item-1", text: "Edit" }],
+      });
+      turnMessage = null;
+      expect(actors).toEqual([
+        { by: "agent", userMessageId: null },
+        { by: "agent", userMessageId: "message-user" },
+        { by: "agent", userMessageId: null },
+      ]);
+    }),
+);
+
+it.effect("names the user tasks a call filed so their cards go at the call", () =>
+  Effect.gen(function* () {
+    const result = yield* call("list_update", {
+      expectedRevision: 3,
+      changes: [{ text: "Rotate the staging webhook secret", owner: "you" }],
+    });
+    expect(result.structuredContent).toMatchObject({ filedTasks: ["T7"] });
+    const edit = yield* call("list_update", {
+      expectedRevision: 3,
+      changes: [{ id: "item-1", text: "Ship" }],
+    });
+    expect(edit.structuredContent).not.toHaveProperty("filedTasks");
+  }),
 );
 
 it.effect("records evidence on the calling thread and reads summaries or one landing", () =>

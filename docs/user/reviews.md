@@ -39,21 +39,21 @@ message box, and it goes out with your next message, together with anything you
 type. **Cancel** on the card, or removing the chip, takes it back out and keeps
 your choice on the card as a draft.
 
-**Discuss** puts your note in the message box as a comment on the question
-instead of an answer, for when you want to ask the agent something first. The
-question stays open and keeps counting as waiting on you. A question has an
-answer or a comment in the message box, not both. Once the agent's turn picks
-up your comment, the note clears from the card and the question reads
-**Discussing**; an option you chose stays as a draft. The agent replies in chat
-and, when the decision is still open, asks it again as a newer question that
-reflects the discussion. An answer whose note asks the agent something back
-goes the same way: the agent replies in chat and reopens the question, which
-reads **Discussing** with your choice and note kept as a draft.
+**Discuss** puts a reference to the question in your message box and moves the
+cursor there, for when you want to talk it over first: write what you want to
+ask around the reference. Press **Discuss** again, or remove the chip, to take
+it back out. The question stays open, and your choice and note stay on the card
+as a draft. Once you send the message, the question reads **Discussing** and
+leaves the count until you change it again. The agent replies in chat and, when
+the decision is still open, asks it again as a newer question that reflects the
+discussion. An answer whose note asks the agent something back goes the same
+way: the agent replies in chat and reopens the question, which reads
+**Discussing** with your choice and note kept as a draft.
 
 Paste or drop an image into a question's note to show the agent what you mean.
 The note gets a marker such as `[Q1 image 1]` and the card shows the image. The
-image waits on the card and joins your message only together with the answer or
-comment: **Cancel**, removing the chip, dismissing or deferring the question
+image waits on the card and joins your message only together with the answer:
+**Cancel**, removing the chip, dismissing or deferring the question
 takes it back out, and the card keeps it. Deleting the marker from the note, the
 image's remove button on the card, or removing the image from the message box
 drops the image and its marker. Images follow the message box's limits on type,
@@ -61,7 +61,7 @@ size and count; an answer whose images would not fit is not added.
 
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
-starts; or, for a comment or a reopened answer, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling
+starts; or, for a discussion or a reopened answer, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling
 the queued message returns it with its draft. A closed question shrinks to one
 line; click it to see the whole card again, with your choice and note, read-only.
 A replaced question links to its replacement with **Replaced by Qn**, and the
@@ -105,7 +105,29 @@ window each row keeps only its title and button. The strip hides when nothing
 waits on you.
 
 Deferred questions, items you are discussing, and changes the agent is fixing
-leave the count. A thread with items waiting shows one count in the thread
+leave the count. A QA card or task card has **Discuss** too, which works as it
+does on a question.
+
+### Your tasks
+
+When an agent needs something only you can do, such as granting access,
+rotating a secret or approving an account, it files a task for you instead of
+asking in its reply. The task appears as a card in the chat where the agent
+filed it, numbered T1, T2 and so on, with **Dismiss**, **Discuss** and **Done**.
+Done and Dismiss start no turn; the agent hears with your next message. A task
+you add yourself in Todos joins the strip without a card. A closed task shrinks
+to one line with **Reopen**.
+
+When you tell the agent in chat that a task is done or no longer needed, it
+records that on the card as **Recorded by the agent**, with your words on hover,
+so you can reopen it if the agent misread you. An agent can close your task
+only from your own message in its current turn; it cannot mark one done on its
+own, and it must say why when it cancels one.
+
+The agent sees what waits on you with each of your messages, and what you
+changed since your last one, so a short reply such as "done, rotated it" is
+enough. Changes you reported a problem with are listed to it on every turn until
+a fix lands. A thread with items waiting shows one count in the thread
 list; hover it to see them by kind. **Waiting on you** at the top of the thread
 list gathers every such thread in one place (see
 [Working with threads](thread-sidebar.md)). Such a thread stays out of automatic

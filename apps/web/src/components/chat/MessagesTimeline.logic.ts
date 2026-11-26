@@ -91,6 +91,7 @@ export function timelineEntryRunId(entry: TimelineEntry): RunId | null {
     entry.kind === "mcp-app" ||
     entry.kind === "sent-message" ||
     entry.kind === "thread-questions" ||
+    entry.kind === "thread-tasks" ||
     entry.kind === "thread-evidence" ||
     entry.kind === "question-dismissed"
   ) {
@@ -674,6 +675,12 @@ type MessagesTimelineRowContent =
       questionIds: ReadonlyArray<string>;
     }
   | {
+      kind: "thread-tasks";
+      id: string;
+      createdAt: string;
+      taskRefs: ReadonlyArray<string>;
+    }
+  | {
       kind: "thread-evidence";
       id: string;
       createdAt: string;
@@ -886,6 +893,7 @@ function deriveSupersededAttemptFolds(
       entry.kind === "mcp-app" ||
       entry.kind === "sent-message" ||
       entry.kind === "thread-questions" ||
+      entry.kind === "thread-tasks" ||
       entry.kind === "thread-evidence" ||
       entry.kind === "question-dismissed" ||
       timelineEntryIsPersistentResourceCard(entry) ||
@@ -2290,6 +2298,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "thread-tasks") {
+      nextRows.push({
+        kind: "thread-tasks",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        taskRefs: timelineEntry.taskRefs,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "thread-evidence") {
       nextRows.push({
         kind: "thread-evidence",
@@ -2940,6 +2958,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "thread-questions": {
       const bq = b as typeof a;
       return a.createdAt === bq.createdAt && a.questionIds.join() === bq.questionIds.join();
+    }
+
+    case "thread-tasks": {
+      const bt = b as typeof a;
+      return a.createdAt === bt.createdAt && a.taskRefs.join() === bt.taskRefs.join();
     }
 
     case "thread-evidence": {

@@ -76,3 +76,19 @@ export function revealQaInChat(
       description: "Scroll up to load earlier messages, or open Evidence to find it.",
     });
 }
+
+const TASK_REVEAL_PREFIX = "task:";
+
+/** The task ref a reveal request asks for, or null for another kind's request. */
+export const taskRevealRef = (target: string) =>
+  target.startsWith(TASK_REVEAL_PREFIX) ? target.slice(TASK_REVEAL_PREFIX.length) : null;
+
+export const threadTaskElementId = (ref: string) => `thread-task-${ref}`;
+
+/**
+ * Scrolls the thread's chat to a user task's card. A task with no card in the loaded chat, such
+ * as one the user added in Todos, opens Todos instead.
+ */
+export function revealTaskInChat(threadKey: string, ref: string, openTodos: () => void) {
+  if (requestQuestionReveal(threadKey, `${TASK_REVEAL_PREFIX}${ref}`) === "missing") openTodos();
+}

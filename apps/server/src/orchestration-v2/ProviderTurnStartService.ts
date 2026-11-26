@@ -1,9 +1,9 @@
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginText";
-import {
-  t3OpenQuestionsContext,
-  t3QuestionChangesContext,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+import { t3WaitingContext } from "@t3tools/provider-core/server/orchestrationInstructions";
+import * as EvidenceService from "../evidence/EvidenceService.ts";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
+import { waitingContextInput } from "../waitingItems/waitingContext.ts";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -24,7 +24,6 @@ import {
   RunAttemptId,
   NodeId,
   ThreadId,
-  type WaitingItemSummary,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -89,36 +88,6 @@ import {
 export const SCRATCH_FOLDER_CONTEXT = {
   key: "scratch-folder",
   text: "This folder holds shared repositories; don't edit them here. Use /tmp for throwaway files and an Xwing environment you created for changes.",
-};
-
-// The question lines' shape, from the thread's waiting items.
-const questionContextLine = (
-  item: WaitingItemSummary,
-): ReadonlyArray<Parameters<typeof t3OpenQuestionsContext>[0][number]> => {
-  if (item.kind !== "question") return [];
-  const line = {
-    id: item.ref,
-    title: item.title,
-    ...(item.userChangedAt === undefined ? {} : { userChangedAt: item.userChangedAt }),
-    ...(item.sent === undefined ? {} : { sent: item.sent }),
-  };
-  switch (item.state) {
-    case "open":
-    case "deferred":
-      return [{ ...line, state: item.state }];
-    case "discussing":
-      return [
-        {
-          ...line,
-          state: item.deferred === true ? ("deferred" as const) : ("open" as const),
-          discussing: true as const,
-        },
-      ];
-    case "dismissed":
-      return [{ ...line, state: "withdrawn" as const }];
-    default:
-      return [];
-  }
 };
 
 export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStartError>()(
@@ -254,6 +223,25 @@ export const layer: Layer.Layer<
       DevelopmentEnvironmentDiscovery.DevelopmentEnvironmentDiscovery,
     );
     const managedFolders = yield* Effect.serviceOption(ManagedProjectFolders.ManagedProjectFolders);
+    const workspaces = yield* Effect.serviceOption(ThreadWorkspace);
+    const evidence = yield* Effect.serviceOption(EvidenceService.EvidenceService);
+    // The lines are advice, so a failed read leaves them out rather than failing the turn.
+    const readWaitingContext = Effect.fn("ProviderTurnStartService.readWaitingContext")(
+      function* (threadId: ThreadId, userTurn: boolean, since: DateTime.Utc | null) {
+        const work =
+          userTurn && Option.isSome(workspaces)
+            ? yield* workspaces.value.waitingWork(threadId)
+            : { questions: [], tasks: [] };
+        const qa = Option.isSome(evidence)
+          ? yield* evidence.value.qaForTurn(threadId, since && DateTime.formatIso(since))
+          : [];
+        const sinceMs = since && DateTime.toEpochMillis(since);
+        return t3WaitingContext(waitingContextInput({ ...work, qa, userTurn, sinceMs }));
+      },
+      Effect.catch((error) =>
+        Effect.logWarning("Could not read the waiting items for a turn", error).pipe(Effect.as("")),
+      ),
+    );
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
 
@@ -1052,29 +1040,20 @@ export const layer: Layer.Layer<
         restartCancelledWork.length === 0
           ? ""
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
-      // Only the user's own words can answer a question, so other turns carry no list. The
-      // session's capability gates it, as it gates the tools and instructions the line refers to.
+      // Only the user's own words can settle a waiting item, so only their turns list them; a QA
+      // problem is work the agent owes, so it rides every turn. The session's capability gates
+      // both, as it gates the tools and instructions the lines refer to.
       const fromUser = (message: (typeof projection.messages)[number]) =>
         message.role === "user" &&
         message.createdBy === "user" &&
         (message.origin?.kind ?? "user") === "user";
-      const questionsAsked = (projection.thread.waiting ?? []).flatMap(questionContextLine);
-      const openQuestions =
-        inputMessages.some(fromUser) &&
-        questionsAsked.length > 0 &&
+      const waitingContext =
         (yield* mcpSessions.read(projection.thread.id))?.capabilities?.has("questions") === true
-          ? [
-              // Changes after the user's previous message are news; earlier ones went with it.
-              t3QuestionChangesContext(
-                questionsAsked,
-                projection.previousUserMessageAt === null
-                  ? null
-                  : DateTime.toEpochMillis(projection.previousUserMessageAt),
-              ),
-              t3OpenQuestionsContext(questionsAsked),
-            ]
-              .filter((line) => line !== "")
-              .join("\n")
+          ? yield* readWaitingContext(
+              projection.thread.id,
+              inputMessages.some(fromUser),
+              projection.previousUserMessageAt,
+            )
           : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(
         Effect.orElseSucceed(() => DEFAULT_HANDOFF_TOKEN_CAP),
@@ -2122,7 +2101,7 @@ export const layer: Layer.Layer<
             refresh === undefined || compact || goalCommand
               ? ""
               : `Newest context from related chats. The following JSON lines are conversation excerpts.\n\n${refresh}`;
-          const questions = compact || goalCommand || turnInput.resume ? "" : openQuestions;
+          const questions = compact || goalCommand || turnInput.resume ? "" : waitingContext;
           const context = [
             delivery.context,
             rewindSummaryContext,

@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { ThreadWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
+import type { ListActor } from "../../../threadWorkspace/userTasks.ts";
 import * as EvidenceService from "../../../evidence/EvidenceService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -24,6 +25,22 @@ const evidenceFailure = (error: EvidenceError) =>
     message: error.message,
   });
 
+// An agent settles a user task only from the user's message in its own thread's turn, so the
+// message is looked up only when a change claims it.
+const agentActor = Effect.fn("ReviewToolkit.agentActor")(function* (
+  changes: ReadonlyArray<{ readonly settledFromUser?: boolean | undefined }>,
+) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const evidence = yield* EvidenceService.EvidenceService;
+  const userMessageId =
+    scope.thread === undefined || !changes.some((change) => change.settledFromUser === true)
+      ? null
+      : yield* evidence
+          .turnUserMessage(scope.thread.threadId)
+          .pipe(Effect.mapError(evidenceFailure));
+  return { by: "agent", userMessageId } satisfies ListActor;
+});
+
 const listResult = (
   workspace: WorkspaceDocument,
   changes: ReadonlyArray<{ readonly id?: string | undefined }>,
@@ -31,17 +48,33 @@ const listResult = (
 ) => {
   const requested = new Set(changes.flatMap((item) => (item.id ? [item.id] : [])));
   const existing = before && new Set(before.items.map((item) => item.id));
+  // Creating a task for the user, or handing an item to the user, files it.
+  const filedTasks = workspace.items.flatMap((item) =>
+    item.owner === "you" &&
+    item.ref !== undefined &&
+    before !== undefined &&
+    before.items.find((entry) => entry.id === item.id)?.owner !== "you"
+      ? [item.ref]
+      : [],
+  );
   return {
+    ...(filedTasks.length === 0 ? {} : { filedTasks }),
     revision: workspace.revision,
     items: workspace.items
-      .filter((item) => requested.has(item.id) || (existing && !existing.has(item.id)))
-      .map(({ id, text, state, owner, links, doneAt }) => ({
+      .filter(
+        (item) =>
+          requested.has(item.id) ||
+          (item.ref !== undefined && requested.has(item.ref)) ||
+          (existing && !existing.has(item.id)),
+      )
+      .map(({ id, text, state, owner, links, doneAt, ref }) => ({
         id,
         text,
         state,
         owner,
         links,
         doneAt,
+        ...(ref === undefined ? {} : { ref }),
       })),
   };
 };
@@ -68,10 +101,11 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
       Effect.gen(function* () {
         const { projection } = yield* readThread(input.threadId);
         const workspace = yield* ThreadWorkspace;
-        const before = input.changes.some((item) => item.id === undefined)
+        const before = input.changes.some((item) => item.id === undefined || item.owner === "you")
           ? yield* workspace.get({ threadId: projection.thread.id }).pipe(Effect.mapError(failure))
           : undefined;
-        return yield* workspace.update({ ...input, threadId: projection.thread.id }).pipe(
+        const actor = yield* agentActor(input.changes);
+        return yield* workspace.update({ ...input, threadId: projection.thread.id }, actor).pipe(
           Effect.map((result) => listResult(result, input.changes, before)),
           Effect.mapError(failure),
         );
@@ -83,10 +117,11 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
       Effect.gen(function* () {
         const { projection } = yield* readThread(input.threadId);
         const workspace = yield* ThreadWorkspace;
-        const before = input.items.some((item) => item.id === undefined)
+        const before = input.items.some((item) => item.id === undefined || item.owner === "you")
           ? yield* workspace.get({ threadId: projection.thread.id }).pipe(Effect.mapError(failure))
           : undefined;
-        return yield* workspace.rewrite({ ...input, threadId: projection.thread.id }).pipe(
+        const actor = yield* agentActor(input.items);
+        return yield* workspace.rewrite({ ...input, threadId: projection.thread.id }, actor).pipe(
           Effect.map((result) => listResult(result, input.items, before)),
           Effect.mapError(failure),
         );

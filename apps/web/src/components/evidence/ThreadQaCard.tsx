@@ -28,7 +28,11 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CaptureTile } from "./CaptureTile";
 import { CHECKS, checkLabel, reviewDisplay } from "./evidence.logic";
-import { qaDiscussRecord, toggleQaDiscuss, useQaInComposer } from "./qaComposer";
+import { qaDiscussRecord } from "./qaComposer";
+import {
+  toggleWaitingItemDiscuss,
+  useWaitingItemsInComposer,
+} from "../waiting/waitingItemComposer";
 
 const HELP = {
   dismiss: "Close this without checking it. Nothing is sent to the agent; you can add why later.",
@@ -115,7 +119,7 @@ export function ThreadQaCard({
   const canAct = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
   const setQa = useAtomCommand(evidenceSetQa, { label: "QA" });
   const navigate = useNavigate();
-  const inComposer = useQaInComposer(threadRef).has(qaKey(landing.id, change.id));
+  const inComposer = useWaitingItemsInComposer(threadRef, "qa").has(qaKey(landing.id, change.id));
   // The server's answer shows at once; the thread's next read replaces it.
   const [answered, setAnswered] = useState<EvidenceChangeQa | null>(null);
   const [busy, setBusy] = useState(false);
@@ -150,7 +154,7 @@ export function ThreadQaCard({
   };
   const settle = async (state: "confirmed" | "waived") => {
     focusNext.current = "line";
-    if (inComposer) toggleQaDiscuss(threadRef, qaDiscussRecord(landing, change), null);
+    if (inComposer) toggleWaitingItemDiscuss(threadRef, qaDiscussRecord(landing, change), null);
     if (!(await answer(state))) focusNext.current = null;
     setExpanded(false);
   };
@@ -395,7 +399,11 @@ export function ThreadQaCard({
                 aria-pressed={inComposer}
                 disabled={!canAct}
                 onClick={(event) =>
-                  toggleQaDiscuss(threadRef, qaDiscussRecord(landing, change), event.currentTarget)
+                  toggleWaitingItemDiscuss(
+                    threadRef,
+                    qaDiscussRecord(landing, change),
+                    event.currentTarget,
+                  )
                 }
               >
                 Discuss

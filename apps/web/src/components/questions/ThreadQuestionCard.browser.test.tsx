@@ -1,12 +1,26 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, type ThreadQuestion, ThreadId } from "@t3tools/contracts";
+import { useSyncExternalStore } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 
 import { render } from "../../../test/render";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
+
+vi.mock(import("../../state/threadQuestions"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  const actual = await original();
+  return {
+    ...actual,
+    threadQuestionDraft: {
+      ...actual.threadQuestionDraft,
+      permissionAtom: () => Atom.make(true),
+    } as never,
+  };
+});
 
 const threadRef = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-1"));
 
@@ -98,4 +112,45 @@ it("offers the description toggle only when an option has a description", async 
   await expect
     .element(screen.getByRole("button", { name: /option descriptions/ }))
     .not.toBeInTheDocument();
+});
+
+it("discusses an open question through a composer reference, with or without a note", async () => {
+  const open: ThreadQuestion = {
+    ...answered,
+    state: "open",
+    closedAt: null,
+    answer: null,
+    answeredBy: null,
+  };
+  function Card() {
+    // Re-renders when the composer changes, as the timeline row does.
+    useSyncExternalStore(useComposerDraftStore.subscribe, () =>
+      useComposerDraftStore.getState().getComposerDraft(threadRef),
+    );
+    return <ThreadQuestionCard question={open} threadRef={threadRef} />;
+  }
+  const records = () =>
+    useComposerDraftStore.getState().getComposerDraft(threadRef)?.waitingItems ?? [];
+  // router: false because the card never navigates.
+  await using screen = await render(<Card />, { router: false });
+  const discuss = screen.getByRole("button", { name: "Discuss Q8" });
+  await expect.element(discuss).toBeEnabled();
+
+  await userEvent.click(discuss);
+  await vi.waitFor(() =>
+    expect(records().map((record) => [record.label, record.itemKind, record.key])).toEqual([
+      ["Q8 · discuss · Which machine should agents drive?", "question", "Q8"],
+    ]),
+  );
+  await expect.element(discuss).toHaveAttribute("aria-pressed", "true");
+  await expect.element(screen.getByText("In composer")).toBeVisible();
+  // Nothing went in as an artifact answer or comment.
+  expect(
+    useComposerDraftStore.getState().getComposerDraft(threadRef)?.artifactAnswers ?? [],
+  ).toEqual([]);
+
+  await userEvent.click(discuss);
+  await vi.waitFor(() => expect(records()).toEqual([]));
+  await expect.element(discuss).toHaveAttribute("aria-pressed", "false");
+  useComposerDraftStore.setState({ draftsByThreadKey: {} });
 });

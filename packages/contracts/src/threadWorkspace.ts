@@ -49,8 +49,19 @@ export const ListItem = Schema.Struct({
   linkStates: Schema.optional(Schema.Array(ListLinkState)),
   /** A user task's number in its thread, T1, T2, ...; never given out again. */
   ref: Schema.optional(TrimmedNonEmptyString),
+  /** Who closed a user task: the user directly, or the agent from the user's message. */
+  settledBy: Schema.optional(Schema.Literals(["user", "agent"])),
+  /** The user message an agent closed a user task from. */
+  settledFromMessageId: Schema.optional(MessageId),
+  /** The user message that took a user task into chat; cleared once the user changes the task. */
+  discussedInMessageId: Schema.optional(MessageId),
+  /** On a closed user task, the user's words the agent recorded or why it was dropped. */
+  note: Schema.optional(Schema.String),
+  /** When the user last closed or reopened a user task; cleared once the agent changes it. */
+  userChangedAt: Schema.optional(IsoDateTime),
 });
 export type ListItem = typeof ListItem.Type;
+const LIST_ITEM_NOTE_MAX_LENGTH = 500;
 export const ThreadArtifactVersion = Schema.Struct({
   questions: Schema.Array(ArtifactQuestion),
   answers: Schema.Record(Schema.String, ArtifactAnswer),
@@ -133,6 +144,9 @@ export const ListItemChange = Schema.Struct({
   details: Schema.optional(Schema.String),
   parentId: Schema.optional(ListItem.fields.parentId),
   links: Schema.optional(ListItem.fields.links),
+  /** Closes a user task from the user's message in this turn; the server checks that message. */
+  settledFromUser: Schema.optional(Schema.Boolean),
+  note: Schema.optional(Schema.String.check(Schema.isMaxLength(LIST_ITEM_NOTE_MAX_LENGTH))),
 });
 export const ThreadListUpdateInput = Schema.Struct({
   threadId: ThreadId,
