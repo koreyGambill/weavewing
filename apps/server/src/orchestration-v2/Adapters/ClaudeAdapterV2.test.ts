@@ -4715,11 +4715,23 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
     it.effect("stores an unknown record at a rollback, so a closed query still sends the set", () =>
       Effect.gen(function* () {
-        const harness = yield* makeWakeHarness;
+        // Rollback closes the live query, so this harness lets it close.
+        const harness = yield* makeWakeHarnessWithOptions({
+          close: (sdkMessages) => Queue.shutdown(sdkMessages),
+          freshQueueOnReopen: true,
+        });
         const current = ClaudeInstructionUpdates.claudeInstructionRecord(sections);
+        // A first turn leaves the adapter holding the session's record as well.
+        yield* startTurn(harness, {
+          ordinal: 0,
+          providerThread: harness.providerThread,
+          resumed: false,
+        });
+        yield* finishTurn(harness, 0);
+        assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, current);
         const rolledBack = yield* harness.runtime.rollbackThread({
           providerThread: {
-            ...withRecord(harness.providerThread, current),
+            ...persisted(harness),
             nativeMetadata: { claudeInstructions: current, forkHeadMessageId: "fork-head" },
           },
           target: {
