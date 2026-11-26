@@ -420,7 +420,7 @@ function TokenDetails({ data }: { readonly data: ThreadInsights }) {
               <dl className="divide-y text-xs">
                 {footprint.parts.map((part) => (
                   <div
-                    key={part.key}
+                    key={`${part.category}:${part.key}:${part.label}`}
                     className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-2"
                   >
                     <dt className="min-w-0 flex-1 break-words">

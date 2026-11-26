@@ -4,6 +4,7 @@ import type {
   NodeId,
   OrchestrationV2Checkpoint,
   OrchestrationV2DomainEvent,
+  OrchestrationV2ProviderThread,
   OrchestrationV2ContextHandoff,
   OrchestrationV2StoredEvent,
   OrchestrationV2Subagent,
@@ -313,6 +314,26 @@ export function projectContextHandoffForWire(
   return { ...projected, summaryText: "" };
 }
 
+/** The Claude adapter's instruction record is server state; clients read its computed footprint. */
+function projectProviderThreadForWire(
+  providerThread: OrchestrationV2ProviderThread,
+): OrchestrationV2ProviderThread {
+  const metadata = providerThread.nativeMetadata;
+  if (metadata?.claudeInstructions === undefined) return providerThread;
+  const { claudeInstructions: _claudeInstructions, ...rest } = metadata;
+  return { ...providerThread, nativeMetadata: rest };
+}
+
+/** Idempotent; bounded snapshots that skip `projectThreadProjectionForWire` still need it. */
+export function projectProviderThreadsForWire(
+  projection: OrchestrationV2ThreadProjection,
+): OrchestrationV2ThreadProjection {
+  const providerThreads = projection.providerThreads.map(projectProviderThreadForWire);
+  return providerThreads.every((thread, index) => thread === projection.providerThreads[index])
+    ? projection
+    : { ...projection, providerThreads };
+}
+
 export function projectThreadProjectionForWire(
   projection: OrchestrationV2ThreadProjection,
 ): OrchestrationV2ThreadProjection {
@@ -326,7 +347,7 @@ export function projectThreadProjectionForWire(
     return projected;
   };
   return {
-    ...projection,
+    ...projectProviderThreadsForWire(projection),
     checkpoints: projection.checkpoints.map(capCheckpointFiles),
     contextHandoffs: projection.contextHandoffs.map(projectContextHandoffForWire),
     turnItems: projection.turnItems.map(project),
@@ -346,7 +367,9 @@ export function projectDomainEventForWire(
       ? { ...event, payload: projectContextHandoffForWire(event.payload) }
       : event.type === "checkpoint.captured"
         ? { ...event, payload: capCheckpointFiles(event.payload) }
-        : event;
+        : event.type === "provider-thread.updated"
+          ? { ...event, payload: projectProviderThreadForWire(event.payload) }
+          : event;
 }
 
 // Keyed on the stored event PubSub hands every subscriber, so all of them share one projection

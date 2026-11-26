@@ -14,6 +14,7 @@ import {
   ThreadId,
   TurnItemId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ProviderThread,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
@@ -31,6 +32,7 @@ import {
   projectTurnItemForDetail,
   projectDomainEventForWire,
   projectStoredEventForWire,
+  projectProviderThreadsForWire,
 } from "./WireProjection.ts";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
 import { MAX_TOOL_OUTPUT_IMAGES, toolOutputImages } from "@t3tools/shared/toolOutput";
@@ -429,6 +431,51 @@ describe("orchestration V2 wire projection", () => {
       },
     };
     expect(projectStoredEventForWire(detached)).toBe(detached);
+  });
+
+  it("keeps the Claude instruction record on the server and the rest of the metadata", () => {
+    const providerThread: OrchestrationV2ProviderThread = {
+      id: ProviderThreadId.make("provider-thread"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      providerSessionId: null,
+      appThreadId: base.threadId,
+      ownerNodeId: null,
+      nativeThreadRef: null,
+      nativeConversationHeadRef: null,
+      status: "idle",
+      firstRunOrdinal: null,
+      lastRunOrdinal: null,
+      handoffIds: [],
+      forkedFrom: null,
+      pendingBackgroundTasks: [],
+      contextUsage: null,
+      goal: null,
+      nativeMetadata: {
+        title: "Kept",
+        claudeInstructions: { start: null, sections: [{ name: "t3:0:## QA", digest: "abc" }] },
+      },
+      createdAt: base.updatedAt,
+      updatedAt: base.updatedAt,
+    };
+    const event: OrchestrationV2DomainEvent = {
+      id: EventId.make("provider-thread-event"),
+      type: "provider-thread.updated",
+      threadId: base.threadId,
+      occurredAt: base.updatedAt,
+      payload: providerThread,
+    };
+    const projected = projectDomainEventForWire(event);
+    expect(
+      projected.type === "provider-thread.updated" && projected.payload.nativeMetadata,
+    ).toEqual({ title: "Kept" });
+    const projection = {
+      providerThreads: [providerThread],
+    } as unknown as OrchestrationV2ThreadProjection;
+    expect(projectProviderThreadsForWire(projection).providerThreads[0]?.nativeMetadata).toEqual({
+      title: "Kept",
+    });
+    expect(providerThread.nativeMetadata?.claudeInstructions).toBeDefined();
   });
 });
 
