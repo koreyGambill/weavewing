@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- oxlint calls rules synchronously, so the directory read cannot go through an Effect service.
 import { defineRule } from "@oxlint/plugins";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
