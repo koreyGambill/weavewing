@@ -55,14 +55,15 @@ const workspace: ThreadWorkspace = {
   updatedAt: null,
 };
 
-function List({ width, onClose = () => undefined }: { width: number; onClose?: () => void }) {
+function List({ width, unlisted = 0 }: { width: number; unlisted?: number }) {
   return (
     <div style={{ width }}>
       <WaitingItemsList
         threadRef={threadRef}
         groups={groupWaitingItems(waiting)}
         workspace={workspace}
-        onClose={onClose}
+        unlisted={unlisted}
+        hasQuestions
       />
     </div>
   );
@@ -70,8 +71,7 @@ function List({ width, onClose = () => undefined }: { width: number; onClose?: (
 
 it("answers each kind in one click and leaves a problem to the agent", async () => {
   sent.length = 0;
-  const onClose = vi.fn();
-  await using screen = await render(<List width={800} onClose={onClose} />);
+  await using screen = await render(<List width={800} />);
   await expect.element(screen.getByRole("region", { name: "QA" })).toBeVisible();
   await expect.element(screen.getByRole("region", { name: "Tasks" })).toBeVisible();
   await expect.element(screen.getByText("Agent fixing")).toBeVisible();
@@ -90,8 +90,14 @@ it("answers each kind in one click and leaves a problem to the agent", async () 
     },
   ]);
 
-  await userEvent.keyboard("{Escape}");
-  expect(onClose).toHaveBeenCalledOnce();
+  await expect.element(screen.getByText(/more not listed here/)).not.toBeInTheDocument();
+});
+
+it("says how many items the capped rows leave out and where to see them", async () => {
+  await using screen = await render(<List width={800} unlisted={30} />);
+  await expect.element(screen.getByText("30 more not listed here. See them in")).toBeVisible();
+  for (const name of ["Questions", "Evidence", "Todos"])
+    await expect.element(screen.getByRole("button", { name, exact: true })).toBeVisible();
 });
 
 it("keeps only each row's title and answer under 600 px", async () => {

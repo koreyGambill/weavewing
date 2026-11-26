@@ -1878,7 +1878,7 @@ function OpenCommandPaletteDialog(props: {
 
   if (
     activeThread !== null &&
-    (activeThread.waiting ?? []).some((item) => item.kind === "question") &&
+    (activeThread.waitingCounts?.liveQuestions ?? 0) > 0 &&
     waitingCardsEnvironmentIds.includes(activeThread.environmentId)
   ) {
     actionItems.push({

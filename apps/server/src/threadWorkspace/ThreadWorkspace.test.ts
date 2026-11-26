@@ -19,6 +19,7 @@ import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   type WaitingItemSummary,
+  waitingMirror,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
@@ -191,6 +192,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
     delivered,
     hooks,
     threadState,
+    mirror,
     mirrored,
     changed,
     messages,
@@ -1494,6 +1496,44 @@ it.effect("follows a provider accepting a turn when nothing else reports it", ()
     } as unknown as OrchestrationV2DomainEvent);
     yield* Queue.take(h.changed);
     expect(yield* h.mirrored()).toEqual([]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("follows a sent answer's turn while more than 30 other items wait in the thread", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Flag name?" }] });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "cache-v2" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "", "cache-v2")]));
+    h.threadRuns.push(threadRun("r1", "m1", "running"));
+    const sent = yield* h.mirrored();
+    expect(sent).toMatchObject([{ ref: "Q1", sent: true }]);
+    // The thread's stored mirror, as the orchestrator keeps it with 31 tasks waiting.
+    h.mirror.waiting = waitingMirror([
+      ...Array.from({ length: 31 }, (_, index) => ({
+        kind: "task" as const,
+        ref: `T${index + 1}`,
+        key: `task-${index + 1}`,
+        title: `Task ${index + 1}`,
+        state: "open" as const,
+      })),
+      ...sent,
+    ]).waiting;
+    yield* Queue.clear(h.changed);
+    yield* Effect.forkScoped(h.service.followQuestionDeliveries);
+    h.acceptTurn("r1");
+    yield* Queue.offer(h.domainEvents, {
+      type: "provider-turn.updated",
+      threadId,
+      payload: {},
+    } as unknown as OrchestrationV2DomainEvent);
+    // The provider accepted the turn, so the answer closes and leaves the mirror.
+    yield* Queue.take(h.changed);
+    expect((yield* h.service.get({ threadId })).questions[0]?.state).toBe("answered");
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 

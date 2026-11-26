@@ -85,6 +85,7 @@ import {
   managedRuntimeModeCeilingMessage,
   T3_MCP_SERVER_NAME,
   threadToolOverridesNotice,
+  sameWaitingCounts,
   sameWaitingItems,
   waitingMirror,
   waitingTotal,
@@ -4712,9 +4713,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (thread.waiting === undefined
         ? waiting.length === 0
         : sameWaitingItems(thread.waiting, waiting) &&
-          thread.waitingCounts?.question === waitingCounts.question &&
-          thread.waitingCounts.qa === waitingCounts.qa &&
-          thread.waitingCounts.task === waitingCounts.task)
+          sameWaitingCounts(thread.waitingCounts, waitingCounts))
     )
       return;
     yield* emit(

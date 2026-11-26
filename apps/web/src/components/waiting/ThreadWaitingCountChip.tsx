@@ -1,14 +1,17 @@
-import {
-  waitingOnUser,
-  waitingTotal,
-  type WaitingCounts,
-  type WaitingItemSummary,
-} from "@t3tools/contracts";
+import { waitingTotal, type WaitingCounts, type WaitingItemSummary } from "@t3tools/contracts";
 
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { WAITING_KIND_HEADING, groupWaitingItems, waitingChipLabel } from "./waitingStrip.logic";
+import {
+  WAITING_KIND_HEADING,
+  groupWaitingItems,
+  waitingChipLabel,
+  waitingStripSummary,
+} from "./waitingStrip.logic";
 
+// Everything listed but not counted says why.
+const stateNote = (item: WaitingItemSummary) =>
+  item.sent === true ? "answer queued" : STATE_NOTE[item.state];
 const STATE_NOTE: Partial<Record<WaitingItemSummary["state"], string>> = {
   deferred: "deferred",
   discussing: "discussing",
@@ -30,7 +33,7 @@ export function ThreadWaitingCountChip({
   const label = waitingChipLabel(counts);
   const groups = groupWaitingItems(waiting);
   // The row carries a capped list, so a long backlog ends with how many it left out.
-  const unlisted = Math.max(0, total - (waiting ?? []).filter(waitingOnUser).length);
+  const unlisted = waitingStripSummary(waiting, counts)?.unlisted ?? 0;
   return (
     <Tooltip>
       <TooltipTrigger render={<Badge variant="info" size="sm" aria-label={label} />}>
@@ -47,8 +50,8 @@ export function ThreadWaitingCountChip({
                   <span className="shrink-0 font-medium tabular-nums">{item.ref}</span>
                   <span className="min-w-0 break-words">
                     {item.title}
-                    {STATE_NOTE[item.state] ? (
-                      <span className="text-muted-foreground"> ({STATE_NOTE[item.state]})</span>
+                    {stateNote(item) ? (
+                      <span className="text-muted-foreground"> ({stateNote(item)})</span>
                     ) : null}
                   </span>
                 </li>

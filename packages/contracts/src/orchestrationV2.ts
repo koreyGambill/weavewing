@@ -688,8 +688,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
   /**
-   * The thread's waiting questions, QA changes and user tasks, capped, then closed items the user
-   * changed. Absent until the thread's first one.
+   * The thread's questions, every one, and its QA changes and user tasks still waiting, capped.
+   * Absent until the thread's first one.
    */
   waiting: Schema.optional(Schema.Array(WaitingItemSummary)),
   waitingCounts: Schema.optional(WaitingCounts),

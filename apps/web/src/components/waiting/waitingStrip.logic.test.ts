@@ -1,4 +1,4 @@
-import type { WaitingItemSummary } from "@t3tools/contracts";
+import type { WaitingCounts, WaitingItemSummary } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -14,15 +14,24 @@ const item = (
   state: WaitingItemSummary["state"] = "open",
 ): WaitingItemSummary => ({ kind, ref, key: ref, title: ref, state });
 
+const counts = (partial: Partial<WaitingCounts>): WaitingCounts => ({
+  question: 0,
+  qa: 0,
+  task: 0,
+  discussing: 0,
+  liveQuestions: 0,
+  live: 0,
+  ...partial,
+});
+
 describe("waitingStripSummary", () => {
   it("hides the strip when nothing waits on the user and nothing is discussed", () => {
     expect(waitingStripSummary(undefined, undefined)).toBeNull();
     expect(
-      waitingStripSummary([item("question", "Q1", "deferred"), item("qa", "QA1", "problem")], {
-        question: 0,
-        qa: 0,
-        task: 0,
-      }),
+      waitingStripSummary(
+        [item("question", "Q1", "deferred"), item("qa", "QA1", "problem")],
+        counts({ liveQuestions: 1, live: 2 }),
+      ),
     ).toBeNull();
   });
 
@@ -30,7 +39,7 @@ describe("waitingStripSummary", () => {
     expect(
       waitingStripSummary(
         [item("question", "Q1"), item("qa", "QA1", "discussing"), item("task", "T1")],
-        { question: 1, qa: 0, task: 1 },
+        counts({ question: 1, task: 1, discussing: 1, liveQuestions: 1, live: 3 }),
       ),
     ).toEqual({
       counts: [
@@ -39,11 +48,28 @@ describe("waitingStripSummary", () => {
       ],
       discussing: 1,
       total: 2,
+      unlisted: 0,
+      hasQuestions: true,
     });
-    expect(
-      waitingStripSummary([item("task", "T1", "discussing")], { question: 0, qa: 0, task: 0 }),
-    ).toEqual({ counts: [], discussing: 1, total: 0 });
   });
+
+  it.each([31, 60])(
+    "takes discussions, questions and what is left out from the counts with %i items",
+    (size) => {
+      // The row lists 30 tasks; a discussed QA change and a deferred question sit past the cap.
+      const rows = Array.from({ length: 30 }, (_, index) => item("task", `T${index}`));
+      const summary = waitingStripSummary(
+        rows,
+        counts({ task: size - 2, discussing: 1, liveQuestions: 1, live: size }),
+      );
+      expect(summary).toMatchObject({
+        discussing: 1,
+        hasQuestions: true,
+        unlisted: size - 30,
+        total: size - 2,
+      });
+    },
+  );
 });
 
 describe("groupWaitingItems", () => {
@@ -77,7 +103,7 @@ describe("qaKeyParts", () => {
 
 describe("waitingChipLabel", () => {
   it("names each kind with a count", () => {
-    expect(waitingChipLabel({ question: 1, qa: 2, task: 0 })).toBe(
+    expect(waitingChipLabel(counts({ question: 1, qa: 2 }))).toBe(
       "3 waiting on you: 1 question, 2 changes to check",
     );
   });

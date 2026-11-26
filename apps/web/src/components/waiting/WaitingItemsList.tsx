@@ -16,13 +16,14 @@ import {
   MessageCircleQuestionIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { evidenceSetQa } from "../../state/evidence";
 import { useSaveQuestionDraft } from "../../state/threadQuestions";
 import { threadListUpdate } from "../../state/threadWorkspace";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { removeQaDiscuss, useQaInComposer } from "../evidence/qaComposer";
 import { QaStatusBadge } from "../evidence/ThreadQaCard";
@@ -36,6 +37,7 @@ import { questionDraftWriter } from "../questions/questionDraftWriter";
 import { revealQuestionInChat, revealQaInChat } from "../questions/questionReveal";
 import { CardStatusBadge, QuestionStatusBadge } from "../questions/QuestionStatusBadge";
 import { HelpButton } from "../questions/ThreadCardShell";
+import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { WAITING_KIND_HEADING, qaKeyParts } from "./waitingStrip.logic";
 
@@ -60,7 +62,7 @@ function keepFocusInList(from: HTMLElement | null) {
 }
 
 // Module-level, so React calls it once as the list opens and never refocuses it on a render.
-// Opening the list hands it the keyboard, so Tab walks its rows and Escape closes it.
+// Opening the list hands it the keyboard, so Tab walks its rows.
 const focusOnOpen = (element: HTMLDivElement | null) => element?.focus({ preventScroll: true });
 
 /**
@@ -72,7 +74,8 @@ export function WaitingItemsList({
   threadRef,
   groups,
   workspace,
-  onClose,
+  unlisted,
+  hasQuestions,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly groups: ReadonlyArray<{
@@ -80,20 +83,17 @@ export function WaitingItemsList({
     readonly items: ReadonlyArray<WaitingItemSummary>;
   }>;
   readonly workspace: ThreadWorkspace | null;
-  readonly onClose: () => void;
+  /** Items still waiting that the capped rows leave out. */
+  readonly unlisted: number;
+  readonly hasQuestions: boolean;
 }) {
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    onClose();
-  };
+  const sidebar = useThreadContextSidebarStore.getState;
   return (
     <div
       role="group"
       aria-label="Waiting on you"
       tabIndex={-1}
       ref={focusOnOpen}
-      onKeyDown={onKeyDown}
       className="@container max-h-[min(18rem,40vh)] space-y-1.5 overflow-y-auto rounded-md outline-none"
     >
       {groups.map((group) => (
@@ -113,6 +113,34 @@ export function WaitingItemsList({
           </ul>
         </section>
       ))}
+      {unlisted > 0 ? (
+        <p className="flex flex-wrap items-center gap-x-1 px-2 pb-1 text-xs text-muted-foreground">
+          <span>{unlisted} more not listed here. See them in</span>
+          {hasQuestions ? (
+            <Button
+              variant="link"
+              size="micro"
+              onClick={() => useRightPanelStore.getState().open(threadRef, "questions", "tile-2")}
+            >
+              Questions
+            </Button>
+          ) : null}
+          <Button
+            variant="link"
+            size="micro"
+            onClick={() => sidebar().show("evidence", { thread: threadRef })}
+          >
+            Evidence
+          </Button>
+          <Button
+            variant="link"
+            size="micro"
+            onClick={() => sidebar().show("todos", { thread: threadRef })}
+          >
+            Todos
+          </Button>
+        </p>
+      ) : null}
     </div>
   );
 }

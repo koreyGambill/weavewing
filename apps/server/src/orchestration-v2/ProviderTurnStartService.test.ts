@@ -25,6 +25,7 @@ import {
   ProjectId,
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
+  waitingMirror,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -2403,6 +2404,59 @@ effectIt.effect("marks a question the user is discussing in the open questions l
     expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
       withInlineContext(
         "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Flag name? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)",
+        "My own prompt",
+      ),
+    );
+  }),
+);
+
+effectIt.effect("lists every question with its reminders behind more than 30 other items", () =>
+  Effect.gen(function* () {
+    const tasks = Array.from({ length: 31 }, (_, index) => ({
+      kind: "task" as const,
+      ref: `T${index + 1}`,
+      key: `task-${index + 1}`,
+      title: `Task ${index + 1}`,
+      state: "open" as const,
+    }));
+    const qa = Array.from({ length: 5 }, (_, index) => ({
+      kind: "qa" as const,
+      ref: `QA${index + 1}`,
+      key: `landing/${index + 1}`,
+      title: `Change ${index + 1}`,
+      state: "open" as const,
+    }));
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      questionTools: true,
+      // The mirror the orchestrator stores; only the display caps rows.
+      waiting: waitingMirror([
+        ...tasks,
+        ...qa,
+        {
+          kind: "question",
+          ref: "Q1",
+          key: "Q1",
+          title: "Flag name?",
+          state: "discussing",
+          deferred: true,
+        },
+        { kind: "question", ref: "Q2", key: "Q2", title: "Which database?", state: "open" },
+        {
+          kind: "question",
+          ref: "Q3",
+          key: "Q3",
+          title: "Ship it?",
+          state: "open",
+          sent: true,
+        },
+      ]).waiting,
+    });
+    yield* harness.start;
+    expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
+      withInlineContext(
+        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Flag name? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Which database?",
         "My own prompt",
       ),
     );

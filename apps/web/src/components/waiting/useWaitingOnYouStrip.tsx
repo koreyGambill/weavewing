@@ -102,7 +102,6 @@ export function useWaitingOnYouStrip(input: {
     });
     setAdding(false);
   };
-  const hasQuestions = (input.waiting ?? []).some((item) => item.kind === "question");
   const spoken = [
     ...summary.counts.map(
       ({ kind, count }) =>
@@ -160,7 +159,7 @@ export function useWaitingOnYouStrip(input: {
                   Answer all drafted
                 </Button>
               ) : null}
-              {hasQuestions ? (
+              {summary.hasQuestions ? (
                 <Button
                   size="xs"
                   variant="outline"
@@ -178,9 +177,12 @@ export function useWaitingOnYouStrip(input: {
               threadRef={threadRef}
               groups={groupWaitingItems(input.waiting)}
               workspace={workspace ?? null}
-              onClose={close}
+              unlisted={summary.unlisted}
+              hasQuestions={summary.hasQuestions}
             />
           ),
+          // Escape from a row or a header control closes the list and returns to the toggle.
+          onEscape: close,
         }
       : {}),
   };

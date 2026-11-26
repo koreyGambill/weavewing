@@ -1,5 +1,5 @@
 import { InfoIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -23,6 +23,8 @@ export interface ComposerBannerStackItem {
   readonly actions?: ReactNode;
   readonly dismissLabel?: string;
   readonly onDismiss?: () => void;
+  /** Escape from anywhere inside the card, its header controls included. */
+  readonly onEscape?: () => void;
 }
 
 const GROUPS = ["environment", "attention"] as const;
@@ -177,6 +179,15 @@ function NoticeCard({
       detached={detached}
       density="comfortable"
       data-chat-composer-collapsed-controls="true"
+      {...(item.onEscape === undefined
+        ? {}
+        : {
+            onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+              if (event.key !== "Escape" || event.defaultPrevented) return;
+              event.preventDefault();
+              item.onEscape?.();
+            },
+          })}
     >
       <ComposerBanner.Row layout="wrap-actions">
         <ComposerBanner.Icon className="h-(--composer-banner-icon-column) self-start">

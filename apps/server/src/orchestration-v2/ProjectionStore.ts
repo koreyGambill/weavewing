@@ -19,7 +19,7 @@ import type {
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
-import { isWaitingItemState } from "@t3tools/contracts";
+import { waitingDisplayRows } from "@t3tools/contracts";
 import {
   latestRootProviderFailure,
   latestUnheldRun,
@@ -1798,7 +1798,7 @@ const waitingShellFields = (thread: Pick<OrchestrationV2AppThread, "waiting" | "
   thread.waiting === undefined || thread.waitingCounts === undefined
     ? {}
     : {
-        waiting: thread.waiting.filter((item) => isWaitingItemState(item.state)),
+        waiting: waitingDisplayRows(thread.waiting),
         waitingCounts: thread.waitingCounts,
       };
 

@@ -20,27 +20,39 @@ export const WAITING_KIND_HEADING: Record<WaitingItemKind, string> = {
   task: "Tasks",
 };
 
-/** What the collapsed strip says: per-kind counts and how many wait on the agent instead. */
+/** What the strip says: per-kind counts, discussions, and rows the capped list leaves out. */
 export interface WaitingStripSummary {
   readonly counts: ReadonlyArray<{ readonly kind: WaitingItemKind; readonly count: number }>;
   readonly discussing: number;
   readonly total: number;
+  /** Items still waiting that the thread's capped rows do not list. */
+  readonly unlisted: number;
+  /** Any question still waits on someone, so the questions panel has something to show. */
+  readonly hasQuestions: boolean;
 }
 
-/** Null when nothing waits on the user and nothing is being discussed, so the strip hides. */
+/**
+ * Null when nothing waits on the user and nothing is being discussed, so the strip hides. Every
+ * number comes from the exact counts, never from how many rows the thread lists.
+ */
 export function waitingStripSummary(
-  waiting: ReadonlyArray<WaitingItemSummary> | undefined,
+  rows: ReadonlyArray<WaitingItemSummary> | undefined,
   counts: WaitingCounts | undefined,
 ): WaitingStripSummary | null {
-  const discussing = (waiting ?? []).filter((item) => item.state === "discussing").length;
+  if (counts === undefined) return null;
   const total = waitingTotal(counts);
-  if (total === 0 && discussing === 0) return null;
+  if (total === 0 && counts.discussing === 0) return null;
   return {
     counts: WAITING_KINDS.flatMap((kind) =>
-      counts !== undefined && counts[kind] > 0 ? [{ kind, count: counts[kind] }] : [],
+      counts[kind] > 0 ? [{ kind, count: counts[kind] }] : [],
     ),
-    discussing,
+    discussing: counts.discussing,
     total,
+    unlisted: Math.max(
+      0,
+      counts.live - (rows ?? []).filter((row) => isWaitingItemState(row.state)).length,
+    ),
+    hasQuestions: counts.liveQuestions > 0,
   };
 }
 

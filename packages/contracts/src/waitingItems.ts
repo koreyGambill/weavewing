@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -43,15 +44,25 @@ export const WaitingItemSummary = Schema.Struct({
 });
 export type WaitingItemSummary = typeof WaitingItemSummary.Type;
 
-/** Items waiting on the user per kind: `open` and not `sent`. Exact even when the list is capped. */
+/**
+ * Exact numbers for a thread's waiting items, which stay right when the listed rows are capped.
+ * `question`, `qa` and `task` count items waiting on the user: `open` and not `sent`.
+ */
 export const WaitingCounts = Schema.Struct({
   question: NonNegativeInt,
   qa: NonNegativeInt,
   task: NonNegativeInt,
+  // A thread stored before these three were kept reads zero until the next rebuild, at startup.
+  /** Items the user is discussing, which wait on the agent. */
+  discussing: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  /** Questions still waiting on someone: open, sent, deferred or discussing. */
+  liveQuestions: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  /** Every item still waiting on someone, of any kind; rows past the cap are this minus those listed. */
+  live: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
 export type WaitingCounts = typeof WaitingCounts.Type;
 
-/** The most waiting items a thread carries; counts stay exact past it. */
+/** The most waiting rows a thread lists for display; counts stay exact past it. */
 export const WAITING_ITEMS_LIMIT = 30;
 
 const WAITING_KINDS: ReadonlyArray<WaitingItemKind> = ["question", "qa", "task"];
@@ -61,56 +72,87 @@ export const isWaitingItemState = (state: WaitingItemState): boolean =>
   state === "open" || state === "deferred" || state === "discussing" || state === "problem";
 
 /** Whether the item counts as waiting on the user. */
-export const waitingOnUser = (item: WaitingItemSummary): boolean =>
+const waitingOnUser = (item: WaitingItemSummary): boolean =>
   item.state === "open" && item.sent !== true;
 
 const waitingItemCounts = (items: ReadonlyArray<WaitingItemSummary>): WaitingCounts => {
-  const counts = { question: 0, qa: 0, task: 0 };
-  for (const item of items) if (waitingOnUser(item)) counts[item.kind] += 1;
+  const counts = { question: 0, qa: 0, task: 0, discussing: 0, liveQuestions: 0, live: 0 };
+  for (const item of items) {
+    if (!isWaitingItemState(item.state)) continue;
+    counts.live += 1;
+    if (waitingOnUser(item)) counts[item.kind] += 1;
+    if (item.state === "discussing") counts.discussing += 1;
+    if (item.kind === "question") counts.liveQuestions += 1;
+  }
   return counts;
 };
 
 export const waitingTotal = (counts: WaitingCounts | undefined): number =>
   counts === undefined ? 0 : counts.question + counts.qa + counts.task;
 
+export const sameWaitingCounts = (a: WaitingCounts | undefined, b: WaitingCounts | undefined) =>
+  a === b ||
+  (a !== undefined &&
+    b !== undefined &&
+    a.question === b.question &&
+    a.qa === b.qa &&
+    a.task === b.task &&
+    a.discussing === b.discussing &&
+    a.liveQuestions === b.liveQuestions &&
+    a.live === b.live);
+
 // What a capped list keeps first: what waits on the user, then on the agent, then set aside.
 const capRank = (item: WaitingItemSummary) =>
   waitingOnUser(item) ? 0 : item.state === "discussing" || item.state === "problem" ? 1 : 2;
 
+const byKindThenOrder = <T extends { readonly item: WaitingItemSummary; readonly index: number }>(
+  a: T,
+  b: T,
+) => WAITING_KINDS.indexOf(a.item.kind) - WAITING_KINDS.indexOf(b.item.kind) || a.index - b.index;
+
+/** At most `limit` of the items still waiting, preferring what waits on the user, grouped by kind. */
+function capWaiting(
+  items: ReadonlyArray<WaitingItemSummary>,
+  limit: number,
+): ReadonlyArray<WaitingItemSummary> {
+  return items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => isWaitingItemState(item.state))
+    .sort((a, b) => capRank(a.item) - capRank(b.item) || a.index - b.index)
+    .slice(0, limit)
+    .sort(byKindThenOrder)
+    .map(({ item }) => item);
+}
+
 /**
- * The thread's mirror from every item its three stores report: the waiting ones, capped at
- * `WAITING_ITEMS_LIMIT` and grouped by kind, then closed items the user changed, which the agent
- * hears about on its next user turn.
+ * The thread's mirror from every item its three stores report. Server logic reads its questions,
+ * so every question is kept, closed ones the user changed included; QA changes and tasks still
+ * waiting are capped at `WAITING_ITEMS_LIMIT`, because only the display reads them.
  */
 export function waitingMirror(items: ReadonlyArray<WaitingItemSummary>): {
   readonly waiting: ReadonlyArray<WaitingItemSummary>;
   readonly waitingCounts: WaitingCounts;
 } {
-  const indexed = items.map((item, index) => ({ item, index }));
-  const kept = new Set(
-    indexed
-      .filter(({ item }) => isWaitingItemState(item.state))
-      .sort((a, b) => capRank(a.item) - capRank(b.item) || a.index - b.index)
-      .slice(0, WAITING_ITEMS_LIMIT)
-      .map(({ index }) => index),
+  const others = new Set(
+    capWaiting(
+      items.filter((item) => item.kind !== "question"),
+      WAITING_ITEMS_LIMIT,
+    ),
   );
-  const byKind = (entry: { readonly item: WaitingItemSummary; readonly index: number }) =>
-    WAITING_KINDS.indexOf(entry.item.kind);
   return {
-    waiting: [
-      ...indexed.filter(({ index }) => kept.has(index)),
-      ...indexed.filter(({ item }) => !isWaitingItemState(item.state)),
-    ]
-      .sort(
-        (a, b) =>
-          Number(!isWaitingItemState(a.item.state)) - Number(!isWaitingItemState(b.item.state)) ||
-          byKind(a) - byKind(b) ||
-          a.index - b.index,
-      )
+    waiting: items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.kind === "question" || others.has(item))
+      .sort(byKindThenOrder)
       .map(({ item }) => item),
     waitingCounts: waitingItemCounts(items),
   };
 }
+
+/** The rows a thread lists for display: at most `WAITING_ITEMS_LIMIT` still waiting. */
+export const waitingDisplayRows = (
+  waiting: ReadonlyArray<WaitingItemSummary>,
+): ReadonlyArray<WaitingItemSummary> => capWaiting(waiting, WAITING_ITEMS_LIMIT);
 
 const sameItem = (a: WaitingItemSummary, b: WaitingItemSummary) =>
   a.kind === b.kind &&

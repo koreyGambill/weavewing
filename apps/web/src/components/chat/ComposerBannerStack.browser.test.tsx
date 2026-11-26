@@ -149,3 +149,25 @@ it("opens the details of a long notice right above its button", async () => {
     expect(gap).toBeLessThan(8);
   });
 });
+
+it("hands Escape from a header control or the card's body to the card", async () => {
+  const onEscape = vi.fn();
+  await using screen = await render(
+    <ComposerBannerStack
+      items={[
+        {
+          ...notice("Waiting on you"),
+          actions: <button type="button">Open panel</button>,
+          children: <button type="button">Row</button>,
+          onEscape,
+        },
+      ]}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Open panel" }));
+  await userEvent.keyboard("{Escape}");
+  expect(onEscape).toHaveBeenCalledTimes(1);
+  screen.getByRole("button", { name: "Row" }).element().focus();
+  await userEvent.keyboard("{Escape}");
+  expect(onEscape).toHaveBeenCalledTimes(2);
+});
