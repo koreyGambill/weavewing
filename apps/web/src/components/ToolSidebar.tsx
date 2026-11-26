@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { isElectron } from "../env";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useResizeDrag } from "../hooks/useResizeDrag";
@@ -586,7 +587,10 @@ function SideAreaBody({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A timer decides when a run of thread switches has stopped.
   useEffect(() => {
     if (settledKey === key) return;
-    const timer = window.setTimeout(() => setSettledKey(key), SIDE_AREA_SETTLE_MS);
+    // Rendered synchronously so the view's queries subscribe in this task; a deferred render
+    // leaves their fresh nodes unsubscribed long enough for the registry to collect them, which
+    // interrupts the requests they just started and sends them again.
+    const timer = window.setTimeout(() => flushSync(() => setSettledKey(key)), SIDE_AREA_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [key, settledKey]);
   return (
