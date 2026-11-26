@@ -540,7 +540,12 @@ function LandingNotes({
               </Tooltip>
             </div>
             {open ? (
-              <NoteDetail environmentId={environmentId} landingId={landingId} changeId={note.id} />
+              <NoteDetail
+                environmentId={environmentId}
+                landingId={landingId}
+                changeId={note.id}
+                title={note.title}
+              />
             ) : (
               <>
                 {note.gapPreviews.map((gap, index) => (
@@ -575,10 +580,12 @@ function NoteDetail({
   environmentId,
   landingId,
   changeId,
+  title,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   changeId: string;
+  title: string;
 }) {
   const landing = useEnvironmentQuery(evidenceGet({ environmentId, input: { landingId } }));
   const change = landing.data?.changes.find((candidate) => candidate.id === changeId);
@@ -590,7 +597,7 @@ function NoteDetail({
     );
   return (
     <>
-      {change.summary ? (
+      {change.summary.trim() && change.summary.trim() !== title ? (
         <p className="whitespace-pre-wrap break-words text-muted-foreground">{change.summary}</p>
       ) : null}
       {change.gaps.map((gap, index) => (
