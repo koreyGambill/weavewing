@@ -334,9 +334,8 @@ single press or **Double press** for two presses only. Choosing **Quit** from th
 application menu always quits immediately. A focused terminal keeps `Ctrl+Q` on
 Windows and Linux.
 
-Switch the left sidebar between the thread list and your last thread tool with
-`mod+alt+i` (`threadContext.toggle`). If the sidebar is hidden, it opens on
-that tool.
+`mod+alt+i` (`threadContext.toggle`) opens the side panel on the last thread view
+you used, or closes it when a thread view is showing.
 
 ## Side panel
 

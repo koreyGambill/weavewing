@@ -51,7 +51,6 @@ import {
   bookmarkNavigation,
   bookmarkUpdate,
   isBookmarkTodo,
-  isOpenBookmarkTodo,
   bookmarkToggle,
 } from "./bookmarks.logic";
 import { BookmarkNoteEditor } from "./BookmarkNoteEditor";
@@ -85,11 +84,6 @@ export function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
     useFollowUpsAtom(threadRef?.environmentId ?? null, threadRef?.threadId),
     followUpsOf,
   );
-}
-
-/** Open bookmark to-dos of one thread, for the Todos strip badge. */
-export function useOpenFollowUpCount(threadRef: ScopedThreadRef | null) {
-  return useThreadFollowUpList(threadRef).filter(isOpenBookmarkTodo).length;
 }
 
 /** Every bookmark on one message: the whole message and its passages. */

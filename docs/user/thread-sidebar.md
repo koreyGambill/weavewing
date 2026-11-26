@@ -87,26 +87,24 @@ folder with the conversation carried over. Finish or stop any work before moving
 
 The thread's views (Todos, Evidence, Artifacts, Links, Related, Timeline, Details,
 Environments, Inspect and Automations) open in the side panel on the right, along
-with Inbox, Calendar and Status. Open it with the panel button at the right of the
-titlebar, with `Cmd+Alt+Shift+B` on macOS or `Ctrl+Alt+Shift+B` on Windows and
-Linux, or on a thread's details with the panel button at the right end of the row
-under the composer. Choose a view from the menu at the top left of the panel. The
-panel covers the right edge of the chat instead of narrowing it, and shows the
+with Inbox, Calendar and Status. The left sidebar holds only your threads. Open the
+panel with the panel button at the right of the titlebar, with `Cmd+Alt+Shift+B` on
+macOS or `Ctrl+Alt+Shift+B` on Windows and Linux, or on a thread's details with the
+panel button at the right end of the row under the composer. `Cmd+Alt+I` on macOS or
+`Ctrl+Alt+I` on Windows and Linux opens the panel on the last thread view you used,
+or closes it when a thread view is showing. Choose a view from the menu at the top
+left of the panel: **This thread** lists the thread views and **Everywhere** the rest.
+The panel covers the right edge of the chat instead of narrowing it, and shows the
 selected thread. It closes when you press Escape, click outside it or switch
 threads. **Pin** keeps it open while you move between threads, and its views
 follow the thread you select. **Lock to thread** keeps showing one thread while
 you select others; the panel names the locked thread, and unlocking returns it to
-following. Drag the panel's left edge to resize it; double-click the edge to
+following. Opening Todos or Automations from another thread's menu locks the panel
+to that thread. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
-The left sidebar also holds the same thread views, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
-**Threads** at the top of the strip, to return to your threads. `Cmd+Alt+I` on macOS or `Ctrl+Alt+I`
-on Windows and Linux switches between your threads and the last tool, and opens
-a hidden sidebar on that tool. While the sidebar is hidden, its toggle shows when
-something needs you, such as an unanswered question or a status alert. The tools
-follow the focused tile; pin them to keep one thread while you move between
-tiles. Hide tools you don't use from the bottom of the strip. Opening a hidden
-tool from elsewhere, such as an artifact reminder, shows it again.
+While the left sidebar is hidden, its toggle shows when something needs you, such as
+an unanswered question or an unread alert.
 
 **Waiting on you**, at the top of the thread list, counts the threads where
 something waits on you: a question, a change to check or a task. It also shows
@@ -125,7 +123,7 @@ Keybindings**; when the thread list is not on screen, both open the Inbox
 instead. Turning **Waiting-on-you cards** off in **Settings → Threads** hides
 the row and its palette command; the Inbox keeps its own entry points.
 
-The **Inbox**, the bell under Threads in the strip and a view in the side panel, collects notifications that
+The **Inbox** view in the side panel collects notifications that
 need urgent action or are important enough that you must not miss them, newest first.
 Agents must choose urgent or important when raising one. Routine progress,
 completions and review nitpicks stay in their threads. Landed work awaiting QA
@@ -145,7 +143,7 @@ following your settings under **Settings → General → Notifications**.
 
 Open **Status** in the side panel to check your status sources. Its alert dot
 also appears on the panel button while the panel is closed. Configure sources
-under **Settings → Status sources**, also linked from the Status tool.
+under **Settings → Status sources**, also linked from the Status view.
 
 Links, Artifacts and Related have a filter box, and each row can copy its link,
 ticket ID or thread link. Links also filters by service, sorts, and copies every
@@ -182,7 +180,7 @@ or what's wrong with it, the agent records that on the card as **Recorded by the
 agent**. A problem it records shows as **Agent fixing** until a later landing names the
 fix. **Reopen** on any settled card makes it open again.
 
-The Evidence tool lists the same landings. Pick **Thread** for this thread's landings
+The Evidence view lists the same landings. Pick **Thread** for this thread's landings
 or **All** for every thread on this server, and filter to the ones that still need QA.
 Open a landing to see its changes and load their captures; click a capture to view it
 full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
@@ -235,7 +233,7 @@ Hover a bar for its model, duration and how long it waited to start; click it to
 open that thread. On a thread that ran for days, pick a shorter window from the
 view's header. Delegates in a linked environment and plain forks are not shown.
 
-The sidebar's **Environments** view shows Xwing environments used by the thread
+The **Environments** view shows Xwing environments used by the thread
 and its delegated children. Open an environment to see its repositories and apps,
 open a terminal, or review an archive or deletion. **Unlink** removes a link to a
 folder the thread is not using. Select it again with **Change folder** to restore

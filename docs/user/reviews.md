@@ -122,7 +122,7 @@ Choose **All threads and machines** to review work across connected environments
 including archived and settled conversations. Each entry links back to its thread.
 Disconnected machines show that their work could not be loaded.
 
-QA of landed work lives in **Evidence** in the sidebar strip (see
+QA of landed work lives in the **Evidence** view of the side panel (see
 [Thread sidebar](thread-sidebar.md)). Pending QA does not stop routine work or
 authorized landing.
 
@@ -188,7 +188,7 @@ panel.
 
 ## Inspect: loads and token usage
 
-Choose **Inspect** in the sidebar's strip for Loads, Context and Tokens.
+Choose **Inspect** in the side panel's view menu for Loads, Context and Tokens.
 
 Loads shows file reads, skill loads, and related tool activity observed in the
 conversation. Use Refresh to update these views while an agent is working. Reported events and events inferred from command text are labeled

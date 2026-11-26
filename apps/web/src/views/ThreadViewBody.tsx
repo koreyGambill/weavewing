@@ -1,6 +1,5 @@
 import { AutomationsView } from "../components/automations/AutomationsView";
 import { EvidenceView } from "../components/evidence/EvidenceView";
-import { InboxView } from "../components/inbox/InboxView";
 import {
   FLUSH_THREAD_TOOLS,
   ThreadInspect,
@@ -8,12 +7,12 @@ import {
 } from "../components/ThreadToolViews";
 import { Empty, EmptyDescription } from "../components/ui/empty";
 import { cn } from "../lib/utils";
-import type { ThreadContextSection } from "../threadContextSidebarStore";
+import type { ThreadViewId } from "../components/ToolSidebar.logic";
 import type { ViewSlots, ViewTarget } from "./viewRegistry";
 
 /**
  * A thread view's content for its target. It renders only from what its host passes, so the
- * rail, the side area and later hosts show the same view.
+ * side area and later hosts show the same view.
  */
 export function ThreadViewBody({
   view,
@@ -21,7 +20,7 @@ export function ThreadViewBody({
   target,
   slots,
 }: {
-  view: ThreadContextSection;
+  view: ThreadViewId;
   title: string;
   target: ViewTarget;
   slots: ViewSlots;
@@ -33,12 +32,10 @@ export function ThreadViewBody({
       aria-label={title}
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col",
-        view !== "inbox" && !FLUSH_THREAD_TOOLS.has(view) && "overflow-auto px-2.5 py-2.5",
+        !FLUSH_THREAD_TOOLS.has(view) && "overflow-auto px-2.5 py-2.5",
       )}
     >
-      {view === "inbox" ? (
-        <InboxView actions={actions} />
-      ) : view === "automations" ? (
+      {view === "automations" ? (
         <AutomationsView threadRef={threadRef} />
       ) : view === "evidence" ? (
         <EvidenceView threadRef={threadRef} />

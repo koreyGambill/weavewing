@@ -97,7 +97,7 @@ without the agent's context growing. To move a one-thread task, pick another
 thread in its project under **Destination**. Moving such a task to another
 project starts a new thread there on its next run.
 
-On web and desktop, open **Automations** in the sidebar and choose **Manage** to browse automations.
+On web and desktop, open **Automations** in the side panel and choose **Manage** to browse automations.
 Finished one-time schedules are under **Completed**. Open **Run history** to
 see runs by server, then choose an automation to see only its runs.
 
@@ -182,7 +182,7 @@ cannot receive the advisory.
 
 ## Context reviews
 
-Open **Inspect → Context** from the sidebar's strip to see each turn's instruction sizes,
+Open **Inspect → Context** in the side panel to see each turn's instruction sizes,
 injected tools, file and knowledge reads, repeated reads and reported token usage.
 Read counts from shell commands are inferred. Missing provider telemetry stays
 unknown. Use **Older turns** to page through the history.

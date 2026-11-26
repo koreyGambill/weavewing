@@ -4,7 +4,6 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { createContext, use, useState, type ReactNode } from "react";
 import { selectThreadTileLayout, useRightPanelStore } from "../rightPanelStore";
 import { selectContextThread } from "../threadContextSidebar";
-import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useToolSidebarStore } from "../toolSidebarStore";
@@ -25,14 +24,7 @@ export function useSelectedThreadRef(): ScopedThreadRef | null {
   const layout = useRightPanelStore((state) =>
     owner ? selectThreadTileLayout(state.byThreadKey, owner) : null,
   );
-  return selectContextThread(owner, layout, surfaces ?? [], null);
-}
-
-/** The thread the sidebar's tools follow: a pinned thread, else the focused tile's. */
-export function useThreadToolsTarget(): ScopedThreadRef | null {
-  const selected = useSelectedThreadRef();
-  const pinned = useThreadContextSidebarStore((state) => state.pinned);
-  return pinned ?? selected;
+  return selectContextThread(owner, layout, surfaces ?? []);
 }
 
 /** The thread the side area's thread views show: a locked thread, else the selected one. */
@@ -43,46 +35,27 @@ export function useSideAreaThreadRef(): ScopedThreadRef | null {
 }
 
 type Slot = HTMLDivElement | null;
-interface SlotsValue {
-  setDetails: (element: Slot) => void;
-  actions: Slot;
-  setActions: (element: Slot) => void;
-}
-const Slots = createContext<SlotsValue>({
-  setDetails: () => {},
-  actions: null,
-  setActions: () => {},
-});
 const SideAreaDetails = createContext<(element: Slot) => void>(() => {});
 
-/**
- * Holds the places the open tool renders into outside its own panel: its heading row's button slot,
- * and the Details view that the conversation's details card moves into.
- */
+/** Gives the conversation's details card to the host whose Details view shows its thread. */
 export function ThreadToolsHost({ children }: { children: ReactNode }) {
-  const threadRef = useThreadToolsTarget();
   const selected = useSelectedThreadRef();
-  const view = useThreadContextSidebarStore((state) => state.view);
   const sideThreadRef = useSideAreaThreadRef();
   const sideOpen = useToolSidebarStore((state) => state.open);
   const sideView = useToolSidebarStore((state) => state.view);
-  const [details, setDetails] = useState<Slot>(null);
   const [sideDetails, setSideDetails] = useState<Slot>(null);
-  const [actions, setActions] = useState<Slot>(null);
-  const destination = resolveDetailsDestination({
-    side:
+  const destination = resolveDetailsDestination(
+    [
       sideOpen && sideView === "details" && sideThreadRef && sideDetails
         ? { threadRef: sideThreadRef, element: sideDetails }
         : null,
-    rail: view === "details" && threadRef && details ? { threadRef, element: details } : null,
+    ],
     selected,
-  });
+  );
   return (
-    <Slots value={{ setDetails, actions, setActions }}>
-      <SideAreaDetails value={setSideDetails}>
-        <ThreadDetailsDestination value={destination}>{children}</ThreadDetailsDestination>
-      </SideAreaDetails>
-    </Slots>
+    <SideAreaDetails value={setSideDetails}>
+      <ThreadDetailsDestination value={destination}>{children}</ThreadDetailsDestination>
+    </SideAreaDetails>
   );
 }
 
@@ -101,10 +74,6 @@ export function useRouteDraft(threadRef: ScopedThreadRef | null): ViewDraft | nu
   return draftId && session
     ? { draftId, threadRef: scopeThreadRef(session.environmentId, session.threadId) }
     : null;
-}
-
-export function useThreadToolsSlots() {
-  return use(Slots);
 }
 
 /** A button an open tool adds to its heading row. */

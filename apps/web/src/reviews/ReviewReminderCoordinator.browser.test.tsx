@@ -82,6 +82,7 @@ vi.mock(
 
 import { useRightPanelStore } from "../rightPanelStore";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import { useToolSidebarStore } from "../toolSidebarStore";
 import { ReviewReminderCoordinator } from "./ReviewReminderCoordinator";
 
 const environmentId = EnvironmentId.make("remote-environment");
@@ -107,6 +108,7 @@ function setup() {
   state.query.mockReset();
   useRightPanelStore.setState({ byThreadKey: {} });
   useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
+  useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
 }
 
 it.each(["other-thread", "list"])(
@@ -121,11 +123,11 @@ it.each(["other-thread", "list"])(
       useThreadContextSidebarStore.getState().show("todos", { thread: ref });
     }
     const route = view === "list" ? "/remote-environment/review-thread" : "/existing/thread";
-    const initialTools = useThreadContextSidebarStore.getState().view;
+    const initialView = useToolSidebarStore.getState().view;
     await using screen = await render(<ReviewReminderCoordinator />, { router: route });
     await vi.waitFor(() => expect(state.add).toHaveBeenCalledTimes(1));
     expect(screen.router?.state.location.pathname).toBe(route);
-    expect(useThreadContextSidebarStore.getState().view).toBe(initialTools);
+    expect(useToolSidebarStore.getState().view).toBe(initialView);
     state.due = [{ ...review, revision: 2 }];
     await screen.rerender(<ReviewReminderCoordinator />);
     expect(state.add).toHaveBeenCalledTimes(1);
@@ -133,10 +135,14 @@ it.each(["other-thread", "list"])(
     await vi.waitFor(() =>
       expect(screen.router?.state.location.pathname).toBe("/remote-environment/review-thread"),
     );
-    expect(useThreadContextSidebarStore.getState()).toMatchObject({
+    expect(useThreadContextSidebarStore.getState().artifactSelection).toEqual({
+      thread: ref,
+      id: review.id,
+    });
+    expect(useToolSidebarStore.getState()).toMatchObject({
+      open: true,
       view: "artifacts",
-      artifactSelection: { thread: ref, id: review.id },
-      pinned: ref,
+      locked: null,
     });
   },
 );
@@ -202,8 +208,8 @@ it("opens the review from a desktop notification without starting work", async (
   await vi.waitFor(() =>
     expect(screen.router?.state.location.pathname).toBe("/remote-environment/review-thread"),
   );
-  expect(useThreadContextSidebarStore.getState()).toMatchObject({
-    view: "artifacts",
-    artifactSelection: { id: review.id },
+  expect(useThreadContextSidebarStore.getState().artifactSelection).toMatchObject({
+    id: review.id,
   });
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "artifacts" });
 });
