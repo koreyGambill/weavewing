@@ -99,6 +99,14 @@ you select others; the panel names the locked thread, and unlocking returns it t
 following. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
+Calendar, Status and Pull requests also open as full pages beside the thread list.
+The expand button next to **Pin** opens such a view as a page; for a thread view it
+maximizes the panel instead. The command palette offers **Open Calendar as a page**
+and **Open Status as a page**, and **Open pull requests** as before. On a page,
+**Open in side panel** moves the view back into the panel and returns you to where you
+were. A view that needs more room than the panel, such as Pull requests, shows
+**Open full size** there instead.
+
 The left sidebar also holds the same thread views, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
 **Threads** at the top of the strip, to return to your threads. `Cmd+Alt+I` on macOS or `Ctrl+Alt+I`
 on Windows and Linux switches between your threads and the last tool, and opens

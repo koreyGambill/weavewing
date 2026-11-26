@@ -19,6 +19,7 @@ import {
 import { createElement, type ComponentType, type ReactNode } from "react";
 
 import { CalendarTool } from "../components/CalendarTool";
+import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { VIEW_IDS, type ViewId, type ViewLayout } from "../components/ToolSidebar.logic";
 import { InboxGlobalView, InboxUnreadCount } from "./InboxGlobalView";
 import { StatusAlertCount, StatusView } from "./StatusView";
@@ -27,6 +28,8 @@ import { ThreadViewBody } from "./ThreadViewBody";
 export type { ViewId, ViewLayout };
 export type ViewScope = "thread" | "global";
 export type ViewHost = "panel" | "tile" | "page";
+/** Where a global view opens full size: the shared view page or a route of its own. */
+export type ViewPage = "/view/$viewId" | "/pull-requests";
 
 /** A draft that has no thread yet; Inspect previews its starting context. */
 export interface ViewDraft {
@@ -68,6 +71,8 @@ export interface ViewDefinition {
    * mounts it only while open.
    */
   readonly PickerCount?: ComponentType<{ readonly target: ViewTarget }>;
+  /** The route that shows a global view full size; hosts narrower than `minWidthPx` link to it. */
+  readonly page?: ViewPage;
   readonly render: (props: {
     readonly target: ViewTarget;
     readonly layout: ViewLayout;
@@ -176,6 +181,7 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     about: "Your agenda for a day. Calendar sync is not available yet.",
     scope: "global",
     minWidthPx: 280,
+    page: "/view/$viewId",
     render: () => createElement(CalendarTool),
   },
   status: {
@@ -187,7 +193,19 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     scope: "global",
     minWidthPx: 280,
     PickerCount: StatusAlertCount,
+    page: "/view/$viewId",
     render: () => createElement(StatusView),
+  },
+  "pull-requests": {
+    id: "pull-requests",
+    title: "Pull requests",
+    icon: PullRequestGlyph.pullRequest,
+    about: "Pull requests across your projects, with their checks and reviews, and a detail tile.",
+    scope: "global",
+    minWidthPx: 720,
+    page: "/pull-requests",
+    // Its page reads its filters from its own route, so narrower hosts offer only Open full size.
+    render: () => null,
   },
 };
 

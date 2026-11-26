@@ -25,6 +25,23 @@ export function takeSideAreaFocusRequest(): boolean {
   return requested;
 }
 
+let routeHold = false;
+
+/**
+ * Keeps the side area open through the next route change, which closes an unpinned one, so a
+ * page can hand its view to the side area and go back. The page releases it when it unmounts.
+ */
+export function holdSideAreaThroughRoute(open: boolean) {
+  routeHold = open;
+}
+
+/** True once while a page's hand-over is pending. */
+export function takeSideAreaRouteHold(): boolean {
+  const held = routeHold;
+  routeHold = false;
+  return held;
+}
+
 export const useToolSidebarStore = create<SideAreaStore>()(
   persist(
     (set, get) => ({
