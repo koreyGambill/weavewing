@@ -31,6 +31,7 @@ Cases are JSON lines in `cases/`, one file per area. The case schema in `run.ts`
 - `setup.questions` turns on Waiting-on-you cards: T3 lists `question_ask` and `question_update`, adds their instructions, and puts the listed open and deferred questions ahead of the user's `prompt`, as it does for a user's message. An empty list turns the setting on with no open questions.
 - `setup.contextRewind: true` turns on the provider's context rewind setting, so T3 lists `context_rewind` to Claude and `context_rewind_turn` to Codex. Codex cases offer it through the Code Mode `exec` catalog like every other T3 tool, while T3 Code lists it as a direct tool.
 - `rewindSummary: {"turns": n, "replyExcerpt": "..."}` replaces `prompt` with T3's request for a summary when the user chooses Rewind to here and keep a summary, built from this checkout with its origin header.
+- `setup.resumedSession` (Claude only) models a session that started on an older build and is resumed: Claude Code replays the append it started with, which lacks the `startedWithout` sections and holds the `startedWith` texts, and T3 puts its instruction-update notice ahead of `prompt`. Name sections by their heading line, such as `## T3 Code QA`. `--without-instruction-notice` leaves the notice out, as T3 ran before it had one.
 - `setup.mocks`: a `{"$sequence": [...]}` mock answers its nth call with the nth result, then repeats the last. A `{"$ticketExport": {"count": 100, "from": 1}}` mock, alone or inside `$sequence`, answers with a generated support export (`ticketExport.ts`), so a case can return large tool results without committing them. Claude Code moves an MCP result of about 80 KB or more to a file, so keep each result well under that.
 - `setup.priorTurns[].toolCalls[].resultFile`: load a repository-relative file as the tool result instead of copying its contents into the case. An empty `prompt` resumes a top-level thread after its last prior tool result without adding a user message. Side-chat and subagent setups require a nonempty prompt.
 - `expect`: the checks, such as `calls`, `sharedArg` (every call of a tool passes one value at an argument path), `callsMustNot`, `maxCalls`, `order`, `shellMust`, `textMust`, `finalTextMust` (the last text, once the turn ended), and `linked`. A call's `args` match partially: `~text` is a case-insensitive substring, a bare `~` any present value, `"<=N"` / `">=N"` bound a number, `null` matches a missing key, and keys may be dotted paths. Device cases also use `device` to check every child brief, forbid raw UI commands, bound failed device actions per user turn, and require artifact paths in completed final answers. Secrets cases use `secret` (see [Secrets cases](#secrets-cases)).
@@ -87,6 +88,19 @@ Passes per case, main's runtime text → this text ("Write every file path in yo
 | file-links-parent-thread-root | 0/5 → 1/6 | 5/6 → 5/6  |
 
 On the parent-folder case, Haiku's absolute share rose from 17% to 62% and Sonnet's stayed at 94%. A narrower "Write every file you cite as an absolute path" reached 72% and 87%, and "Cite files in inline code the same way" stayed near main (59% and 84%). Most remaining relative pills are later mentions in inline code, such as a bare `index.ts:5`, or values quoted from a manifest, such as `src/index.ts`. Chat still turns those spans into pills. A 6-sample run of the nine cases cost about $0.35 on Haiku and $1.80 on Sonnet, as the CLI reported.
+
+## Resumed-session cases
+
+`cases/resumed-instructions.ndjson` checks the notice T3 sends a resumed Claude session whose instructions changed since it started. Passes per case, 4 samples each through `--transport claude-cli` on 2026-11-26, with `--without-instruction-notice` → without it:
+
+| Case                             | Kind    | Haiku 5.5 | Sonnet 5.5 |
+| -------------------------------- | ------- | --------- | ---------- |
+| resumed-changed-section-new-form | bad     | 0/4 → 3/4 | 0/4 → 4/4  |
+| resumed-qa-notice-confirms       | guard   | 4/4 → 4/4 | 4/4 → 4/4  |
+| resumed-notice-not-recapped      | guard   | 4/4 → 3/3 | 4/4 → 4/4  |
+| resumed-no-change-control        | control | 4/4 → 4/4 | 4/4 → 4/4  |
+
+A session that never saw the QA section still records "that works", because `evidence_qa_update`'s own description carries that rule; the case guards that the notice leaves it intact. One Haiku sample errored in the shell simulator. The four runs cost about $0.15 on Haiku and $1.60 on Sonnet, as the CLI reported.
 
 ## Where T3's text lives
 

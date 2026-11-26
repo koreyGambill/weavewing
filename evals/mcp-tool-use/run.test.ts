@@ -771,6 +771,31 @@ it("lists link tools only while a case turns the beta on, and sends chips as T3 
   assert.include(prompt?.text, "environmentId: environment-vps");
 });
 
+it("replays a resumed session's start append and puts T3's notice ahead of the prompt", () => {
+  const base = buildBase(template, { model: "claude-haiku-5-5", keepUserInstructions: false });
+  const resumed = (resumedSession: NonNullable<McpToolUseCase["setup"]["resumedSession"]>) => ({
+    ...childCase,
+    setup: { role: "top" as const, resumedSession },
+  });
+  const system = (sample: ReturnType<typeof makeSample>) => JSON.stringify(sample.base.system);
+  const lacking = makeSample(resumed({ startedWithout: ["## T3 Code QA"] }), base);
+  assert.notInclude(system(lacking), "## T3 Code QA");
+  const notices = (sample: ReturnType<typeof makeSample>) =>
+    (buildMessages(sample).at(-1)?.content ?? []).flatMap((block) =>
+      String(block.text ?? "").includes("T3 Code's instructions") ? [block.text] : [],
+    );
+  const lastMessage = buildMessages(lacking).at(-1)?.content ?? [];
+  assert.include(lastMessage.at(-2)?.text, '<section name="## T3 Code QA" change="added">');
+  assert.equal(lastMessage.at(-1)?.text, childCase.prompt);
+  const before = makeSample(resumed({ startedWithout: ["## T3 Code QA"] }), base, {
+    instructionNotice: false,
+  });
+  assert.deepEqual(notices(before), []);
+  const current = makeSample(resumed({}), base);
+  assert.include(system(current), "## T3 Code QA");
+  assert.deepEqual(notices(current), []);
+});
+
 it("replays earlier capability results with the model under test as the caller", () => {
   const base = buildBase(template, { model: "claude-opus-5-5", keepUserInstructions: false });
   const capabilities = {

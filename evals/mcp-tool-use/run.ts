@@ -97,6 +97,11 @@ import {
   CLAUDE_PROVIDER,
   makeClaudeQueryOptions,
 } from "../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import {
+  claudeAppendSections,
+  claudeInstructionRecord,
+  claudeInstructionUpdate,
+} from "../../apps/server/src/orchestration-v2/Adapters/ClaudeInstructionUpdates.ts";
 import { proxyConfig } from "../shared/proxy.ts";
 import { changeRequestsCreatedBy } from "../../apps/server/src/orchestration-v2/PullRequestSyncReactor.ts";
 import { type BackgroundWait, makeBackgroundWait } from "./backgroundWait.ts";
@@ -398,6 +403,18 @@ export const McpToolUseCase = Schema.Struct({
     /** Regexes on one part of a shell command. A match wins over the shell simulator. */
     shellMocks: Schema.optional(
       Schema.Array(Schema.Struct({ match: Schema.String, output: Schema.String })),
+    ),
+    /**
+     * A Claude session that started on an older build and is resumed: Claude Code replays the
+     * append it started with, which lacks the `startedWithout` sections and holds the
+     * `startedWith` texts, and T3 puts its instruction-update notice ahead of `prompt`. Sections
+     * are named by their heading line, such as `## T3 Code QA`.
+     */
+    resumedSession: Schema.optional(
+      Schema.Struct({
+        startedWithout: Schema.optional(Schema.Array(Schema.String)),
+        startedWith: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+      }),
     ),
     /** The thread is a side chat's first turn: T3 puts the parent's digest ahead of `prompt`. */
     sideChat: Schema.optional(
@@ -1009,6 +1026,10 @@ type Sample = {
   readonly mockCalls: Map<string, number>;
   /** USD the Claude CLI reported for this sample, on `--transport claude-cli`. */
   readonly cliCost?: CliCost;
+  /** A resumed session's start append, which Claude Code replays in place of T3's current one. */
+  readonly systemAppend?: string;
+  /** T3's instruction-update notice, which goes ahead of the prompt. */
+  readonly instructionNotice?: string;
 };
 /** USD the Claude CLI reported, and runs that stopped before reporting any. */
 type CliCost = { usd: number; unreported: number };
@@ -1025,8 +1046,57 @@ const withThreadCwd = (base: Base, cwd: string | undefined): Base => {
   return { ...base, ...moved };
 };
 
-export const makeSample = (testCase: McpToolUseCase, templateBase: Base): Sample => {
-  const base = withThreadCwd(templateBase, testCase.setup.threadCwd);
+/** The system text and notice of a resumed Claude session that started on an older append. */
+const resumedSession = (
+  testCase: McpToolUseCase,
+  base: Base,
+  notice: boolean,
+): Pick<Sample, "base" | "systemAppend" | "instructionNotice"> => {
+  const resumed = testCase.setup.resumedSession;
+  if (resumed === undefined || base.codex !== undefined) return { base };
+  const world = testCase.setup.world;
+  const current = t3SystemAppend(
+    base.model as Model,
+    world?.deviceAgentAccess !== false,
+    world?.browserAgentAccess !== false,
+    testCase.setup.questions !== undefined,
+  );
+  const sections = claudeAppendSections(current, current);
+  const started = sections.flatMap((section) => {
+    if (resumed.startedWithout?.includes(section.name)) return [];
+    const text = resumed.startedWith?.[section.name];
+    return text === undefined
+      ? [section]
+      : [{ ...section, text: `${/^\s*/.exec(section.text)?.[0] ?? ""}${text}` }];
+  });
+  const systemAppend = started.map((section) => section.text).join("");
+  const escaped = (value: string) => JSON.stringify(value).slice(1, -1);
+  const system = JSON.parse(
+    JSON.stringify(base.system).replaceAll(escaped(current), escaped(systemAppend)),
+  ) as Base["system"];
+  const update = claudeInstructionUpdate({
+    record: claudeInstructionRecord(started),
+    sections,
+    cut: false,
+  });
+  return {
+    base: { ...base, system },
+    systemAppend,
+    ...(notice && update.notice !== null ? { instructionNotice: update.notice } : {}),
+  };
+};
+
+export const makeSample = (
+  testCase: McpToolUseCase,
+  templateBase: Base,
+  options?: { readonly instructionNotice?: boolean | undefined },
+): Sample => {
+  const resumed = resumedSession(
+    testCase,
+    withThreadCwd(templateBase, testCase.setup.threadCwd),
+    options?.instructionNotice !== false,
+  );
+  const base = resumed.base;
   const prior = testCase.setup.priorTurns ?? [];
   const priorCalls = prior.flatMap((turn) => turn.toolCalls ?? []);
   const repo = testCase.setup.world?.repo ?? "acme/app";
@@ -1053,6 +1123,7 @@ export const makeSample = (testCase: McpToolUseCase, templateBase: Base): Sample
     .filter((call) => SHELL_TOOLS.has(call.tool))
     .map(({ tool, input, result }) => ({ tool, input, output: valueText(result) }));
   return {
+    ...resumed,
     testCase,
     base,
     tools: [...base.nativeTools],
@@ -1261,7 +1332,11 @@ export const buildMessages = (sample: Sample) => {
   const prompt = inlineContext === "" ? userText : withInlineContext(inlineContext, userText);
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
   if (testCase.prompt !== "")
-    push("user", text(role === "delegated-child" ? childPrompt() : prompt));
+    push(
+      "user",
+      ...(sample.instructionNotice === undefined ? [] : [text(sample.instructionNotice)]),
+      text(role === "delegated-child" ? childPrompt() : prompt),
+    );
   // Claude Code gives a subagent its SubagentStart hooks' context as a reminder after the task.
   if (native && base.subagentContext) {
     push("user", reminder(`SubagentStart hook additional context: ${base.subagentContext}`));
@@ -1793,6 +1868,8 @@ type Config = {
   readonly effort: string;
   readonly maxSteps: number;
   readonly shellModel: ShellModel;
+  /** false sends no instruction-update notice to resumed sessions, as T3 did before it had one. */
+  readonly instructionNotice?: boolean;
 };
 
 /**
@@ -2438,7 +2515,10 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
   templateBase: Base,
   spent: { readonly usage: Usage; readonly shellUsage: Usage },
 ) {
-  const sample = { ...makeSample(testCase, templateBase), shellUsage: spent.shellUsage };
+  const sample = {
+    ...makeSample(testCase, templateBase, { instructionNotice: config.instructionNotice }),
+    shellUsage: spent.shellUsage,
+  };
   const { base } = sample;
   yield* withDevices(sample);
   yield* withBackgroundWait(sample);
@@ -2620,12 +2700,13 @@ export const cliInvocation = (
       ? []
       : [
           "--append-system-prompt",
-          t3SystemAppend(
-            config.model,
-            world?.deviceAgentAccess !== false,
-            world?.browserAgentAccess !== false,
-            testCase.setup.questions !== undefined,
-          ),
+          sample.systemAppend ??
+            t3SystemAppend(
+              config.model,
+              world?.deviceAgentAccess !== false,
+              world?.browserAgentAccess !== false,
+              testCase.setup.questions !== undefined,
+            ),
         ];
   const args = [
     "--input-format",
@@ -2659,7 +2740,7 @@ export const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(functio
   spent: { readonly usage: Usage; readonly shellUsage: Usage; readonly cliCost: CliCost },
 ) {
   const sample = {
-    ...makeSample(testCase, templateBase),
+    ...makeSample(testCase, templateBase, { instructionNotice: config.instructionNotice }),
     shellUsage: spent.shellUsage,
     cliCost: spent.cliCost,
   };
@@ -2912,6 +2993,7 @@ const Flags = Schema.Struct({
   "user-instructions": Schema.Literals(["keep", "drop"]),
   transport: Schema.Literals(["api", "claude-cli"]),
   "dry-run": Schema.Boolean,
+  "without-instruction-notice": Schema.Boolean,
   "stop-on-regression": Schema.Boolean,
   "regression-budget": Schema.optional(PositiveIntOrZero),
   context: Schema.Boolean,
@@ -2954,6 +3036,8 @@ const main = Effect.gen(function* () {
       // claude-cli: Claude models on the local Claude login, no ANTHROPIC_API_KEY.
       transport: { ...string, default: "api" },
       "dry-run": { type: "boolean", default: false },
+      // Resumed-session cases as T3 ran them before it told resumed sessions about changes.
+      "without-instruction-notice": { type: "boolean", default: false },
       "stop-on-regression": { type: "boolean", default: false },
       "regression-budget": string,
       // Prints the size of T3's text and tool schemas, then exits. Needs no template or key.
@@ -3153,7 +3237,9 @@ const main = Effect.gen(function* () {
   if (flags["dry-run"]) {
     // One JSON line per case. Without --case this also checks that every case builds.
     for (const testCase of selected) {
-      const sample = makeSample(testCase, baseFor(testCase));
+      const sample = makeSample(testCase, baseFor(testCase), {
+        instructionNotice: !flags["without-instruction-notice"],
+      });
       yield* Effect.scoped(Effect.andThen(withDevices(sample), withBackgroundWait(sample)));
       if (cli) {
         const invocation =
@@ -3186,6 +3272,7 @@ const main = Effect.gen(function* () {
     effort,
     maxSteps,
     shellModel: flags["shell-model"],
+    instructionNotice: !flags["without-instruction-notice"],
   };
   const previous =
     flags.baseline === undefined ? [] : yield* readNdjson(flags.baseline, decodeBaselineRow);
