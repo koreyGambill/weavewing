@@ -865,9 +865,18 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    contextRewind: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({
+        title: "Let Codex rewind its context",
+        description:
+          "Offers the context_rewind_turn tool: Codex can replace everything it did since your last message with a summary it writes, and the thread keeps every item. Applies when a thread's Codex session next starts.",
+        providerSettingsForm: { control: "switch", clearWhenEmpty: "omit" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs", "contextRewind"],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;

@@ -407,6 +407,8 @@ export const ProviderAdapterContextRewindRefusal = Schema.Literals([
   "cut_not_found",
   "split_tool_call",
   "compacted",
+  "legacy_history",
+  "message_not_rebuildable",
 ]);
 export type ProviderAdapterContextRewindRefusal = typeof ProviderAdapterContextRewindRefusal.Type;
 
@@ -431,6 +433,10 @@ export function contextRewindRefusalMessage(reason: ProviderAdapterContextRewind
       return "That rewind would separate a kept tool call from its result. Nothing was removed; try again without tool_calls.";
     case "compacted":
       return "Your context was compacted after those tool calls, so they can no longer be removed. Nothing was removed.";
+    case "legacy_history":
+      return "This conversation's history format cannot drop a turn. Nothing was removed; carry on with the task.";
+    case "message_not_rebuildable":
+      return "The message that started this turn cannot be sent to you again exactly, so a rewind would change your task. Nothing was removed; carry on with the task.";
   }
 }
 
@@ -922,8 +928,11 @@ export class ProviderAdapterV2 extends Context.Service<
   {
     readonly instanceId: ProviderInstanceId;
     readonly driver: ProviderDriverKind;
-    /** This instance's settings turned on context rewind, so its sessions implement `rewindContext`. */
-    readonly offersContextRewind?: true;
+    /**
+     * This instance's settings turned on context rewind, so its sessions implement `rewindContext`.
+     * `tool_calls` cuts back a chosen number of tool calls; `turn` removes the whole provider turn.
+     */
+    readonly offersContextRewind?: "tool_calls" | "turn";
     readonly getCapabilities: () => Effect.Effect<
       OrchestrationV2ProviderCapabilities,
       ProviderAdapterV2Error

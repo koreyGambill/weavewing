@@ -592,10 +592,11 @@ export const layerWithOptions = (
                   Option.isSome(lineage) && !lineage.value && (yield* agentQuestionsEnabled);
                 if (questionTools) capabilities.add("questions");
                 const contextRewind = yield* registry.get(providerInstanceId).pipe(
-                  Effect.map((adapter) => adapter.offersContextRewind === true),
-                  Effect.orElseSucceed(() => false),
+                  Effect.map((adapter) => adapter.offersContextRewind),
+                  Effect.orElseSucceed(() => undefined),
                 );
-                if (contextRewind) capabilities.add("context-rewind");
+                if (contextRewind === "tool_calls") capabilities.add("context-rewind");
+                if (contextRewind === "turn") capabilities.add("context-rewind-turn");
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.
@@ -618,7 +619,8 @@ export const layerWithOptions = (
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable &&
                     resolved.capabilities.has("questions") === questionTools &&
-                    resolved.capabilities.has("context-rewind") === contextRewind &&
+                    resolved.capabilities.has("context-rewind") === (contextRewind === "tool_calls") &&
+                    resolved.capabilities.has("context-rewind-turn") === (contextRewind === "turn") &&
                     // A credential issued while the lineage read failed is replaced once it works.
                     (resolved.thread.subagent === true) === subagent
                   ) {

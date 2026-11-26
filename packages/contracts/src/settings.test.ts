@@ -12,6 +12,7 @@ import {
   ClientSettingsPatch,
   ClientServerSettingsPatch,
   ClaudeSettings,
+  CodexSettings,
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
@@ -43,6 +44,7 @@ const decodeClientServerSettingsPatch = Schema.decodeUnknownSync(ClientServerSet
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 
 it("keeps remote media opt-in and accepts changes in both directions", () => {
   expect(decodeServerSettings({}).autoLoadRemoteMedia).toBe(false);
@@ -610,6 +612,11 @@ it("ignores a stored client setting this build removed and keeps the rest", () =
 it("turns Claude's context rewind on unless a user turns it off", () => {
   expect(decodeClaudeSettings({}).contextRewind).toBe(true);
   expect(decodeClaudeSettings({ contextRewind: false }).contextRewind).toBe(false);
+});
+
+it("turns Codex's context rewind on unless a user turns it off", () => {
+  expect(decodeCodexSettings({}).contextRewind).toBe(true);
+  expect(decodeCodexSettings({ contextRewind: false }).contextRewind).toBe(false);
 });
 
 describe("Claude omitted built-in tools", () => {

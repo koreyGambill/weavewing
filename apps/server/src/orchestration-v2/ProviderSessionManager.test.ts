@@ -445,7 +445,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   state: Ref.Ref<TestProviderRuntimeState>,
   options: {
     readonly failEventStream?: boolean;
-    readonly offersContextRewind?: true;
+    readonly offersContextRewind?: "tool_calls" | "turn";
     readonly normalizeThreadLoadModelSelection?: (selection: ModelSelection) => ModelSelection;
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly extensionStatuses?: OrchestrationV2ProviderSession["extensionStatuses"];
@@ -490,7 +490,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: ProviderInstanceId.make("codex"),
     driver: CODEX_DRIVER,
-    ...(options.offersContextRewind ? { offersContextRewind: true as const } : {}),
+    ...(options.offersContextRewind ? { offersContextRewind: options.offersContextRewind } : {}),
     getCapabilities: () => Effect.succeed(options.capabilities ?? CodexCapabilities),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
@@ -620,7 +620,7 @@ function layerTest(input: {
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
   readonly failEventStream?: boolean;
-  readonly offersContextRewind?: true;
+  readonly offersContextRewind?: "tool_calls" | "turn";
   readonly normalizeThreadLoadModelSelection?: (selection: ModelSelection) => ModelSelection;
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
   readonly extensionStatuses?: OrchestrationV2ProviderSession["extensionStatuses"];
@@ -671,7 +671,7 @@ function layerTest(input: {
   const layerRegistry = Layer.unwrap(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
-      ...(input.offersContextRewind ? { offersContextRewind: true as const } : {}),
+      ...(input.offersContextRewind ? { offersContextRewind: input.offersContextRewind } : {}),
       ...(input.normalizeThreadLoadModelSelection === undefined
         ? {}
         : { normalizeThreadLoadModelSelection: input.normalizeThreadLoadModelSelection }),
@@ -2746,9 +2746,13 @@ it.effect(
     }),
 );
 
-it.effect.each([true, false])(
-  "ProviderSessionManagerV2 grants context rewind only when the adapter offers it (%s)",
-  (offered) =>
+it.effect.each([
+  { offered: "tool_calls", granted: "context-rewind" },
+  { offered: "turn", granted: "context-rewind-turn" },
+  { offered: undefined, granted: undefined },
+] as const)(
+  "ProviderSessionManagerV2 grants the context rewind capability the adapter offers ($offered)",
+  ({ offered, granted }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2782,11 +2786,12 @@ it.effect.each([true, false])(
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
-            ...(offered ? { offersContextRewind: true as const } : {}),
+            ...(offered === undefined ? {} : { offersContextRewind: offered }),
           }),
         ),
       );
-      assert.equal(capabilities?.has("context-rewind"), offered);
+      assert.equal(capabilities?.has("context-rewind"), granted === "context-rewind");
+      assert.equal(capabilities?.has("context-rewind-turn"), granted === "context-rewind-turn");
     }),
 );
 
