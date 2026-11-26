@@ -7,7 +7,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   claudeSettingsForInstance,
+  connectorsDescription,
   connectorsOn,
+  connectorsPartial,
   EMPTY_TOOL_OVERRIDES,
   mcpServerSections,
   threadTurnRunning,
@@ -269,6 +271,12 @@ describe("MCP servers", () => {
     ]);
   });
 
+  // A group as the popover builds it: the thread's saved tools default to the provider's.
+  const group = (
+    provider: typeof defaults | typeof connectorsDefaultOn,
+    saved: ThreadToolOverrides = EMPTY_TOOL_OVERRIDES,
+  ) => ({ provider, saved, names: connectorNames });
+
   it("switching one connector on with the group off turns the group on for it alone", () => {
     for (const provider of [defaults, connectorsDefaultOn]) {
       const groupOff = provider === defaults ? EMPTY_TOOL_OVERRIDES : connectorsForcedOff;
@@ -276,8 +284,7 @@ describe("MCP servers", () => {
         groupOff,
         "claude.ai Fixture Board",
         true,
-        provider,
-        connectorNames,
+        group(provider, groupOff),
       );
       expect(connectorsOn(provider, staged)).toBe(true);
       expect(staged.omittedMcpServers).toEqual(["claude.ai Fixture Mail"]);
@@ -291,19 +298,64 @@ describe("MCP servers", () => {
   it("switching the group back to the provider default clears the thread's setting", () => {
     for (const provider of [defaults, connectorsDefaultOn]) {
       const defaultOn = provider.claudeAiConnectors === "on";
-      const away = withConnectorsMaster(EMPTY_TOOL_OVERRIDES, !defaultOn, provider, connectorNames);
+      const away = withConnectorsMaster(EMPTY_TOOL_OVERRIDES, !defaultOn, group(provider));
       expect(away.claudeAiConnectors).toBe(defaultOn ? "off" : "on");
-      const back = withConnectorsMaster(away, defaultOn, provider, connectorNames);
+      // Saved away from the default, then switched back: the thread follows the default again.
+      const back = withConnectorsMaster(away, defaultOn, group(provider, away));
       expect(back.claudeAiConnectors).toBe("default");
     }
   });
 
-  it("leaves a server out by name and brings it back", () => {
-    const off = withMcpServerSwitched(EMPTY_TOOL_OVERRIDES, "fixture-notes", false, defaults);
-    expect(off.omittedMcpServers).toEqual(["fixture-notes"]);
-    expect(withMcpServerSwitched(off, "fixture-notes", true, defaults).omittedMcpServers).toEqual(
-      [],
+  it("restores a saved explicit setting when the group is switched away and back unsaved", () => {
+    // Saved on for the thread, and the provider default later changed to match it.
+    const saved = { ...EMPTY_TOOL_OVERRIDES, claudeAiConnectors: "on" } as const;
+    const connectors = group(connectorsDefaultOn, saved);
+    const off = withConnectorsMaster(saved, false, connectors);
+    expect(off.claudeAiConnectors).toBe("off");
+    const back = withConnectorsMaster(off, true, connectors);
+    expect(back.claudeAiConnectors).toBe("on");
+    expect(
+      toolsFooterState({
+        provider: connectorsDefaultOn,
+        rows: toolRows(connectorsDefaultOn),
+        saved,
+        staged: back,
+        ordinaryServerNames: [],
+        turnRunning: false,
+        backgroundWork: false,
+      }).kind,
+    ).toBe("unchanged");
+  });
+
+  it("describes what the group has on and where that comes from", () => {
+    const connectors = group(connectorsDefaultOn);
+    const partial = { ...EMPTY_TOOL_OVERRIDES, omittedMcpServers: ["claude.ai Fixture Mail"] };
+    expect(connectorsDescription(connectors, EMPTY_TOOL_OVERRIDES, false)).toBe(
+      "All 2 connectors on; follows the provider default",
     );
+    expect(connectorsDescription(connectors, partial, false)).toBe(
+      "1 of 2 connectors on; follows the provider default",
+    );
+    expect(connectorsPartial(connectors, partial)).toBe(true);
+    expect(connectorsDescription(connectors, connectorsForcedOff, true)).toBe(
+      "Connectors off, individual choices reset; set for this thread",
+    );
+    expect(connectorsDescription({ ...connectors, names: [] }, EMPTY_TOOL_OVERRIDES, false)).toBe(
+      "Connectors on; follows the provider default",
+    );
+  });
+
+  it("leaves a server out by name and brings it back", () => {
+    const off = withMcpServerSwitched(
+      EMPTY_TOOL_OVERRIDES,
+      "fixture-notes",
+      false,
+      group(defaults),
+    );
+    expect(off.omittedMcpServers).toEqual(["fixture-notes"]);
+    expect(
+      withMcpServerSwitched(off, "fixture-notes", true, group(defaults)).omittedMcpServers,
+    ).toEqual([]);
     expect(mcpServerSections({ inventory, provider: defaults, staged: off }).servers).toEqual([
       { name: "fixture-notes", active: false, on: false },
     ]);
@@ -313,8 +365,7 @@ describe("MCP servers", () => {
     const staged = withConnectorsMaster(
       { ...wakeupAndConnectors, omittedMcpServers: ["fixture-notes", "claude.ai Fixture Mail"] },
       false,
-      defaults,
-      connectorNames,
+      group(defaults),
     );
     expect(connectorsOn(defaults, staged)).toBe(false);
     expect(staged.omittedMcpServers).toEqual(["fixture-notes"]);

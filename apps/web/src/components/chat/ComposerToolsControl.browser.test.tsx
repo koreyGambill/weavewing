@@ -309,6 +309,46 @@ it("lists MCP servers only once open, and picks one connector in a single step",
   });
 });
 
+it("keeps a saved explicit setting when the group is switched off and back on unsaved", async () => {
+  setup();
+  // Saved on for the thread, and the provider default later changed to match it.
+  await using screen = await renderControl(
+    {
+      ...idleThread,
+      toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors: "on", omittedMcpServers: [] },
+    },
+    { ...provider, claudeAiConnectors: "on" },
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Tools 1 on · 7 off/ }));
+  const dialog = dialogOf();
+  const group = dialog.getByRole("switch", { name: /claude\.ai connectors/ });
+  await expect.element(dialog.getByText(/set for this thread/)).toBeVisible();
+  await userEvent.click(group);
+  await userEvent.click(group);
+  await expect.element(group).toBeChecked();
+  await expect.element(dialog.getByText(/set for this thread/)).toBeVisible();
+  await expect.element(dialog.getByText("Nothing changed")).toBeVisible();
+});
+
+it("counts a partial connector selection and says switching the group off resets it", async () => {
+  setup();
+  await using screen = await renderControl(idleThread, { ...provider, claudeAiConnectors: "on" });
+  await userEvent.click(screen.getByRole("button", { name: /Tools 1 on · 7 off/ }));
+  const dialog = dialogOf();
+  await expect
+    .element(dialog.getByText("All 2 connectors on; follows the provider default"))
+    .toBeVisible();
+  const connectors = page.getByRole("list", { name: "claude.ai connectors" });
+  await userEvent.click(connectors.getByRole("switch").first());
+  await expect
+    .element(dialog.getByText("1 of 2 connectors on; follows the provider default"))
+    .toBeVisible();
+  await userEvent.click(dialog.getByRole("switch", { name: /claude\.ai connectors/ }));
+  await expect
+    .element(dialog.getByText("Connectors off, individual choices reset; set for this thread"))
+    .toBeVisible();
+});
+
 it("follows an On default, turns the connectors off for the thread, and back clears it", async () => {
   setup();
   await using screen = await renderControl(idleThread, { ...provider, claudeAiConnectors: "on" });

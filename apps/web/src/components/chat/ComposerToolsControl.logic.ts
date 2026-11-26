@@ -81,14 +81,66 @@ export function connectorsOn(
   return thread === "default" ? provider.claudeAiConnectors === "on" : thread === "on";
 }
 
-// Choosing the provider's default clears the thread's setting, so a later default still reaches it.
+/** What switching the claude.ai connectors needs besides the staged tools. */
+export interface ConnectorsGroup {
+  readonly provider: ConnectorsProvider;
+  /** The thread's saved tools, which switching back to their value restores exactly. */
+  readonly saved: ThreadToolOverrides;
+  /** The connectors the inventory names; empty until it loads. */
+  readonly names: ReadonlyArray<string>;
+}
+
+// Back to the saved value keeps the saved setting, so an unsaved round trip changes nothing;
+// otherwise the provider's default clears the thread's setting, so a later default reaches it.
 function withConnectorsGroup(
-  provider: ConnectorsProvider,
+  group: ConnectorsGroup,
   staged: ThreadToolOverrides,
   on: boolean,
 ): ThreadToolOverrides {
-  const followsDefault = on === (provider.claudeAiConnectors === "on");
-  return { ...staged, claudeAiConnectors: followsDefault ? "default" : on ? "on" : "off" };
+  const claudeAiConnectors =
+    on === connectorsOn(group.provider, group.saved)
+      ? group.saved.claudeAiConnectors
+      : on === (group.provider.claudeAiConnectors === "on")
+        ? "default"
+        : on
+          ? "on"
+          : "off";
+  return { ...staged, claudeAiConnectors };
+}
+
+/** Whether the group is on with some of its named connectors left out. */
+export function connectorsPartial(group: ConnectorsGroup, staged: ThreadToolOverrides): boolean {
+  return (
+    connectorsOn(group.provider, staged) &&
+    group.names.some((name) => staged.omittedMcpServers.includes(name))
+  );
+}
+
+/**
+ * The group's description: what is on, then whether the thread follows the provider default.
+ * `reset` says that switching the group off cleared the connectors chosen one by one.
+ */
+export function connectorsDescription(
+  group: ConnectorsGroup,
+  staged: ThreadToolOverrides,
+  reset: boolean,
+): string {
+  const on = connectorsOn(group.provider, staged);
+  const onCount = group.names.filter((name) => !staged.omittedMcpServers.includes(name)).length;
+  const state = !on
+    ? reset
+      ? "Connectors off, individual choices reset"
+      : "Connectors off"
+    : group.names.length === 0
+      ? "Connectors on"
+      : onCount === group.names.length
+        ? `All ${group.names.length} connectors on`
+        : `${onCount} of ${group.names.length} connectors on`;
+  const source =
+    staged.claudeAiConnectors === "default"
+      ? "follows the provider default"
+      : "set for this thread";
+  return `${state}; ${source}`;
 }
 
 /**
@@ -229,22 +281,21 @@ export function mcpServerSections(input: {
 }
 
 /**
- * Switching one of `connectorNames` on while the group is off turns the group on for it alone,
- * leaving the other connectors out.
+ * Switching one of the group's connectors on while the group is off turns the group on for it
+ * alone, leaving the other connectors out.
  */
 export function withMcpServerSwitched(
   staged: ThreadToolOverrides,
   server: string,
   on: boolean,
-  provider: ConnectorsProvider,
-  connectorNames: ReadonlyArray<string> = [],
+  group: ConnectorsGroup,
 ): ThreadToolOverrides {
-  if (on && connectorNames.includes(server) && !connectorsOn(provider, staged)) {
+  if (on && group.names.includes(server) && !connectorsOn(group.provider, staged)) {
     return {
-      ...withConnectorsGroup(provider, staged, true),
+      ...withConnectorsGroup(group, staged, true),
       omittedMcpServers: [
-        ...staged.omittedMcpServers.filter((name) => !connectorNames.includes(name)),
-        ...connectorNames.filter((name) => name !== server),
+        ...staged.omittedMcpServers.filter((name) => !group.names.includes(name)),
+        ...group.names.filter((name) => name !== server),
       ],
     };
   }
@@ -256,14 +307,13 @@ export function withMcpServerSwitched(
 export function withConnectorsMaster(
   staged: ThreadToolOverrides,
   on: boolean,
-  provider: ConnectorsProvider,
-  connectorNames: ReadonlyArray<string>,
+  group: ConnectorsGroup,
 ): ThreadToolOverrides {
-  const next = withConnectorsGroup(provider, staged, on);
+  const next = withConnectorsGroup(group, staged, on);
   return on
     ? next
     : {
         ...next,
-        omittedMcpServers: next.omittedMcpServers.filter((name) => !connectorNames.includes(name)),
+        omittedMcpServers: next.omittedMcpServers.filter((name) => !group.names.includes(name)),
       };
 }

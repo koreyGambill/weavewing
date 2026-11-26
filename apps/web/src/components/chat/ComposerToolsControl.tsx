@@ -34,7 +34,10 @@ import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRowItems"
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   claudeSettingsForInstance,
+  connectorsDescription,
   connectorsOn,
+  connectorsPartial,
+  type ConnectorsGroup,
   mcpServerSections,
   withConnectorsMaster,
   withMcpServerSwitched,
@@ -270,6 +273,7 @@ function ToolsPopoverContent({
           inventory={inventory}
           onRetry={retryInventory}
           provider={provider}
+          saved={saved}
           staged={staged}
           onStage={onStage}
         />
@@ -290,6 +294,7 @@ function McpServersSection({
   inventory,
   onRetry,
   provider,
+  saved,
   staged,
   onStage,
 }: {
@@ -297,11 +302,16 @@ function McpServersSection({
   inventory: AsyncResult.AsyncResult<OrchestrationV2ListThreadMcpServersResult, unknown>;
   onRetry: () => void;
   provider: Pick<ClaudeSettings, "claudeAiConnectors">;
+  saved: ThreadToolOverrides;
   staged: ThreadToolOverrides;
   onStage: (value: ThreadToolOverrides) => void;
 }) {
   const servers = AsyncResult.isSuccess(inventory) ? inventory.value.servers : [];
-  const connectorNames = servers.filter((server) => server.connector).map((server) => server.name);
+  const group: ConnectorsGroup = {
+    provider,
+    saved,
+    names: servers.filter((server) => server.connector).map((server) => server.name),
+  };
   const sections = mcpServerSections({ inventory: servers, provider, staged });
   return (
     <section className="border-t" aria-label="MCP servers">
@@ -331,17 +341,12 @@ function McpServersSection({
             <McpServerSwitchRow
               key={row.name}
               row={row}
-              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on, provider))}
+              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on, group))}
             />
           ))}
         </ul>
       )}
-      <ConnectorsMaster
-        provider={provider}
-        staged={staged}
-        onStage={onStage}
-        connectorNames={connectorNames}
-      />
+      <ConnectorsMaster group={group} staged={staged} onStage={onStage} />
       {sections.connectors.length === 0 ? null : (
         <ul aria-label="claude.ai connectors" className="pb-1">
           {sections.connectors.map((row) => (
@@ -349,9 +354,7 @@ function McpServersSection({
               key={row.name}
               row={row}
               nested
-              onChange={(on) =>
-                onStage(withMcpServerSwitched(staged, row.name, on, provider, connectorNames))
-              }
+              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on, group))}
             />
           ))}
         </ul>
@@ -361,28 +364,27 @@ function McpServersSection({
 }
 
 function ConnectorsMaster({
-  provider,
+  group,
   staged,
   onStage,
-  connectorNames,
 }: {
-  provider: Pick<ClaudeSettings, "claudeAiConnectors">;
+  group: ConnectorsGroup;
   staged: ThreadToolOverrides;
   onStage: (value: ThreadToolOverrides) => void;
-  connectorNames: ReadonlyArray<string>;
 }) {
+  // Set when switching off drops connectors chosen one by one, so the user sees it before saving.
+  const [reset, setReset] = useState(false);
   return (
     <div className="border-t">
       <ToolSwitchRow
         label="claude.ai connectors"
-        description={
-          staged.claudeAiConnectors === "default"
-            ? "Every connector on your Claude account; follows the provider default"
-            : "Every connector on your Claude account; set for this thread"
-        }
+        description={connectorsDescription(group, staged, reset)}
         estimatedTokens={CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS}
-        on={connectorsOn(provider, staged)}
-        onChange={(on) => onStage(withConnectorsMaster(staged, on, provider, connectorNames))}
+        on={connectorsOn(group.provider, staged)}
+        onChange={(on) => {
+          setReset(!on && connectorsPartial(group, staged));
+          onStage(withConnectorsMaster(staged, on, group));
+        }}
         asListItem={false}
       />
     </div>
