@@ -4735,7 +4735,7 @@ export class OrchestrationV2RewindWithSummaryError extends Schema.TaggedError<Or
   {
     threadId: ThreadId,
     /**
-     * `refused`: the thread or point cannot rewind, and `detail` says why. `summary-failed`: the
+     * `refused`: the thread or point cannot rewind, and `detail` gives the refusal. `summary-failed`: the
      * summary turn did not finish with a reply. `rewind-failed`: the summary exists but the rewind
      * did not apply. The conversation is unchanged in every case.
      */
@@ -4751,7 +4751,7 @@ export class OrchestrationV2RewindWithSummaryError extends Schema.TaggedError<Or
       case "summary-failed":
         return "The agent did not finish its summary, so nothing was rewound. Its summary turn stays in the thread.";
       case "rewind-failed":
-        return `The summary is written, but the rewind did not apply${this.detail === undefined ? "" : `: ${this.detail}`}. The summary turn stays in the thread.`;
+        return "The summary is written, but the conversation changed before the rewind could apply, so nothing was rewound. The summary turn stays in the thread.";
     }
   }
 }

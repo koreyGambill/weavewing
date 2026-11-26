@@ -1978,15 +1978,7 @@ const make = Effect.gen(function* () {
         sideChat: true,
         rewindSummary: { runId: run.id, messageId: summary.messageId, text: summary.text.trim() },
       }).pipe(
-        Effect.mapError((cause) =>
-          fail(
-            "rewind-failed",
-            cause._tag === "OrchestratorDispatchError" && typeof cause.cause === "string"
-              ? cause.cause
-              : undefined,
-            cause,
-          ),
-        ),
+        Effect.mapError((cause) => fail("rewind-failed", undefined, cause)),
       );
       return { archiveThreadId, summarizedTurns: turns };
     }).pipe(
