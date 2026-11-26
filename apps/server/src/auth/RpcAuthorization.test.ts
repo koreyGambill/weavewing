@@ -59,6 +59,7 @@ describe("RPC authorization scopes", () => {
     );
     for (const method of [
       ORCHESTRATION_V2_WS_METHODS.prepareSummaryHandoff,
+      ORCHESTRATION_V2_WS_METHODS.rewindWithSummary,
       WS_METHODS.threadListUpdate,
       WS_METHODS.threadListRewrite,
       WS_METHODS.threadArtifactWrite,
