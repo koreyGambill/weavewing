@@ -1,6 +1,7 @@
 import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
 
 import type { AgentActivityProps } from "./AgentActivity";
+import { APP_BASE_NAME } from "../lib/mobileBranding";
 
 // The widget only refreshes while the app is open, so after this long it stops
 // claiming an agent is still working. Matches the Live Activity's stale date.
@@ -16,7 +17,7 @@ export function agentActivityWidgetTimeline(source: AgentActivityWidgetSource, n
   const updatedAt = new Date(now).toISOString();
   if (source.kind !== "snapshot" || !source.aggregate) {
     const props: AgentActivityProps = {
-      title: "T3 Code",
+      title: APP_BASE_NAME,
       subtitle:
         source.kind === "signed-out"
           ? "Sign in to T3 Connect to see agents"

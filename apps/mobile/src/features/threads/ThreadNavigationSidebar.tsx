@@ -80,6 +80,7 @@ import {
 } from "./threadListV2";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
 
 type SidebarListItem =
   | ThreadListV2ListItem
@@ -530,7 +531,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   };
   const header = (
     <WorkspaceListHeader
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel={`${APP_BASE_NAME}, Threads`}
       onOpenEnvironments={props.onOpenEnvironmentSettings}
       onOpenSettings={props.onOpenSettings}
       search={{

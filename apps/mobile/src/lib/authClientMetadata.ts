@@ -7,6 +7,7 @@ export function authClientMetadata(appVersion?: string): AuthClientPresentationM
   const deviceModel = Device.modelName?.trim();
 
   return {
+    // Servers store this label and quote it in triage prompts; clients brand it when they render it.
     label: "T3 Code Mobile",
     deviceType:
       Device.deviceType === Device.DeviceType.TABLET

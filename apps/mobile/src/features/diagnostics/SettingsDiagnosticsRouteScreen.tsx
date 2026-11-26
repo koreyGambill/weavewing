@@ -26,6 +26,7 @@ import {
   parseStartupCrashRecords,
   type StartupCrashRecord,
 } from "./crash-log-model";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
 
 // expo-updates retains only seven days of logs.
 const LOG_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -189,8 +190,8 @@ function CrashReportsSetting() {
       </SettingsSection>
       <Text className="px-2 text-sm leading-normal text-foreground-muted">
         When the app crashes or hits an error, it sends the error message, the stack trace, the app
-        version, and the device model and OS version to the T3 Code team. Each launch also sends
-        startup timings. Reports carry a random ID for this install.
+        version, and the device model and OS version to the {APP_BASE_NAME} team. Each launch also
+        sends startup timings. Reports carry a random ID for this install.
       </Text>
     </View>
   );

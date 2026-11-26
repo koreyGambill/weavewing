@@ -16,6 +16,7 @@ import { useSelectedThreadGitState } from "../../../state/use-selected-thread-gi
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { vcsEnvironment } from "../../../state/vcs";
 import { SheetActionButton } from "./gitSheetComponents";
+import { APP_BASE_NAME } from "../../../lib/mobileBranding";
 
 type GitBranchesSheetProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -96,7 +97,7 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
       <FormSection title="New worktree">
         {worktreeProvider === "t3" ? null : (
           <Text className="text-sm text-foreground-secondary">
-            This machine's Isolated checkouts setting does not allow T3 worktrees.
+            This machine's Isolated checkouts setting does not allow {APP_BASE_NAME} worktrees.
           </Text>
         )}
         <FormField

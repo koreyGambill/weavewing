@@ -1,4 +1,4 @@
-# T3 Code Mobile
+# Weavewing Mobile
 
 > [!NOTE]
 > To install the released app from the App Store or Google Play, see [Mobile app](../../docs/user/install.md#mobile-app). This guide covers building it from source.

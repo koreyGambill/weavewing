@@ -101,7 +101,7 @@ function subscriptionUsageProps(
         return {
           name,
           detail: !fresh
-            ? "Open T3 to refresh"
+            ? "Open Weavewing to refresh"
             : pool.accounts.length > 1
               ? `${pool.accounts.length} accounts · pooled`
               : "Subscription remaining",
@@ -168,7 +168,7 @@ export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, n
       ...snapshot,
       providers: snapshot.providers.map((provider) =>
         provider.windows.length > 0 && provider.expiresAt <= date
-          ? { ...provider, detail: "Open T3 to refresh", windows: [], totalWindows: 0 }
+          ? { ...provider, detail: "Open Weavewing to refresh", windows: [], totalWindows: 0 }
           : provider,
       ),
     },

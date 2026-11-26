@@ -11,6 +11,7 @@ import {
   workspaceListFilterIcon,
   type WorkspaceListHeaderProps,
 } from "./WorkspaceListHeader.types";
+import { APP_BASE_NAME } from "../../../lib/mobileBranding";
 
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
   const navigation = useNavigation();
@@ -58,7 +59,7 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
 
   return (
     <AppBar
-      title="T3 Code"
+      title={APP_BASE_NAME}
       titleContent={
         <WorkspaceBrandTitle
           accessibilityLabel={props.accessibilityLabel}

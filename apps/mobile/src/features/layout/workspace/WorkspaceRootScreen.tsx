@@ -41,6 +41,7 @@ import {
   useSystemWorkspaceTabBar,
 } from "./useSystemWorkspaceTabBar";
 import { openSettings } from "../../settings/settings-navigation";
+import { APP_BASE_NAME } from "../../../lib/mobileBranding";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -59,7 +60,7 @@ function WorkspaceRootTitle(props: {
   return (
     <View style={{ width: maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
-        brand={<CompactBrandTitle accessibilityLabel={`T3 Code, ${tabTitle}`} fit />}
+        brand={<CompactBrandTitle accessibilityLabel={`${APP_BASE_NAME}, ${tabTitle}`} fit />}
         maxWidth={maxWidth}
         onPress={props.onOpenEnvironments}
       />

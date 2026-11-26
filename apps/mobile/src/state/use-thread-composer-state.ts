@@ -121,6 +121,7 @@ import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
+import { APP_BASE_NAME } from "../lib/mobileBranding";
 
 const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null).pipe(
   Atom.withLabel("mobile-thread-queue-workflow:empty"),
@@ -809,7 +810,7 @@ export function useThreadComposerState(input: {
       return "Side chats are not ready yet. Try again in a moment.";
     }
     if (serverConfig.environment.capabilities.sideChats !== true) {
-      return "Update this environment's T3 Code server to use side chats.";
+      return `Update this environment's ${APP_BASE_NAME} server to use side chats.`;
     }
     if (selectedThreadCreation !== null) return "Side chats start after the first message.";
     if (

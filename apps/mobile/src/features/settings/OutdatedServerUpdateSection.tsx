@@ -20,6 +20,8 @@ import {
   releaseCheckError,
   releaseCheckValue,
 } from "./environmentUpdateCheck";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
+import { serverUpdateFailureCopy } from "./serverUpdateFailureCopy";
 
 export function OutdatedServerUpdateSection({
   environmentId,
@@ -36,7 +38,8 @@ export function OutdatedServerUpdateSection({
   const checking = checkResult.waiting;
   // Starting an update replaces a failed check's message with the update's own state.
   const [checkErrorDismissed, setCheckErrorDismissed] = useState(false);
-  const error = checkErrorDismissed ? null : releaseCheckError(checkResult);
+  const checkError = checkErrorDismissed ? null : releaseCheckError(checkResult);
+  const error = checkError === null ? null : serverUpdateFailureCopy(checkError);
   const busy = checking || state.status === "running";
 
   function check() {
@@ -54,7 +57,7 @@ export function OutdatedServerUpdateSection({
     if (busy || !release || !targetVersion) return;
     Dialog.alert(
       `Update ${label}?`,
-      `Install T3 Code ${targetVersion}. T3 Code restarts on that machine and reconnects. Running threads may be interrupted.`,
+      `Install ${APP_BASE_NAME} ${targetVersion}. ${APP_BASE_NAME} restarts on that machine and reconnects. Running threads may be interrupted.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -73,7 +76,7 @@ export function OutdatedServerUpdateSection({
   }
 
   return (
-    <SettingsSection title="T3 Code">
+    <SettingsSection title={APP_BASE_NAME}>
       <View className="gap-1 p-4">
         <Text className="text-base text-foreground">
           {release ? `Version ${release.fromVersion}` : "Update required"}
@@ -89,11 +92,11 @@ export function OutdatedServerUpdateSection({
               ? release.targetVersion
                 ? `Version ${release.targetVersion} is available.`
                 : "No newer version is available yet."
-              : "This app needs a newer version of T3 Code on this machine."}
+              : `This app needs a newer version of ${APP_BASE_NAME} on this machine.`}
         </Text>
         {error || state.status === "failed" ? (
           <Text selectable accessibilityRole="alert" className="text-sm text-danger-foreground">
-            {error ?? (state.status === "failed" ? state.message : null)}
+            {error ?? (state.status === "failed" ? serverUpdateFailureCopy(state.message) : null)}
           </Text>
         ) : null}
       </View>

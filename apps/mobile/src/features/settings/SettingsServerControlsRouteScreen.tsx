@@ -46,6 +46,7 @@ import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 import { isSourceControlProviderOffered } from "@t3tools/client-runtime/operations/projects";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
 
 type SettingsPage = "threads" | "source-control" | "worktrees" | "maintenance";
 
@@ -81,7 +82,11 @@ const WORKTREE_PROVIDER_CHOICES: ReadonlyArray<{
   readonly label: string;
   readonly description: string;
 }> = [
-  { provider: "t3", label: "T3 worktrees", description: "T3 creates a worktree for each one." },
+  {
+    provider: "t3",
+    label: `${APP_BASE_NAME} worktrees`,
+    description: `${APP_BASE_NAME} creates a worktree for each one.`,
+  },
   {
     provider: "xwing",
     label: "Xwing environments",

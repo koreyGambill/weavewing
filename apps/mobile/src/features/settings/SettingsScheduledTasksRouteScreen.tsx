@@ -98,6 +98,7 @@ import {
   formatNextScheduledTaskRun,
   formatScheduledTaskInterval,
 } from "./scheduledTaskPresentation";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
 
 type ScheduledTaskRoutes = {
   SettingsScheduledTaskNew: undefined;
@@ -784,7 +785,7 @@ function TaskForm({
     if (draft.schedule.mode === "once" && !offersOnce) {
       Dialog.alert(
         "Once is not available here",
-        "This environment runs an older T3 Code. Update it to schedule a one-time task, or pick another schedule.",
+        `This environment runs an older version of ${APP_BASE_NAME}. Update it to schedule a one-time task, or pick another schedule.`,
       );
       return;
     }

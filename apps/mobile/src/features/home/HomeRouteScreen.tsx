@@ -40,6 +40,7 @@ import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspace
 import { WorkspaceListEmptyDetail } from "../layout/workspace/WorkspaceListEmptyDetail";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 import { buildHomeListFilterMenuItems, homeListFilterEnvironments } from "./home-list-filter-menu";
+import { APP_BASE_NAME } from "../../lib/mobileBranding";
 
 export function HomeRouteScreen() {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
@@ -158,7 +159,7 @@ export function HomeRouteScreen() {
     <AndroidHomeFabLayout onStartNewTask={startNewTask}>
       <>
         <WorkspaceListHeader
-          accessibilityLabel="T3 Code, Threads"
+          accessibilityLabel={`${APP_BASE_NAME}, Threads`}
           onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
           search={{
             value: searchQuery,

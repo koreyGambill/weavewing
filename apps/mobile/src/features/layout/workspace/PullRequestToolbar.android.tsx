@@ -8,6 +8,7 @@ import { WorkspaceBrandTitle } from "./WorkspaceBrandTitle";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import type { PullRequestFilterMenu } from "../../pull-requests/PullRequestListFilters";
 import { openSettings } from "../../settings/settings-navigation";
+import { APP_BASE_NAME } from "../../../lib/mobileBranding";
 
 /** PR search shares the thread list's Android header. */
 export function PullRequestToolbar(props: {
@@ -54,10 +55,10 @@ export function PullRequestToolbar(props: {
   }, [searching, closeSearch, navigation, isTabActive]);
   return (
     <AppBar
-      title="T3 Code"
+      title={APP_BASE_NAME}
       titleContent={
         <WorkspaceBrandTitle
-          accessibilityLabel="T3 Code, Pull requests"
+          accessibilityLabel={`${APP_BASE_NAME}, Pull requests`}
           onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
         />
       }
