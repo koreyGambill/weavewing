@@ -13,6 +13,7 @@ import { act, render } from "../../../test/render";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 const state = vi.hoisted(() => ({
   get: vi.fn(),
+  fetch: vi.fn(),
   settings: vi.fn(),
   save: vi.fn(),
   send: vi.fn(),
@@ -20,6 +21,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("../../state/threadNotes", () => ({
   threadNoteGet: state.get,
+  fetchThreadNote: state.fetch,
   threadNotesSettings: state.settings,
   persistThreadNote: state.save,
   sendThreadNoteSelection: state.send,
