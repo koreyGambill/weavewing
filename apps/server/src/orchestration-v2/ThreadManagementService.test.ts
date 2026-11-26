@@ -834,7 +834,7 @@ it.effect.each([
     }),
 );
 
-it.effect.each(["live", "unsupported-runtime", "refused"] as const)(
+it.effect.each(["live", "unsupported-runtime", "refused", "queued", "delegated_work"] as const)(
   "rewinds the active provider thread's context and queues its continuation with state %s",
   (state) =>
     Effect.gen(function* () {
@@ -902,6 +902,12 @@ it.effect.each(["live", "unsupported-runtime", "refused"] as const)(
                     modelSelection: { instanceId: providerThread.providerInstanceId, model: "m" },
                   },
                   providerThreads: [providerThread],
+                  // A message queued behind the turn would run before the continuation.
+                  runs: state === "queued" ? [{ id: "run:queued", status: "queued" }] : [],
+                  subagents:
+                    state === "delegated_work"
+                      ? [{ id: "task:running", origin: "app_owned", status: "running" }]
+                      : [],
                 } as unknown as OrchestrationV2ThreadProjection),
               dispatch: (command) =>
                 Effect.sync(() => {
@@ -945,7 +951,12 @@ it.effect.each(["live", "unsupported-runtime", "refused"] as const)(
         expect(result).toMatchObject({
           failure: {
             _tag: "ThreadManagementContextRewindError",
-            reason: state === "refused" ? "too_small" : "unsupported",
+            reason:
+              state === "refused"
+                ? "too_small"
+                : state === "unsupported-runtime"
+                  ? "unsupported"
+                  : state,
           },
         });
         if (result._tag === "Failure" && state === "refused") {

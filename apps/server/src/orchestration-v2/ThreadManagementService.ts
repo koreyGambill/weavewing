@@ -415,7 +415,7 @@ export class ThreadManagementContextRewindError extends Schema.TaggedError<Threa
   {
     threadId: ThreadId,
     reason: Schema.Union([
-      Schema.Literals(["unsupported", "unavailable", "failed"]),
+      Schema.Literals(["unsupported", "unavailable", "failed", "queued", "delegated_work"]),
       ProviderAdapterContextRewindRefusal,
     ]),
     cause: Schema.optional(Schema.Defect()),
@@ -429,6 +429,10 @@ export class ThreadManagementContextRewindError extends Schema.TaggedError<Threa
         return "This thread has no running turn to rewind. Nothing was removed.";
       case "failed":
         return "The rewind failed. Nothing was removed; carry on with the task.";
+      case "delegated_work":
+        return "Tasks you delegated are still running, and a rewind would drop your record of them. Nothing was removed; carry on, and rewind once they have reported back.";
+      case "queued":
+        return "A message is already queued to run after this turn, so a rewind could not continue straight from your summary. Nothing was removed; carry on with the task.";
       default:
         return contextRewindRefusalMessage(this.reason);
     }
@@ -1858,7 +1862,7 @@ const make = Effect.gen(function* () {
         ...(cause === undefined ? {} : { cause }),
       });
     const records = yield* orchestrator
-      .getThreadRecords(input.threadId, ["providerThreads"])
+      .getThreadRecords(input.threadId, ["providerThreads", "runs", "subagents"])
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     const providerThread = records.providerThreads.find(
       (candidate) =>
@@ -1873,6 +1877,16 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     if (Option.isNone(runtime)) return yield* fail("unavailable");
     if (runtime.value.rewindContext === undefined) return yield* fail("unsupported");
+    // The continuation queues behind these, and a run that starts first moves past the cut.
+    if (records.runs.some((run) => run.status === "queued")) return yield* fail("queued");
+    // The rewind would drop the agent's record of tasks it delegated that are still working.
+    if (
+      records.subagents.some(
+        (task) => task.origin === "app_owned" && isOrchestrationV2WorkActive(task.status),
+      )
+    ) {
+      return yield* fail("delegated_work");
+    }
     return yield* runtime.value
       .rewindContext({
         providerThread,
