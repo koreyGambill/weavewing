@@ -146,28 +146,30 @@ also survive normalization; a display label is not necessarily a valid reply.
 ## Instruction text after an update
 
 Codex takes T3's instruction text with every turn, so a thread resumed after an update gets the
-new text. Claude Code does not: on every `--resume` it replays the system
-prompt the session first started with and ignores the append T3 passes. A Claude thread would keep
-its first instructions for life.
+new text. Claude Code does not: on every `--resume` it replays the system prompt the session last
+built, at its start or its latest compaction, and ignores the append T3 passes.
 
 The [Claude adapter](../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts) therefore
-records, in the provider thread's native metadata, digests of the append sections the session started
-with and of the sections it holds now. When a process opens by resuming, the
-[comparison](../../apps/server/src/orchestration-v2/Adapters/ClaudeInstructionUpdates.ts) puts one
-`<system-reminder>` ahead of the first normal turn. The reminder gives added and changed sections in
-full and names removed ones. The record moves forward only once Claude Code accepts that prompt, so
-a lost process sends the notice again rather than dropping it. The record follows Claude Code's own
-behaviour:
+records, in the provider thread's native metadata, digests of the append sections the session
+holds. The record is server state; the wire projection leaves it out. When a process opens by
+resuming, the [comparison](../../apps/server/src/orchestration-v2/Adapters/ClaudeInstructionUpdates.ts)
+puts one marked `<system-reminder>` ahead of the next ordinary prompt. The reminder gives added and
+changed sections in full and names removed ones. The record moves forward only when Claude Code
+echoes that prompt or reports that it started, so a lost process sends the notice again rather
+than dropping it. The record follows Claude Code's own behaviour:
 
 - Compaction and `/clear` rebuild the prompt from the running process's append.
-- A fork replays its source's prompt.
-- A resume at an earlier point, such as a rewind, rollback or earlier fork, loses notices accepted
-  after that point.
-- A session with no record gets every current section once.
+- A fork at the head replays its source's prompt and notices.
+- A context rewind keeps the turn's prompt and later messages, so it keeps the record.
+- A rollback cut or an earlier fork holds an unknown mix of notices, so the record becomes unknown.
+- A session with an unknown record gets the complete current set once, which retires any earlier
+  section it does not repeat.
 
-The context breakdown reports the recorded start append, not the one T3 passed, and counts the
-notice separately. Tool descriptions are not covered: a tool Claude already loaded keeps its old
-description, so guidance whose change must reach existing threads belongs in the instruction text.
+The session importer strips the marked notice, so an imported Claude session does not show it as
+the user's text. The context breakdown reports the recorded start append, not the one T3 passed,
+and charges the notice to the turn whose prompt carries it. Tool descriptions are not covered: a
+tool Claude already loaded keeps its old description, so guidance whose change must reach existing
+threads belongs in the instruction text.
 
 ## Attachments and stored history
 
