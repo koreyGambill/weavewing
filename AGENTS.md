@@ -19,8 +19,10 @@ Weavewing is a public fork of T3 Code, a GUI for coding agents. The repository i
 
 ## Verifying
 
-- Run `vp run check:changed` before you merge: CI's fast checks (format, lint, knip, typecheck, nearby tests) for changed files.
-- While iterating, run `vp test run <files>` (add `-t "<name>"` for big files) and `vp run typecheck`. The checker is `effect-tsgo`; there is no `typescript` package to run.
+- A landing is gated by `vp run check:changed` (format, lint, knip, typecheck, and the tests near the changed files), focused tests with `vp test run <files>` (add `-t "<name>"` for big files), and review. Full suites do not gate a landing, so do not run one before landing.
+- A test-channel (nightly) release is gated by the release pipeline's own smoke checks only: the release builds, the clean-bundle check, and the per-platform CLI and native artifact smoke checks. It runs no full CI.
+- A stable release is gated by full CI, which the release pipeline runs itself. See [Weavewing release](docs/operations/weavewing-release.md).
+- While iterating, run focused tests and `vp run typecheck`. The checker is `effect-tsgo`; there is no `typescript` package to run.
 - Never run repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked; CI owns the full suite.
 - Run `node -e` snippets from `apps/server` or the owning package; `effect` does not resolve from the repo root.
 - Before writing or reviewing a test, read [Testing](docs/internals/testing.md): what to test, bug-fix proof, and the browser-test pattern. Server side effects run after the command commits, so tests drain `OrchestrationEffectWorkerV2` or await the persisted event, never sleep or poll; lint enforces this.
