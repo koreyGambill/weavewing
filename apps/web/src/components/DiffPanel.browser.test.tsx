@@ -74,7 +74,11 @@ vi.mock("~/state/entities", () => ({
 vi.mock("~/state/filesystem", () => ({
   useFilesystemReadAccess: () => ({ canReadFiles: true, isPending: false, error: null }),
 }));
-vi.mock("~/hooks/useThreadRouteTarget", () => ({ useThreadRouteRef: () => state.threadRef }));
+vi.mock("~/hooks/useThreadRouteTarget", () => ({
+  useThreadRouteRef: () => state.threadRef,
+  useThreadRouteTarget: () =>
+    state.threadRef ? { kind: "server", threadRef: state.threadRef } : null,
+}));
 vi.mock("~/hooks/useSettings", () => ({
   useClientSettings: (select: (settings: ClientSettings) => unknown) =>
     select({ ...DEFAULT_CLIENT_SETTINGS, diffFilesCollapsed: state.diffFilesCollapsed }),
@@ -98,7 +102,11 @@ vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => async () => {
 vi.mock("~/editorPreferences", () => ({ useOpenInPreferredEditor: () => async () => {} }));
 vi.mock("~/fileContextMenu", () => ({ useFileContextMenuHandler: () => () => {} }));
 vi.mock("~/browser/useOpenLink", () => ({ useOpenLink: () => async () => {} }));
-vi.mock("./diffs/DiffCommentAnnotation", () => ({ DiffCommentAnnotation: () => null }));
+vi.mock("./diffs/DiffCommentAnnotation", () => ({
+  ADD_TO_MESSAGE_LABEL: "",
+  ADD_TO_MESSAGE_PLACEHOLDER: "",
+  DiffCommentAnnotation: () => null,
+}));
 vi.mock("./diffs/DiffFileTree", () => ({ DiffFileTree: () => null }));
 vi.mock("./DiffFilePathCopyButton", () => ({ DiffFilePathCopyButton: () => null }));
 
