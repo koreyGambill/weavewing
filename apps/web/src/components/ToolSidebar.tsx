@@ -31,12 +31,13 @@ import {
   VIEW_DEFINITIONS,
   viewDefinition,
   type ViewDefinition,
+  type ViewSlots,
   type ViewTarget,
 } from "../views/viewRegistry";
 import { DropdownTerminalButton } from "./DropdownTerminal";
 import { useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
-import { SideAreaSlots, useSideAreaThreadRef } from "./threadToolsHost";
+import { useRouteDraft, useSideAreaDetailsSetter, useSideAreaThreadRef } from "./threadToolsHost";
 import {
   SIDE_AREA_WIDE_MEDIA_QUERY,
   describeLockedThread,
@@ -357,7 +358,10 @@ function SideArea({
     };
   });
 
-  const target: ViewTarget = { threadRef: definition.scope === "thread" ? threadRef : null };
+  const draft = useRouteDraft(threadRef);
+  const setDetails = useSideAreaDetailsSetter();
+  const target: ViewTarget =
+    definition.scope === "thread" ? { threadRef, draft } : { threadRef: null, draft: null };
   const layout = resolveViewLayout(definition.compactBelowPx, {
     wide,
     width: maximized ? fullWidth : width,
@@ -392,9 +396,13 @@ function SideArea({
         />
       ) : null}
       <header className="flex h-10 shrink-0 items-center gap-1 border-b pr-2 pl-1.5">
-        <ViewPicker definition={definition} target={{ threadRef }} />
+        <ViewPicker definition={definition} target={target} />
         <div ref={setActions} className="ms-auto flex min-w-0 items-center" />
-        <div className="flex shrink-0 items-center [-webkit-app-region:no-drag]">
+        <div
+          role="group"
+          aria-label="Side panel controls"
+          className="flex shrink-0 items-center [-webkit-app-region:no-drag]"
+        >
           <HeaderToggle
             label={pinned ? "Unpin side panel" : "Pin side panel"}
             hint={
@@ -460,14 +468,13 @@ function SideArea({
           </Button>
         </Empty>
       ) : (
-        <SideAreaSlots actions={actions} setActions={setActions}>
-          <SideAreaBody
-            definition={definition}
-            target={target}
-            layout={layout}
-            width={maximized ? fullWidth : width}
-          />
-        </SideAreaSlots>
+        <SideAreaBody
+          definition={definition}
+          target={target}
+          layout={layout}
+          width={maximized ? fullWidth : width}
+          slots={{ actions, setDetails }}
+        />
       )}
     </aside>
   );
@@ -566,11 +573,13 @@ function SideAreaBody({
   target,
   layout,
   width,
+  slots,
 }: {
   definition: ViewDefinition;
   target: ViewTarget;
   layout: "compact" | "full";
   width: number;
+  slots: ViewSlots;
 }) {
   const key = threadKey(target.threadRef);
   const [settledKey, setSettledKey] = useState(key);
@@ -589,7 +598,7 @@ function SideAreaBody({
             : definition.id
         }
       >
-        {definition.render({ target, layout, host: "panel", width })}
+        {definition.render({ target, layout, host: "panel", width, slots })}
       </Fragment>
     </DeferEnvironmentQueries>
   );

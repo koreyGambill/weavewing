@@ -1,4 +1,5 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { DraftId } from "../composerDraftStore";
 import {
   ActivityIcon,
   BoxesIcon,
@@ -25,9 +26,23 @@ export type { ViewId, ViewLayout };
 export type ViewScope = "thread" | "global";
 export type ViewHost = "panel" | "tile" | "page";
 
-/** The thread a thread view shows; global views ignore it. */
+/** A draft that has no thread yet; Inspect previews its starting context. */
+export interface ViewDraft {
+  readonly draftId: DraftId;
+  readonly threadRef: ScopedThreadRef;
+}
+
+/** The thread a thread view shows, or else the selected draft; global views ignore it. */
 export interface ViewTarget {
   readonly threadRef: ScopedThreadRef | null;
+  readonly draft: ViewDraft | null;
+}
+
+/** Elements the host provides around a view: its heading's button row and a Details element. */
+export interface ViewSlots {
+  readonly actions: HTMLDivElement | null;
+  /** Receives the element the conversation's details card moves into, for the host to claim. */
+  readonly setDetails: (element: HTMLDivElement | null) => void;
 }
 
 /**
@@ -56,6 +71,7 @@ export interface ViewDefinition {
     readonly layout: ViewLayout;
     readonly host: ViewHost;
     readonly width: number;
+    readonly slots: ViewSlots;
   }) => ReactNode;
 }
 
@@ -74,8 +90,8 @@ function threadView<Id extends ThreadViewId>(
     about,
     scope: "thread",
     minWidthPx: 280,
-    render: ({ target }) =>
-      createElement(ThreadViewBody, { view: id, title, threadRef: target.threadRef }),
+    render: ({ target, slots }) =>
+      createElement(ThreadViewBody, { view: id, title, target, slots }),
   };
 }
 

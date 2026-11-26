@@ -31,7 +31,7 @@ import {
   type StripItem,
   type ThreadContextSection,
 } from "../threadContextSidebarStore";
-import { useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
+import { useRouteDraft, useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
 import {
   useEvidenceCounts,
   useEvidenceEnvironment,
@@ -83,6 +83,8 @@ export function ThreadToolsFrame({ children }: { children: ReactNode }) {
   const threadRef = useThreadToolsTarget();
   const view = useThreadContextSidebarStore((state) => state.view);
   const visible = useSidebarVisibility();
+  const draft = useRouteDraft(threadRef);
+  const { actions, setDetails } = useThreadToolsSlots();
   return (
     <div className="flex min-h-0 flex-1">
       <ThreadToolsStrip threadRef={threadRef} />
@@ -100,7 +102,8 @@ export function ThreadToolsFrame({ children }: { children: ReactNode }) {
             }
             view={view}
             title={tool(view).title}
-            threadRef={threadRef}
+            target={{ threadRef, draft }}
+            slots={{ actions, setDetails }}
           />
         </div>
       ) : null}

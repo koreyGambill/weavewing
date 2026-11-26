@@ -1,12 +1,15 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useRouterState } from "@tanstack/react-router";
+import { useParams, useRouterState } from "@tanstack/react-router";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { createContext, use, useState, type ReactNode } from "react";
 import { selectThreadTileLayout, useRightPanelStore } from "../rightPanelStore";
 import { selectContextThread } from "../threadContextSidebar";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { resolveDetailsDestination, resolveSideAreaThread } from "./ToolSidebar.logic";
+import type { ViewDraft } from "../views/viewRegistry";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -83,18 +86,21 @@ export function ThreadToolsHost({ children }: { children: ReactNode }) {
   );
 }
 
-/** Gives the side area's view its own heading-button slot and Details element. */
-export function SideAreaSlots({
-  actions,
-  setActions,
-  children,
-}: {
-  actions: Slot;
-  setActions: (element: Slot) => void;
-  children: ReactNode;
-}) {
-  const setDetails = use(SideAreaDetails);
-  return <Slots value={{ setDetails, actions, setActions }}>{children}</Slots>;
+/** The side area's setter for its Details element, which the host gives the card to. */
+export function useSideAreaDetailsSetter() {
+  return use(SideAreaDetails);
+}
+
+/** The route's draft when no thread is selected, for views that preview a draft. */
+export function useRouteDraft(threadRef: ScopedThreadRef | null): ViewDraft | null {
+  const { draftId: routeDraftId } = useParams({ strict: false });
+  const draftId = routeDraftId === undefined ? undefined : DraftId.make(routeDraftId);
+  const session = useComposerDraftStore((store) =>
+    threadRef === null && draftId ? store.getDraftSession(draftId) : null,
+  );
+  return draftId && session
+    ? { draftId, threadRef: scopeThreadRef(session.environmentId, session.threadId) }
+    : null;
 }
 
 export function useThreadToolsSlots() {
