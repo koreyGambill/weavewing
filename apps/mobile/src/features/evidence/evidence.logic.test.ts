@@ -13,7 +13,6 @@ import {
   evidenceEnvironmentHeading,
   evidenceSheetState,
   evidenceThreadsWaitingCount,
-  groupLandings,
   landingQaSummary,
   landingQaThreadId,
   landingTargetLine,
@@ -48,10 +47,10 @@ const summary = (
   qa: tally(qa),
 });
 
-const page = (
-  items: ReadonlyArray<EvidenceLandingSummary>,
-  next: EvidenceListResult["next"] = null,
-): EvidenceListResult => ({ items, next });
+const page = (items: ReadonlyArray<EvidenceLandingSummary>): EvidenceListResult => ({
+  items,
+  next: null,
+});
 
 describe("evidenceThreadsWaitingCount", () => {
   it("counts threads with changes to check, never the changes in them", () => {
@@ -98,26 +97,11 @@ it("names where a landing went and the thread that shows its QA", () => {
   expect(landingQaThreadId({ threadId: child })).toBe(child);
 });
 
-it("drops landings that need QA from the Landed group, so none shows twice", () => {
-  const items = [
-    summary("pending", { pending: 1 }),
-    summary("problem", { problem: 1, confirmed: 1 }),
-    summary("settled", { confirmed: 1, quiet: 2 }),
-  ];
-  expect(groupLandings("needs-qa", items).map((landing) => landing.id)).toEqual([
-    "pending",
-    "problem",
-    "settled",
-  ]);
-  expect(groupLandings("landed", items).map((landing) => landing.id)).toEqual(["settled"]);
-});
-
 describe("evidenceSheetState", () => {
   const loaded = (
     needsQa: ReadonlyArray<EvidenceLandingSummary>,
     all: ReadonlyArray<EvidenceLandingSummary>,
-    next: EvidenceListResult["next"] = null,
-  ) => ({ needsQa: page(needsQa), all: page(all, next), failed: false });
+  ) => ({ needsQa: page(needsQa), all: page(all), failed: false });
 
   it("loads until every environment answers, then shows the empty state", () => {
     const empty = loaded([], []);
@@ -132,22 +116,17 @@ describe("evidenceSheetState", () => {
     expect(evidenceSheetState([loaded([], [summary("a", { confirmed: 1 })])])).toEqual({
       kind: "listed",
       needsQaEmpty: true,
-      landedEmpty: false,
+      allEmpty: false,
     });
   });
 
-  it("hides the Landed group only when no environment has another landing, here or older", () => {
-    const waiting = summary("a", { pending: 1 });
-    expect(evidenceSheetState([loaded([waiting], [waiting])])).toEqual({
+  it("lists a landing whose only pending change is being discussed under All landings", () => {
+    // Needs QA leaves out a pending change with a sent Discuss, yet the tally still counts it.
+    const discussed = summary("a", { pending: 1 });
+    expect(evidenceSheetState([loaded([], [discussed])])).toEqual({
       kind: "listed",
-      needsQaEmpty: false,
-      landedEmpty: true,
-    });
-    const cursor = { landedAt: "2026-11-20T10:00:00.000Z", id: "a" };
-    expect(evidenceSheetState([loaded([waiting], [waiting], cursor)])).toEqual({
-      kind: "listed",
-      needsQaEmpty: false,
-      landedEmpty: false,
+      needsQaEmpty: true,
+      allEmpty: false,
     });
   });
 
@@ -156,12 +135,12 @@ describe("evidenceSheetState", () => {
     expect(evidenceSheetState([failed])).toEqual({
       kind: "listed",
       needsQaEmpty: false,
-      landedEmpty: false,
+      allEmpty: false,
     });
     expect(evidenceSheetState([loaded([], []), failed])).toEqual({
       kind: "listed",
       needsQaEmpty: false,
-      landedEmpty: false,
+      allEmpty: false,
     });
   });
 });
