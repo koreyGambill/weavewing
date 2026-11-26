@@ -106,9 +106,26 @@ describe("summarizeComposerRowAgents", () => {
     ).toMatchObject({ tone: "failed", label: "1 failed", count: 1 });
   });
 
-  it("counts finished children as done", () => {
+  it("counts completed children as done", () => {
     expect(
       summarizeComposerRowAgents([{ status: "completed" }, { status: "completed" }]),
     ).toMatchObject({ tone: "idle", label: "2 done", description: "Agents: 2 done" });
+  });
+
+  it("calls children that ended without completing past, not done", () => {
+    expect(summarizeComposerRowAgents([{ status: "cancelled" }])).toMatchObject({
+      tone: "idle",
+      done: 0,
+      past: 1,
+      label: "1 past",
+      description: "Agents: 1 past",
+    });
+    expect(
+      summarizeComposerRowAgents([
+        { status: "completed" },
+        { status: "interrupted" },
+        { status: "cancelled" },
+      ]),
+    ).toMatchObject({ label: "3 past", description: "Agents: 1 done, 2 past" });
   });
 });

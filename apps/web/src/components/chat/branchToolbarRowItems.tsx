@@ -1,9 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { GitBranchIcon } from "lucide-react";
 
-import { useComposerDraftStore, type DraftId } from "~/composerDraftStore";
-import { useQuietThreadShell } from "~/state/entities";
 import type { EnvironmentOption } from "../BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { MenuItem, MenuItemDetail } from "../ui/menu";
@@ -23,27 +19,21 @@ export function ComposerRowComputerMenuRow(props: {
   );
 }
 
-/** The branch item's row in ⋯: the thread's branch, opening the branch picker. */
-export function ComposerRowBranchMenuRow(props: {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  draftId: DraftId | undefined;
-  branchOverride: string | null | undefined;
+/**
+ * The branch item's row in ⋯, opening the branch picker. The picker renders its own resolved
+ * label into `setValueElement`, so the row shows exactly what the picker would.
+ */
+export function ComposerRowBranchMenuRow({
+  setValueElement,
+  onOpen,
+}: {
+  setValueElement: (element: HTMLElement | null) => void;
   onOpen: () => void;
 }) {
-  const threadRef = scopeThreadRef(props.environmentId, props.threadId);
-  const shellBranch = useQuietThreadShell(threadRef)?.branch;
-  const draftBranch = useComposerDraftStore(
-    (store) =>
-      (props.draftId ? store.getDraftSession(props.draftId) : store.getDraftThreadByRef(threadRef))
-        ?.branch,
-  );
-  const branch =
-    props.branchOverride !== undefined ? props.branchOverride : (shellBranch ?? draftBranch);
   return (
-    <MenuItem onClick={props.onOpen}>
+    <MenuItem onClick={onOpen}>
       <GitBranchIcon />
-      <span className="min-w-0 flex-1 truncate">{branch ?? "Select ref"}</span>
+      <span ref={setValueElement} className="min-w-0 flex-1 truncate" />
       <MenuItemDetail>Branch</MenuItemDetail>
     </MenuItem>
   );

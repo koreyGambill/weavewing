@@ -946,7 +946,6 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
     ...threadWithHistory("row-keyboard", 1),
     olderSettled: true as const,
     worktreePath: "/workspace/row-keyboard",
-    branch: "feature/row-under-the-composer-keyboard",
   };
   using _environment = installFakeEnvironment([thread], {
     vcsStatus: {
@@ -1072,7 +1071,10 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
   (await menuButton.element()).focus();
   await userEvent.keyboard("{Enter}");
   // The menu lists items that left the row before its own entries, and opens on the first.
-  const branchRow = menu.getByRole("menuitem", { name: /Branch$/ });
+  // The thread's metadata still says main; the row names the checkout's ref, as the picker does.
+  const branchRow = menu.getByRole("menuitem", {
+    name: /^feature\/row-under-the-composer-keyboard\s*Branch$/,
+  });
   await expect.element(branchRow).toHaveFocus();
   await userEvent.keyboard("{Enter}");
   const branchPicker = page.getByRole("listbox");
@@ -1083,6 +1085,81 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
   await userEvent.keyboard("{Escape}");
   await expect.element(branchPicker).not.toBeInTheDocument();
   await expect.element(menuButton).toHaveFocus();
+});
+
+it("moves the branch into the thread menu and back across widths, keeping the location inside its box", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1280, 860);
+
+  // A 16-character last segment keeps the whole name as the truncation tail.
+  const thread = {
+    ...threadWithHistory("row-sweep", 1),
+    olderSettled: true as const,
+    worktreePath: "/workspace/webhook-retry-xy",
+  };
+  using _environment = installFakeEnvironment([thread], {
+    vcsStatus: {
+      _tag: "snapshot",
+      local: {
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: true,
+        refName: "feature/row-under-the-composer-sweep",
+        hasWorkingTreeChanges: false,
+        workingTree: { files: [], insertions: 0, deletions: 0 },
+      },
+      remote: null,
+    },
+  });
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+
+  const branchInMenu = () =>
+    document.querySelector('[data-composer-row-item="branch"][data-in-menu]') !== null;
+  const locationOverflow = () => {
+    const item = document.querySelector<HTMLElement>('[data-composer-row-item="location"]');
+    const label = item?.querySelector<HTMLElement>("[data-composer-label]");
+    if (!label) return 0;
+    const box = label.getBoundingClientRect();
+    return Math.max(
+      0,
+      ...Array.from(label.querySelectorAll<HTMLElement>("span"), (span) =>
+        span.getBoundingClientRect().width === 0
+          ? 0
+          : span.getBoundingClientRect().right - box.right,
+      ),
+    );
+  };
+  await vi.waitFor(() => expect(branchInMenu()).toBe(false));
+
+  // The reviewer's sweep: narrow until the branch leaves, then widen until it returns.
+  for (const width of [
+    1280, 980, 760, 640, 600, 580, 560, 530, 500, 480, 420, 390, 360, 320, 280,
+  ]) {
+    await page.viewport(width, 860);
+    if (width <= 390) await vi.waitFor(() => expect(branchInMenu()).toBe(true));
+    if (width >= 320 && width <= 390) {
+      await vi.waitFor(() => expect(locationOverflow()).toBeLessThanOrEqual(0.5));
+    }
+  }
+  for (const width of [320, 390, 560, 980, 1280]) {
+    await page.viewport(width, 860);
+    if (width >= 980) await vi.waitFor(() => expect(branchInMenu()).toBe(false));
+  }
 });
 
 it("uses the remembered base and whitespace-filtered Diff counts beside the branch", async () => {

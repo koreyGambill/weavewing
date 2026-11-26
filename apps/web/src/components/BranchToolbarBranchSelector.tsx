@@ -26,6 +26,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type Ref,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
@@ -809,7 +810,7 @@ export function BranchToolbarBranchSelector({
         className: cn("flex flex-col", displayMode === "panel" ? "w-(--anchor-width)" : "w-80"),
         ...(displayMode === "toolbar" ? composerFloatingLayerProps : {}),
         ...(rowPlacement?.inMenu
-          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.anchor }
+          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.finalFocus }
           : {}),
       }}
     >
@@ -871,6 +872,7 @@ export function BranchToolbarBranchSelector({
               />
             </ComposerContextLabel>
           </ComboboxTrigger>
+          {rowPlacement?.menuValue ? createPortal(triggerLabel, rowPlacement.menuValue) : null}
         </span>
       </div>
     </BranchPicker>

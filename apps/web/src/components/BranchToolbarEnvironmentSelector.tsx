@@ -168,7 +168,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         alignItemWithTrigger={false}
         {...composerFloatingLayerProps}
         {...(rowPlacement?.inMenu
-          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.anchor }
+          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.finalFocus }
           : {})}
       >
         <SelectGroup>

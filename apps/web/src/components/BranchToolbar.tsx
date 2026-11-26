@@ -683,6 +683,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
           />
         ) : null,
+      ...(canOpenEnvironmentSelector
+        ? { openPopup: () => environmentSelectorRef.current?.open() }
+        : {}),
       renderMenuRow: ({ openPopover }) => (
         <ComposerRowComputerMenuRow
           environment={activeEnvironmentOption}
@@ -754,12 +757,9 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       ),
-      renderMenuRow: ({ openPopover }) => (
+      renderMenuRow: ({ openPopover, setValueElement }) => (
         <ComposerRowBranchMenuRow
-          environmentId={environmentId}
-          threadId={threadId}
-          draftId={draftId}
-          branchOverride={activeThreadBranchOverride}
+          setValueElement={setValueElement}
           onOpen={() => openPopover(() => branchSelectorRef.current?.open())}
         />
       ),

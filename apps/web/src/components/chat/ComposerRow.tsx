@@ -1,5 +1,5 @@
 import { EllipsisIcon } from "lucide-react";
-import { createContext, Fragment, type RefObject, use, useRef, useState } from "react";
+import { createContext, Fragment, use, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { cn } from "~/lib/utils";
@@ -12,6 +12,7 @@ import { ComposerSurface } from "./ComposerSurface";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   COMPOSER_ROW_LABEL_MIN_PX,
+  COMPOSER_ROW_OPEN_EVENT,
   type ComposerRowItem,
   type ComposerRowItemWidth,
   resolveComposerRowHiddenIds,
@@ -21,8 +22,35 @@ import { elementOuterWidth } from "./restingComposerControlsMeasurement";
 export interface ComposerRowItemPlacement {
   /** True while the item sits in ⋯; the row keeps it mounted, invisible and inert. */
   readonly inMenu: boolean;
-  /** The ⋯ button: anchor a popup opened from ⋯ here, and return focus here when it closes. */
-  readonly anchor: RefObject<HTMLElement | null>;
+  /** The ⋯ button, which a popup opened from ⋯ anchors to. */
+  readonly anchor: HTMLElement | null;
+  /** Where focus goes when that popup closes: ⋯, or where a shortcut was pressed. */
+  readonly finalFocus: () => HTMLElement | null;
+  /** The open ⋯ row's value element, for the item to render its live value into. */
+  readonly menuValue: HTMLElement | null;
+}
+
+type ValueSlots = Readonly<Record<string, HTMLElement>>;
+type SetValueSlots = (update: (slots: ValueSlots) => ValueSlots) => void;
+const valueElementSetters = new WeakMap<
+  SetValueSlots,
+  Map<string, (element: HTMLElement | null) => void>
+>();
+
+// One callback per item, so React does not detach and reattach the slot on every render.
+function valueElementSetterFor(setSlots: SetValueSlots, id: string) {
+  const byId = valueElementSetters.get(setSlots) ?? new Map();
+  valueElementSetters.set(setSlots, byId);
+  const existing = byId.get(id);
+  if (existing) return existing;
+  const callback = (element: HTMLElement | null) =>
+    setSlots((slots) => {
+      if ((slots[id] ?? null) === element) return slots;
+      const { [id]: _removed, ...rest } = slots;
+      return element ? { ...rest, [id]: element } : rest;
+    });
+  byId.set(id, callback);
+  return callback;
 }
 
 const ComposerRowItemPlacementContext = createContext<ComposerRowItemPlacement | null>(null);
@@ -100,7 +128,8 @@ function useComposerRowHiddenIds(): readonly [
           (Number.parseFloat(style.paddingInlineStart) || 0) -
           (Number.parseFloat(style.paddingInlineEnd) || 0),
         gap: Number.parseFloat(style.columnGap) || 0,
-        menuWidth: menu ? elementOuterWidth(menu) : 0,
+        // The border box: ⋯'s auto margin is the row's free space, not part of the control.
+        menuWidth: menu ? menu.getBoundingClientRect().width : 0,
         previousHiddenIds,
       });
       const unchanged =
@@ -157,11 +186,14 @@ export function ComposerRow({
   readonly className?: string;
 }) {
   const [attach, hiddenIds] = useComposerRowHiddenIds();
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuButton, setMenuButton] = useState<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [popoverItemId, setPopoverItemId] = useState<string | null>(null);
   // Set when a ⋯ row hands focus to a popup, so ⋯ does not take it back as it closes.
   const [focusHandedOff, setFocusHandedOff] = useState(false);
+  // Where a shortcut was pressed, so its popup returns focus there instead of to ⋯.
+  const [shortcutOrigin, setShortcutOrigin] = useState<HTMLElement | null>(null);
+  const [valueSlots, setValueSlots] = useState<ValueSlots>({});
 
   const shown = items.filter((item) => !item.hidden);
   const rowItems = shown.filter((item) => item.renderRowItem !== undefined);
@@ -174,10 +206,12 @@ export function ComposerRow({
     item.renderMenuRow?.({
       openPopover: (open) => {
         setFocusHandedOff(true);
+        setShortcutOrigin(null);
         setMenuOpen(false);
         if (open) open();
         else setPopoverItemId(item.id);
       },
+      setValueElement: valueElementSetterFor(setValueSlots, item.id),
     });
 
   return (
@@ -200,6 +234,17 @@ export function ComposerRow({
             data-in-menu={inMenu ? "" : undefined}
             aria-hidden={inMenu || undefined}
             inert={inMenu}
+            ref={(element) => {
+              const openPopup = item.openPopup;
+              if (!element || !inMenu || !openPopup) return;
+              const open = () => {
+                const origin = document.activeElement;
+                setShortcutOrigin(origin instanceof HTMLElement ? origin : null);
+                openPopup();
+              };
+              element.addEventListener(COMPOSER_ROW_OPEN_EVENT, open);
+              return () => element.removeEventListener(COMPOSER_ROW_OPEN_EVENT, open);
+            }}
             className={cn(
               "flex items-center gap-1 empty:hidden",
               inMenu
@@ -209,7 +254,14 @@ export function ComposerRow({
                   : "shrink-0",
             )}
           >
-            <ComposerRowItemPlacementContext value={{ inMenu, anchor: menuButtonRef }}>
+            <ComposerRowItemPlacementContext
+              value={{
+                inMenu,
+                anchor: menuButton,
+                finalFocus: () => shortcutOrigin ?? menuButton,
+                menuValue: valueSlots[item.id] ?? null,
+              }}
+            >
               {item.renderRowItem?.()}
             </ComposerRowItemPlacementContext>
           </div>
@@ -231,7 +283,7 @@ export function ComposerRow({
           <Tooltip>
             <TooltipTrigger render={<span className="flex" />}>
               <MenuTrigger
-                ref={menuButtonRef}
+                ref={setMenuButton}
                 render={<ComposerControl size="xs" aria-label="Thread menu" />}
               >
                 <EllipsisIcon />
@@ -264,8 +316,8 @@ export function ComposerRow({
           {popoverItem ? (
             <PopoverPopup
               aria-label={popoverItem.label}
-              anchor={menuButtonRef}
-              finalFocus={menuButtonRef}
+              anchor={menuButton}
+              finalFocus={() => menuButton}
               side="top"
               align="end"
               padding="none"
