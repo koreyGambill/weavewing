@@ -1849,6 +1849,20 @@ describe("MessagesTimeline sent references", () => {
     expect(screen.text()).not.toContain("#save");
   });
 
+  it("selects find matches after CRLF line endings in the body and in a reference", async () => {
+    setup();
+    const crlfAnswer = { ...answer, note: "First line\r\ncrlfneedle in the note" };
+    await using screen = await renderTimeline([
+      message(`Body line\r\ncrlfneedle in the body ${formatComposerContextReference(crlfAnswer)}`, {
+        context: { version: 1, records: [crlfAnswer] },
+      }),
+    ]);
+    await expect.element(screen.getByText(/in the note/)).toBeVisible();
+    expect(
+      collectThreadFindRanges(screen.container, "crlfneedle").map(({ range }) => range.toString()),
+    ).toEqual(["crlfneedle", "crlfneedle"]);
+  });
+
   it("opens a collapsed reference that holds find's match", async () => {
     setup();
     await using screen = await renderTimeline([sentMessage()], {

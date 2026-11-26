@@ -22,6 +22,20 @@ describe("collectThreadFindRanges", () => {
       [2, "const"],
     ]);
   });
+
+  it("selects the matched characters after a CRLF line ending", () => {
+    const container = row("<div></div>");
+    // React writes text nodes directly, so a CRLF survives that HTML parsing would normalize.
+    container
+      .querySelector("[data-thread-find-text] div")!
+      .append(document.createTextNode("alpha\r\nbeta crlfneedle\r\ngamma"));
+    expect(
+      collectThreadFindRanges(container, "crlfneedle").map(({ range }) => range.toString()),
+    ).toEqual(["crlfneedle"]);
+    expect(
+      collectThreadFindRanges(container, "alpha beta").map(({ range }) => range.toString()),
+    ).toEqual(["alpha\r\nbeta"]);
+  });
 });
 
 function Highlights(props: Parameters<typeof useThreadFindHighlights>[0]) {

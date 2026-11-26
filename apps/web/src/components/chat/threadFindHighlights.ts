@@ -31,7 +31,10 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
     if (!rowId) continue;
 
     let text = "";
-    let nodes: { node: Node; start: number; end: number }[] = [];
+    let nodes: { node: Node; start: number; end: number; offsets: number[] | null }[] = [];
+    // Searched text turns a CRLF into one space, so ranges map back to the node's own offsets.
+    const nodeOffset = (entry: (typeof nodes)[number], offset: number) =>
+      entry.offsets?.[offset] ?? offset;
     const flush = () => {
       let startIndex = 0;
       let endIndex = 0;
@@ -43,8 +46,8 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
         const end = nodes[endIndex];
         if (!start || !end) continue;
         const range = container.ownerDocument.createRange();
-        range.setStart(start.node, offset - start.start);
-        range.setEnd(end.node, offset + query.length - end.start);
+        range.setStart(start.node, nodeOffset(start, offset - start.start));
+        range.setEnd(end.node, nodeOffset(end, offset + query.length - end.start));
         const occurrence = occurrenceByRowId.get(rowId) ?? 0;
         ranges.push({ rowId, occurrence, range });
         occurrenceByRowId.set(rowId, occurrence + 1);
@@ -65,8 +68,19 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
       if (node.nodeType === 3) {
         const value = node.nodeValue ?? "";
         const start = text.length;
-        text += inPre ? value : value.replace(/\r?\n/g, " ");
-        nodes.push({ node, start, end: text.length });
+        let offsets: number[] | null = null;
+        if (inPre || !value.includes("\r\n")) {
+          text += inPre ? value : value.replace(/\n/g, " ");
+        } else {
+          offsets = [];
+          for (let index = 0; index < value.length; index++) {
+            offsets.push(index);
+            if (value[index] === "\r" && value[index + 1] === "\n") index++;
+            text += value[index] === "\n" ? " " : value[index];
+          }
+          offsets.push(value.length);
+        }
+        nodes.push({ node, start, end: text.length, offsets });
       }
       for (const child of node.childNodes) visit(child, inPre || tag === "pre");
       if (block) flush();
