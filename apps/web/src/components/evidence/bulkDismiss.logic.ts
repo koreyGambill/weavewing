@@ -16,3 +16,14 @@ export function bulkDismissBefore(day: string): string | null {
     ? null
     : date.toISOString();
 }
+
+/**
+ * What a bulk dismissal reports: how many it dismissed, and how many of the counted changes had
+ * changed meanwhile, without claiming what they are now.
+ */
+export function bulkDismissOutcome(counted: number, dismissed: number): string {
+  const skipped = counted - dismissed;
+  const done = `Dismissed ${dismissed} ${dismissed === 1 ? "change" : "changes"}.`;
+  if (skipped <= 0) return done;
+  return `${done} ${skipped} had already changed and ${skipped === 1 ? "was left as it is" : "were left as they are"}.`;
+}

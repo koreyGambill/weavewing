@@ -18,19 +18,20 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
-import { bulkDismissBefore } from "./bulkDismiss.logic";
-import { useBulkDismissStore } from "./bulkDismissStore";
+import { bulkDismissBefore, bulkDismissOutcome } from "./bulkDismiss.logic";
+import { useBulkDismissDraft, useBulkDismissStore } from "./bulkDismissStore";
 
 const changes = (count: number) => `${count} ${count === 1 ? "change" : "changes"}`;
 
-type Preview =
+// A count belongs to the environment and cutoff it was asked for, and shows for no other.
+type Preview = { readonly environmentId: EnvironmentId; readonly before: string } & (
   | {
-      readonly day: string;
       readonly status: "ready";
       readonly changes: ReadonlyArray<EvidenceChangeKey>;
       readonly more: boolean;
     }
-  | { readonly day: string; readonly status: "failed" };
+  | { readonly status: "failed" }
+);
 
 /**
  * Dismisses, as the user, the changes in this environment still waiting for QA that landed
@@ -44,40 +45,47 @@ export function BulkDismissDialog({
   readonly environmentId: EnvironmentId;
   readonly onClose: () => void;
 }) {
-  const { day, reason, setDay, setReason } = useBulkDismissStore();
+  const draft = useBulkDismissDraft(environmentId);
+  const edit = useBulkDismissStore((state) => state.edit);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const bulkSetQa = useAtomCommand(evidenceBulkSetQa, { label: "Dismiss pending QA" });
   const list = useAtomCommand(evidenceBulkSetQa, { reportFailure: false });
+  const day = draft?.day ?? "";
+  const reason = draft?.reason ?? "";
   const before = bulkDismissBefore(day);
-  // What the day covers, as the dialog shows it.
-  const load = async (at: string, forDay: string): Promise<Preview> => {
+  // What the cutoff covers in `forEnvironment`, as the dialog shows it.
+  const load = async (forEnvironment: EnvironmentId, at: string): Promise<Preview> => {
     const result = await list({
-      environmentId,
+      environmentId: forEnvironment,
       input: { before: DateTime.makeUnsafe(at), dryRun: true },
     });
     return result._tag === "Success"
       ? {
-          day: forDay,
+          environmentId: forEnvironment,
+          before: at,
           status: "ready",
           changes: result.value.changes ?? [],
           more: result.value.more === true,
         }
-      : { day: forDay, status: "failed" };
+      : { environmentId: forEnvironment, before: at, status: "failed" };
   };
   const loadFor = useEffectEvent(load);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server which changes the chosen day covers, so the user sees them counted before confirming
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server which changes the chosen day covers in this environment, so the user sees them counted before confirming
   useEffect(() => {
     if (before === null) return;
     let current = true;
-    void loadFor(before, day).then((next) => {
+    void loadFor(environmentId, before).then((next) => {
       if (current) setPreview(next);
     });
     return () => {
       current = false;
     };
-  }, [before, day]);
-  const shown = preview !== null && preview.day === day ? preview : null;
+  }, [environmentId, before]);
+  const shown =
+    preview !== null && preview.environmentId === environmentId && preview.before === before
+      ? preview
+      : null;
   const listed = shown?.status === "ready" ? shown.changes : null;
   const note = reason.trim();
   const usable = before !== null && note !== "" && listed !== null && listed.length > 0 && !busy;
@@ -90,17 +98,14 @@ export function BulkDismissDialog({
     });
     setBusy(false);
     if (result._tag !== "Success") return;
-    const skipped = listed.length - result.value.count;
     toastManager.add({
       type: "success",
-      title: `Dismissed ${changes(result.value.count)}`,
-      description:
-        skipped > 0
-          ? `${changes(skipped)} had changed since they were counted and stayed open.`
-          : "Each keeps your reason and can be reopened from its card.",
+      title: bulkDismissOutcome(listed.length, result.value.count),
+      description: "Each dismissed change keeps your reason and can be reopened from its card.",
     });
     onClose();
   };
+  if (draft === null) return null;
   return (
     <Dialog
       open
@@ -132,7 +137,7 @@ export function BulkDismissDialog({
                 type="date"
                 required
                 value={day}
-                onChange={(event) => setDay(event.currentTarget.value)}
+                onChange={(event) => edit(environmentId, { day: event.currentTarget.value })}
               />
             </div>
             <div className="grid gap-1.5">
@@ -142,7 +147,7 @@ export function BulkDismissDialog({
                 required
                 value={reason}
                 aria-invalid={note === ""}
-                onChange={(event) => setReason(event.currentTarget.value)}
+                onChange={(event) => edit(environmentId, { reason: event.currentTarget.value })}
               />
               {note === "" ? (
                 <p className="text-xs text-destructive-foreground">Say why they are dismissed.</p>
@@ -165,10 +170,8 @@ export function BulkDismissDialog({
                     onClick={() => {
                       if (before === null) return;
                       setPreview(null);
-                      void load(before, day).then((next) => {
-                        // A day picked meanwhile has its own count on the way.
-                        if (useBulkDismissStore.getState().day === day) setPreview(next);
-                      });
+                      // A count for another environment or day never shows; see `shown`.
+                      void load(environmentId, before).then(setPreview);
                     }}
                   >
                     Retry
