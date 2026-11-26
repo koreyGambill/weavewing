@@ -484,7 +484,7 @@ function LandingChanges({
       </div>
     );
   }
-  const { threadId, changes, verifications } = landing.data;
+  const { threadId, changes, verifications, exempt, target } = landing.data;
   // Badges truncate a long reason, so the opened landing spells each one out.
   const skipped = verifications.filter((check) => check.result === "skipped" && check.reason);
   return [
@@ -497,6 +497,12 @@ function LandingChanges({
           </li>
         ))}
       </ul>
+    ) : null,
+    exempt ? (
+      <p key="exempt" className="border-t border-border p-2 text-muted-foreground">
+        No changes to check. This exemption covers the commits landed up to{" "}
+        <span className="font-mono">{target.sha.slice(0, 7)}</span>.
+      </p>
     ) : null,
     ...changes.map((change) => (
       <ChangeRow
