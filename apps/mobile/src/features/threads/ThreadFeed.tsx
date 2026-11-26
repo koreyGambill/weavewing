@@ -1,3 +1,5 @@
+import { incomingMessageCard } from "./messageCards";
+import { SENDER_CARD_BODY_INSET, SenderCard } from "./SenderCard";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -2029,6 +2031,48 @@ function renderFeedEntry(
         />
       );
     }
+    const incoming = incomingMessageCard(message);
+    if (incoming) {
+      const rowId = `incoming:${message.id}`;
+      return (
+        <SenderCard
+          origin={incoming.origin}
+          threadRef={scopeThreadRef(props.environmentId, props.threadId)}
+          messageId={message.id}
+          text={presentation.text}
+          summary={incoming.summary}
+          timestampLabel={timestampLabel}
+          expanded={props.expandedWorkRows[rowId] ?? false}
+          onToggle={() => props.onToggleWorkRow(rowId, entry.id)}
+          width={props.markdownContentWidth}
+          themeAppearance={props.themeAppearance}
+          iconSubtleColor={iconSubtleColor}
+        >
+          <MessageAttachmentList
+            attachments={attachments}
+            environmentId={props.environmentId}
+            onPressPreview={props.onPressPreview}
+            onPlaybackStart={props.onPlaybackStart}
+          />
+          {presentation.text.trim().length > 0 ? (
+            <MarkdownImageAvailableWidthContext
+              value={props.markdownContentWidth - SENDER_CARD_BODY_INSET}
+            >
+              <UserMessageContent
+                text={renderedText}
+                environmentId={props.environmentId}
+                context={message.context}
+                markdownStyles={markdownStyles.assistant}
+                reviewCommentColors={props.reviewCommentColors}
+                skills={props.skills}
+                linkHandlers={props.markdownLinkHandlers}
+                renderImage={props.renderMarkdownImage}
+              />
+            </MarkdownImageAvailableWidthContext>
+          ) : null}
+        </SenderCard>
+      );
+    }
     if (isUser && presentation.attribution === "automation") {
       const rowId = `automation:${message.id}`;
       return (
@@ -3861,6 +3905,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               ) {
                 return "message:assistant-progress";
               }
+              if (incomingMessageCard(entry.message)) return "message:incoming";
               const { attribution } = resolveUserMessagePresentation(entry.message);
               return attribution === "automation" || attribution === "agent"
                 ? `message:${attribution}`

@@ -1,6 +1,7 @@
 import { Button } from "../../components/ui/Button";
 import { ThreadSubagentGroup } from "./thread-subagent-group";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { OutgoingMessageLabel, useOutgoingMessageCard } from "./OutgoingMessageLabel";
 import {
   WorkLogLabel,
   WorkLogBlock,
@@ -890,6 +891,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
       ? { environmentId: props.environmentId, row: row.projectedItem }
       : null,
   );
+  const outgoing = useOutgoingMessageCard(row, props.environmentId);
   const failureItem = row.projectedItem.item;
   if (failureItem.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
@@ -1022,7 +1024,9 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
   const answerPreview = row.workEntry.questionAnswer
     ? getQuestionAnswerPreview(row.workEntry.questionAnswer)
     : null;
-  const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
+  const accessiblePreview = [outgoing?.accessibilityLabel ?? previewText, answerPreview]
+    .filter(Boolean)
+    .join(": ");
   const displayText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
   const isUsageLimit =
@@ -1106,22 +1110,26 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
                 />
               )}
             </WorkLogIconSlot>
-            <WorkLogLabel
-              tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
-            >
-              {displayText}
-              {answerPreview ? (
-                <Text
-                  className={
-                    !expanded &&
-                    row.workEntry.questionAnswer &&
-                    hasQuestionAnswer(row.workEntry.questionAnswer)
-                      ? "text-foreground"
-                      : "text-foreground-subtle"
-                  }
-                >{`  ${answerPreview}`}</Text>
-              ) : null}
-            </WorkLogLabel>
+            {outgoing ? (
+              <OutgoingMessageLabel card={outgoing} themeAppearance={props.themeAppearance} />
+            ) : (
+              <WorkLogLabel
+                tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
+              >
+                {displayText}
+                {answerPreview ? (
+                  <Text
+                    className={
+                      !expanded &&
+                      row.workEntry.questionAnswer &&
+                      hasQuestionAnswer(row.workEntry.questionAnswer)
+                        ? "text-foreground"
+                        : "text-foreground-subtle"
+                    }
+                  >{`  ${answerPreview}`}</Text>
+                ) : null}
+              </WorkLogLabel>
+            )}
           </>
         )}
 
