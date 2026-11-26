@@ -3920,7 +3920,9 @@ export default function ChatView(props: ChatViewProps) {
               setComposerOverlayElement(overlay);
               attachFollowComposerOverlay(overlay);
             }}
-            inert={isRevertingCheckpoint}
+            // A rewind with a summary waits on a running turn, so Stop must stay reachable;
+            // the send-disabled reason still blocks sending.
+            inert={isRevertingCheckpoint && phase !== "running"}
             data-chat-composer-overlay="true"
             className={
               inlineSideChat
