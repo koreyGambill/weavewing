@@ -158,8 +158,8 @@ function EnvironmentStatusSources({
       >
         <p className="px-4 py-3 text-xs text-muted-foreground">
           External tools checked from {label}. See current state and the last transition in the
-          Status tool in the right tools sidebar. History stays in each tool. Snoozing mutes
-          notifications while checks continue.
+          Status view in the side panel. History stays in each tool. Snoozing mutes notifications
+          while checks continue.
           {sharing && ` Shared sources also alert on every machine that links to ${label}.`}
         </p>
         {!canEdit && (

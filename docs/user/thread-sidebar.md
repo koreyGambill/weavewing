@@ -85,8 +85,21 @@ folders appear under **No project**, with the current folder name in the sidebar
 The thread keeps its history. Its next turn starts a new agent session in that
 folder with the conversation carried over. Finish or stop any work before moving.
 
-The left sidebar also holds tools for the current thread: Todos, Evidence, Artifacts,
-Links, Related, Timeline, Details, Environments and Inspect, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
+The thread's views (Todos, Evidence, Artifacts, Links, Related, Timeline, Details,
+Environments, Inspect and Automations) open in the side panel on the right, along
+with Calendar and Status. Open it with the panel button at the right of the
+titlebar, with `Cmd+Alt+Shift+B` on macOS or `Ctrl+Alt+Shift+B` on Windows and
+Linux, or on a thread's details with the panel button at the right end of the row
+under the composer. Choose a view from the menu at the top left of the panel. The
+panel covers the right edge of the chat instead of narrowing it, and shows the
+selected thread. It closes when you press Escape, click outside it or switch
+threads. **Pin** keeps it open while you move between threads, and its views
+follow the thread you select. **Lock to thread** keeps showing one thread while
+you select others; the panel names the locked thread, and unlocking returns it to
+following. Drag the panel's left edge to resize it; double-click the edge to
+reset it. On narrow screens the panel opens over the conversation.
+
+The left sidebar also holds the same thread views, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
 **Threads** at the top of the strip, to return to your threads. `Cmd+Alt+I` on macOS or `Ctrl+Alt+I`
 on Windows and Linux switches between your threads and the last tool, and opens
 a hidden sidebar on that tool. While the sidebar is hidden, its toggle shows when
@@ -111,8 +124,8 @@ Critical notifications also send a desktop notification and play a sound, and
 warnings do when Weavewing is in the background,
 following your settings under **Settings → General → Notifications**.
 
-Open **Status** in the right tools sidebar to check your status sources. Its alert
-dot also appears on the tools toggle while the sidebar is hidden. Configure sources
+Open **Status** in the side panel to check your status sources. Its alert dot
+also appears on the panel button while the panel is closed. Configure sources
 under **Settings → Status sources**, also linked from the Status tool.
 
 Links, Artifacts and Related have a filter box, and each row can copy its link,

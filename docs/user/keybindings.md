@@ -289,7 +289,7 @@ tile tab. Remap the close commands in Settings if you want those keys in the
 terminal. Apart from the leader and Alt+H/J/K/L overrides above, other Control keys, Escape, Tab, Shift+Tab, Alt combinations and function
 keys reach the focused terminal, including `Ctrl+R` for vim redo or shell history
 search, `Ctrl+Space` for completion, and `Ctrl+6` for vim's alternate buffer.
-Escape keeps working inside a maximized terminal or beside the tools overlay.
+Escape keeps working inside a maximized terminal or beside the side panel.
 Use `Ctrl+Shift+C` to copy terminal selections on Windows and Linux; `Ctrl+C`
 always reaches the terminal. Paste uses `Ctrl+Shift+V` there, leaving `Ctrl+V`
 for vim's visual block mode. macOS uses `Cmd+C` and `Cmd+V` for copy and paste.
@@ -338,13 +338,10 @@ Switch the left sidebar between the thread list and your last thread tool with
 `mod+alt+i` (`threadContext.toggle`). If the sidebar is hidden, it opens on
 that tool.
 
-## Calendar and tools sidebar
+## Side panel
 
-On web and desktop, open the tools sidebar with `mod+alt+shift+b` or **Toggle tools
-sidebar** in the command palette, then choose **Calendar**. Select a day to see its
-agenda. Calendar sync is not available yet. Choose Calendar again to collapse its
-page. Hiding and reopening the sidebar restores its last page and width.
-
-Drag the page's left edge to resize it, or focus that edge and use Left and Right.
-Double-click the edge to reset its width. Maximize fills the main workspace;
-Escape restores the sidebar when focus is outside a terminal. The tools sidebar is hidden on narrow screens.
+On web and desktop, `mod+alt+shift+b` opens and closes the side panel, as does
+**Toggle side panel** in the command palette. When focus is in the panel, Escape
+restores a maximized panel, then closes it, and returns focus to where you opened
+it. Elsewhere, Escape closes an unpinned panel unless a text field or terminal has
+focus. A pinned panel stays open until you close it.
