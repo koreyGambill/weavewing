@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { qaCardTitle, qaPresence } from "@t3tools/client-runtime/qa-card";
 import type { EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpRightIcon, CheckIcon } from "lucide-react";
 import { use } from "react";
@@ -6,7 +7,6 @@ import { use } from "react";
 import { useThreadEvidence } from "../../state/evidence";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Button } from "../ui/button";
-import { qaCardTitle, qaPresence } from "./qaCard.logic";
 import { ThreadEvidenceContext } from "./ThreadEvidenceContext";
 import { ThreadQaCard } from "./ThreadQaCard";
 
