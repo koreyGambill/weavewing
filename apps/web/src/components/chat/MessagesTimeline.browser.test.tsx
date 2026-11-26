@@ -6,11 +6,13 @@ import { AudioPreview } from "../files/AudioPreview";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 import {
   ComposerContextId,
+  ContextHandoffId,
   EnvironmentId,
   MessageId,
   NodeId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderThreadId,
   RunAttemptId,
   RunId,
   RuntimeRequestId,
@@ -259,19 +261,53 @@ function setup({ scheduledTasks = [] as ReadonlyArray<{ id: string; title: strin
 const TASK_ID = ScheduledTaskId.make("task-1");
 const AUTOMATION_PROMPT = "Triage the inbox\n\nLabel every new issue and close duplicates.";
 
-it("keeps the selected reply above the expandable Earlier conversation", async () => {
+it("keeps the selected reply and its rewind summary above the expandable Earlier conversation", async () => {
   const fixture = makeStreamingTimelineFixture();
-  const reply = fixture.visibleTurnItems[2]!.item;
+  const replyRow = fixture.visibleTurnItems[2]!;
+  const reply = replyRow.item;
   if (reply.type !== "assistant_message" || reply.runId === null) {
     throw new Error("Expected a completed assistant reply");
   }
   const parent = { environmentId: ENVIRONMENT_ID, threadId: fixture.threadId };
   const archive = ThreadId.make("split-archive");
   const rewind = vi.fn(async () => {});
+  const rewindWithSummary = vi.fn(async () => {});
   const providerInstanceId = ProviderInstanceId.make("codex");
+  const summaryId = TurnItemId.make("rewind-summary");
   const entries = deriveTimelineEntriesFromVisibleTurnItems({
     optimisticMessages: [],
-    visibleTurnItems: fixture.visibleTurnItems.slice(0, 3),
+    visibleTurnItems: [
+      ...fixture.visibleTurnItems.slice(0, 3),
+      {
+        ...replyRow,
+        position: replyRow.position + 1,
+        sourceItemId: summaryId,
+        item: {
+          id: summaryId,
+          threadId: reply.threadId,
+          runId: reply.runId,
+          nodeId: reply.nodeId,
+          providerThreadId: reply.providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: reply.ordinal + 1,
+          status: "completed",
+          title: "Context rewind: summary of 1 turn",
+          startedAt: reply.completedAt,
+          completedAt: reply.completedAt,
+          updatedAt: reply.updatedAt,
+          type: "handoff",
+          contextHandoffId: ContextHandoffId.make("context-handoff:rewind-summary"),
+          fromProviderThreadIds: [],
+          toProviderThreadId: ProviderThreadId.make("provider-thread:continued"),
+          fromProviderInstanceIds: [providerInstanceId],
+          toProviderInstanceId: providerInstanceId,
+          strategy: "checkpoint_summary",
+          summary: "Changed `src/parse.ts`; tests remain.",
+        },
+      },
+    ],
   });
   await using screen = await renderTimeline(entries, {
     routeThreadKey: `${ENVIRONMENT_ID}:${fixture.threadId}`,
@@ -283,7 +319,7 @@ it("keeps the selected reply above the expandable Earlier conversation", async (
         modelSelection: { instanceId: providerInstanceId, model: "gpt-6.2-sol" },
       },
     ],
-    rewindToReply: { disabledReason: () => null, run: rewind },
+    rewindToReply: { disabledReason: () => null, run: rewind, runWithSummary: rewindWithSummary },
     contextArchives: [
       {
         threadId: archive,
@@ -309,7 +345,15 @@ it("keeps the selected reply above the expandable Earlier conversation", async (
   (rewindButton.element() as HTMLElement).focus();
   await userEvent.keyboard("{Enter}");
   expect(rewind).toHaveBeenCalledWith(reply.runId, reply.messageId);
+  await userEvent.click(screen.getByRole("button", { name: "Rewind to here and keep a summary" }));
+  expect(rewindWithSummary).toHaveBeenCalledWith(reply.runId, reply.messageId);
+  await userEvent.click(screen.getByRole("button", { name: "Context rewind: summary of 1 turn" }));
+  const summaryText = screen.getByText("src/parse.ts");
+  await expect.element(summaryText).toBeVisible();
   const disclosure = screen.getByRole("button", { name: "Earlier conversation", exact: true });
+  expect(summaryText.element().getBoundingClientRect().bottom).toBeLessThan(
+    disclosure.element().getBoundingClientRect().top,
+  );
   await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
   await userEvent.click(disclosure);
   const kept = screen.getByText(reply.text).element();

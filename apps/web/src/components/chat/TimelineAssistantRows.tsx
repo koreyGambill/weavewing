@@ -10,7 +10,7 @@ import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thr
 import { Fragment, memo, use, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon, HistoryIcon, ReplyIcon } from "lucide-react";
+import { GitForkIcon, HistoryIcon, ReplyIcon, ScrollTextIcon } from "lucide-react";
 import {
   ASSISTANT_TEXT_SKIP_ATTRIBUTE,
   captureAssistantMessageOpening,
@@ -404,7 +404,13 @@ function AssistantMessageMeta({
       projectedItem.item.phase !== "partial_answer" &&
       projectedItem.item.runId !== null &&
       !message.streaming ? (
-        <AssistantRewindButton runId={projectedItem.item.runId} messageId={message.id} />
+        <>
+          <AssistantRewindButton runId={projectedItem.item.runId} messageId={message.id} />
+          <AssistantRewindWithSummaryButton
+            runId={projectedItem.item.runId}
+            messageId={message.id}
+          />
+        </>
       ) : null}
       {!message.streaming && projectedItem ? (
         <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
@@ -476,6 +482,45 @@ function AssistantRewindButton({ runId, messageId }: { runId: RunId; messageId: 
         <HistoryIcon className={cn("size-3", busy && "animate-pulse")} />
       </TooltipTrigger>
       <TooltipPopup side="top">{disabledReason ?? "Rewind to here"}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function AssistantRewindWithSummaryButton({
+  runId,
+  messageId,
+}: {
+  runId: RunId;
+  messageId: MessageId;
+}) {
+  const { rewindToReply } = use(TimelineRowCtx);
+  const [busy, setBusy] = useState(false);
+  const runWithSummary = rewindToReply?.runWithSummary;
+  if (!rewindToReply || !runWithSummary) return null;
+  const disabledReason = rewindToReply.disabledReason(runId, messageId);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            aria-label="Rewind to here and keep a summary"
+            aria-disabled={busy || disabledReason !== null || undefined}
+            onClick={() => {
+              if (busy || disabledReason !== null) return;
+              setBusy(true);
+              void runWithSummary(runId, messageId).finally(() => setBusy(false));
+            }}
+          />
+        }
+      >
+        <ScrollTextIcon className={cn("size-3", busy && "animate-pulse")} />
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        {disabledReason ?? "Rewind to here and keep a summary"}
+      </TooltipPopup>
     </Tooltip>
   );
 }

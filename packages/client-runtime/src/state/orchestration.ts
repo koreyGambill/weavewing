@@ -206,6 +206,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:force-stop-thread",
       tag: ORCHESTRATION_V2_WS_METHODS.forceStopThread,
     }),
+    rewindWithSummary: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:rewind-with-summary",
+      tag: ORCHESTRATION_V2_WS_METHODS.rewindWithSummary,
+    }),
     turnItem: (target: {
       readonly environmentId: EnvironmentId;
       readonly input: OrchestrationV2GetTurnItemInput;

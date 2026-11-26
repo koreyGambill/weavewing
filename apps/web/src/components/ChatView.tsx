@@ -2996,6 +2996,7 @@ export default function ChatView(props: ChatViewProps) {
     isRevertingCheckpoint,
     supportsConversationRollback,
     supportsRewindToReply: serverConfig?.environment.capabilities.rewindToReply === true,
+    supportsRewindWithSummary: serverConfig?.environment.capabilities.rewindWithSummary === true,
     activeEnvironmentUnavailable,
     activeEnvironmentUnavailableLabel,
     promptRef,

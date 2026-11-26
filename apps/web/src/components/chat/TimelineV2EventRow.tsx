@@ -12,6 +12,7 @@ import { cn } from "~/lib/utils";
 import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collapsible";
 import { EnvironmentSubagentAvatar, SubagentElapsed, V2LifecycleRow } from "./V2LifecycleRow";
 import { LinkRequestCard } from "./LinkRequestCard";
+import { RewindSummaryRow } from "./RewindSummaryRow";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineRowCtx, type TimelineRow } from "./timelineRowContext";
 import { subagentGroupTiming } from "./TimelineV2EventRow.logic";
@@ -30,6 +31,9 @@ export function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
         visibility={visibility}
       />
     );
+  }
+  if (item.type === "handoff" && item.strategy === "checkpoint_summary") {
+    return <RewindSummaryRow item={item} />;
   }
   if (item.type === "link_request") {
     return (

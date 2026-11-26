@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell, ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import type { ComposerThreadTarget } from "../../composerDraftStore";
 import type { ComposerHandleRef } from "../../composerHandleContext";
@@ -34,6 +35,7 @@ import { openRevertConfirm } from "./ChatOverlayHosts";
 import { assetEnvironment } from "../../state/assets";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { orchestrationEnvironment } from "../../state/orchestration";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { rewindToMessage } from "./chatViewSend";
@@ -41,7 +43,12 @@ import { makeThreadErrorSetter } from "../ChatView.logic";
 export interface RewindToReply {
   readonly disabledReason: (runId: RunId, messageId: MessageId) => string | null;
   readonly run: (runId: RunId, messageId: MessageId) => Promise<void>;
+  /** Absent where the environment or this connection cannot rewind with a summary. */
+  readonly runWithSummary?: (runId: RunId, messageId: MessageId) => Promise<void>;
 }
+
+const REWIND_WITH_SUMMARY_CONFIRMATION =
+  "Rewind to this reply and keep a summary?\nThe agent first writes a summary of the later turns. Then this conversation continues from this reply, the later messages move into Earlier conversation, and the summary goes to the agent with your next message. Your files stay as they are.";
 
 interface TimelineRewindInput {
   readonly environmentId: EnvironmentId;
@@ -57,6 +64,7 @@ interface TimelineRewindInput {
   readonly isRevertingCheckpoint: boolean;
   readonly supportsConversationRollback: boolean;
   readonly supportsRewindToReply: boolean;
+  readonly supportsRewindWithSummary: boolean;
   readonly forkHistoryPolicy?: OrchestrationV2ForkHistoryPolicy;
   readonly activeEnvironmentUnavailable: boolean;
   readonly activeEnvironmentUnavailableLabel: string | null;
@@ -112,6 +120,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     isRevertingCheckpoint,
     supportsConversationRollback,
     supportsRewindToReply,
+    supportsRewindWithSummary,
     forkHistoryPolicy,
     activeEnvironmentUnavailable,
     activeEnvironmentUnavailableLabel,
@@ -134,6 +143,12 @@ export function useTimelineRewind(input: TimelineRewindInput) {
   const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
     reportFailure: false,
   });
+  const rewindWithSummary = useAtomCommand(orchestrationEnvironment.rewindWithSummary, {
+    reportFailure: false,
+  });
+  const canRewindWithSummary =
+    useAtomValue(orchestrationEnvironment.rewindWithSummary.permissionAtom(environmentId)) &&
+    supportsRewindWithSummary;
 
   const onRevertToTurnCount = async (
     turnCount: number,
@@ -319,8 +334,47 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       );
     }
   });
+  const onRewindWithSummary = useStableCallback(async (runId: RunId, messageId: MessageId) => {
+    const api = readLocalApi();
+    if (!api || !activeThread || rewindToReplyDisabledReason(runId, messageId) !== null) return;
+    const confirmed = await settlePromise(() =>
+      api.dialogs.confirm(REWIND_WITH_SUMMARY_CONFIRMATION),
+    );
+    if (
+      confirmed._tag === "Failure" ||
+      !confirmed.value ||
+      useComposerDraftStore.getState().rewindingThreadKeys.has(routeThreadKey)
+    )
+      return;
+    useComposerDraftStore.setState((store) => ({
+      rewindingThreadKeys: new Set(store.rewindingThreadKeys).add(routeThreadKey),
+    }));
+    setThreadError(activeThread.id, null);
+    // Resolves after the agent's summary turn, so the composer waits as it does for a rewind.
+    const result = await rewindWithSummary({
+      environmentId,
+      input: { threadId: activeThread.id, runId, replyMessageId: messageId },
+    }).finally(() => {
+      useComposerDraftStore.setState((store) => {
+        const remaining = new Set(store.rewindingThreadKeys);
+        remaining.delete(routeThreadKey);
+        return { rewindingThreadKeys: remaining };
+      });
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setThreadError(
+        activeThread.id,
+        error instanceof Error ? error.message : "Could not rewind to this reply with a summary.",
+      );
+    }
+  });
   return {
-    rewindToReply: { disabledReason: rewindToReplyDisabledReason, run: onRewindToReply },
+    rewindToReply: {
+      disabledReason: rewindToReplyDisabledReason,
+      run: onRewindToReply,
+      ...(canRewindWithSummary ? { runWithSummary: onRewindWithSummary } : {}),
+    },
     onConfirmRevertStable,
     onForkFromRunStable,
     onRevertTimelineTurnStable,
