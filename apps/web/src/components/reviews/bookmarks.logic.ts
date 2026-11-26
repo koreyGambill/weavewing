@@ -147,9 +147,6 @@ export function bookmarkRailBars(
 /** Servers before bookmarks send no `todo`, and every follow-up they hold is a to-do. */
 export const isBookmarkTodo = (bookmark: MessageFollowUp) => bookmark.todo ?? true;
 
-export const isOpenBookmarkTodo = (bookmark: MessageFollowUp) =>
-  isBookmarkTodo(bookmark) && bookmark.doneAt === null;
-
 /** What a bookmark's menus offer, in order; to-do changes need a server with bookmarks. */
 export function bookmarkMenuActions(bookmark: MessageFollowUp): ReadonlyArray<{
   readonly label: string;

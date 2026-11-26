@@ -4,7 +4,10 @@ import { resolveStorage } from "./lib/storage";
 import {
   INITIAL_SIDE_AREA,
   SIDE_AREA_WIDE_MEDIA_QUERY,
+  adoptRetiredRail,
+  isCurrentSideArea,
   restoreSideArea,
+  type RetiredRailSelection,
   transitionSideArea,
   type SideAreaAction,
   type SideAreaState,
@@ -18,6 +21,8 @@ interface SideAreaStore extends SideAreaState {
 // What had focus when the side area opened; closing hands focus back to it.
 let returnFocus: HTMLElement | null = null;
 let focusOnOpen = false;
+// Whether the stored state predates the side area, so the left rail's selection may carry over.
+let restoredFromOlderVersion = true;
 
 /** True once after an action opened the side area, so a reload that restores it open keeps focus. */
 export function takeSideAreaFocusRequest(): boolean {
@@ -104,17 +109,31 @@ export const useToolSidebarStore = create<SideAreaStore>()(
     {
       name: "weavewing_tool_sidebar",
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
-      partialize: ({ open, view, width, pinned, locked }) => ({
+      partialize: ({ open, view, width, pinned, locked, threadView }) => ({
         open,
         view,
         width,
         pinned,
         locked,
+        threadView,
       }),
-      merge: (persisted, current) => ({ ...current, ...restoreSideArea(persisted) }),
+      merge: (persisted, current) => {
+        restoredFromOlderVersion = !isCurrentSideArea(persisted);
+        return { ...current, ...restoreSideArea(persisted) };
+      },
     },
   ),
 );
+
+/**
+ * Carries the retired left rail's stored selection into the side area, once: only while the side
+ * area's own stored state predates it. The rail's store calls this when it migrates.
+ */
+export function adoptRetiredRailSelection(rail: RetiredRailSelection) {
+  if (!restoredFromOlderVersion) return;
+  restoredFromOlderVersion = false;
+  useToolSidebarStore.setState((state) => adoptRetiredRail(state, rail));
+}
 
 /**
  * Gives the drop-down terminal room when it opens or is used: a maximized side area returns to

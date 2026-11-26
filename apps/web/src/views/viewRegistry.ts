@@ -20,7 +20,12 @@ import { createElement, type ComponentType, type ReactNode } from "react";
 
 import { CalendarTool } from "../components/CalendarTool";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
-import { VIEW_IDS, type ViewId, type ViewLayout } from "../components/ToolSidebar.logic";
+import {
+  VIEW_IDS,
+  type ThreadViewId,
+  type ViewId,
+  type ViewLayout,
+} from "../components/ToolSidebar.logic";
 import { InboxGlobalView, InboxUnreadCount } from "./InboxGlobalView";
 import { StatusAlertCount, StatusView } from "./StatusView";
 import { ThreadViewBody } from "./ThreadViewBody";
@@ -90,8 +95,6 @@ export interface ViewDefinition {
     readonly slots: ViewSlots;
   }) => ReactNode;
 }
-
-type ThreadViewId = Exclude<ViewId, "inbox" | "calendar" | "status">;
 
 function threadView<Id extends ThreadViewId>(
   id: Id,

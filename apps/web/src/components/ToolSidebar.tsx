@@ -180,6 +180,11 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           event.stopPropagation();
           toggle();
         },
+        "threadContext.toggle": (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          useToolSidebarStore.getState().dispatch({ type: "toggleThreadViews" });
+        },
       },
       { capture: true },
     );

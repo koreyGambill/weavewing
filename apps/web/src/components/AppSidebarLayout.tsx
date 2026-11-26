@@ -71,11 +71,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
-import {
-  ThreadToolsAttentionDot,
-  ThreadToolsFrame,
-  useThreadToolsAttention,
-} from "./ThreadContextSidebar";
+import { ThreadToolsAttentionDot, useThreadToolsAttention } from "./ThreadToolsAttention";
 import { ThreadToolsHost } from "./threadToolsHost";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -542,9 +538,7 @@ export function AppSidebarLayout({
               >
                 <SidebarFolderDrop>
                   <SidebarChromeHeader isElectron={isElectron} />
-                  <ThreadToolsFrame>
-                    <ThreadSidebar routeReveal={sidebarRouteReveal} />
-                  </ThreadToolsFrame>
+                  <ThreadSidebar routeReveal={sidebarRouteReveal} />
                   <SidebarChromeFooter />
                 </SidebarFolderDrop>
                 <SidebarRail onDoubleClick={resetSidebarWidth} />

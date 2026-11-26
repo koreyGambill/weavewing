@@ -1,4 +1,5 @@
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import { resolveThreadRouteRef } from "../threadRoutes";
 import { openChangeThreadFolder } from "../components/chat/changeThreadFolderDialogState";
 import { nextThreadGlyphSeed } from "@t3tools/client-runtime/thread-glyphs";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -207,9 +208,17 @@ export function useThreadActionMenu(input: {
           onOpenSideChat?.();
           return;
         case "todos":
-        case "automations":
-          useThreadContextSidebarStore.getState().show(action, { thread: threadRef });
+        case "automations": {
+          const routeThread = resolveThreadRouteRef(router.state.matches.at(-1)?.params ?? {});
+          // A thread other than the open one keeps the side panel on it while you stay here.
+          useThreadContextSidebarStore.getState().show(action, {
+            thread: threadRef,
+            lock:
+              routeThread?.environmentId !== threadRef.environmentId ||
+              routeThread.threadId !== threadRef.threadId,
+          });
           return;
+        }
         case "changes":
           onOpenChanges?.();
           return;

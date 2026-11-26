@@ -1,18 +1,15 @@
 import { EnvironmentId, ThreadId, type ThreadWorkspace } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
-  firstVisibleThreadTool,
-  migrateThreadToolsView,
-  nextSidebarView,
   selectContextThread,
   summarizeThreadTools,
   talkedWithThreads,
   withDelegates,
   threadToolsAttention,
-  toggleThreadToolsView,
 } from "./threadContextSidebar";
 import { applyTileAction, syncTileLayout } from "./threadTileLayout";
 import { useThreadContextSidebarStore } from "./threadContextSidebarStore";
+import { useToolSidebarStore } from "./toolSidebarStore";
 
 const owner = { environmentId: EnvironmentId.make("local"), threadId: ThreadId.make("owner") };
 const child = { environmentId: owner.environmentId, threadId: ThreadId.make("child") };
@@ -21,81 +18,29 @@ const surfaces = [{ id: "side-chat:child", kind: "side-chat", threadId: child.th
 describe("thread context sidebar selection", () => {
   it("follows the active thread through split, floating, maximized and Focus layouts", () => {
     const split = syncTileLayout(undefined, [], ["side-chat:child"], "side-chat:child", true);
-    expect(selectContextThread(owner, split, surfaces, null)).toEqual(child);
+    expect(selectContextThread(owner, split, surfaces)).toEqual(child);
     const mainGroup = split.root.kind === "split" ? split.root.first.id : "";
     const main = applyTileAction(split, { type: "focus", groupId: mainGroup });
-    expect(selectContextThread(owner, main, surfaces, null)).toEqual(owner);
+    expect(selectContextThread(owner, main, surfaces)).toEqual(owner);
     const floating = applyTileAction(split, {
       type: "float-group",
       groupId: "panels-group",
       rect: { x: 0.2, y: 0.2, width: 0.4, height: 0.4 },
     });
-    expect(selectContextThread(owner, floating, surfaces, null)).toEqual(child);
+    expect(selectContextThread(owner, floating, surfaces)).toEqual(child);
     const maximized = applyTileAction(floating, { type: "maximize", groupId: "panels-group" });
-    expect(selectContextThread(owner, maximized, surfaces, null)).toEqual(child);
+    expect(selectContextThread(owner, maximized, surfaces)).toEqual(child);
     const paired = applyTileAction(
       applyTileAction(split, { type: "maximize", groupId: mainGroup }),
       { type: "show-beside", groupId: "panels-group" },
     );
-    expect(selectContextThread(owner, paired, surfaces, null)).toEqual(child);
+    expect(selectContextThread(owner, paired, surfaces)).toEqual(child);
     const left = applyTileAction(paired, { type: "focus", groupId: mainGroup });
-    expect(selectContextThread(owner, left, surfaces, null)).toEqual(owner);
+    expect(selectContextThread(owner, left, surfaces)).toEqual(owner);
   });
 
-  it("keeps a pinned thread across focus and environment changes, then resumes following", () => {
-    useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
-    const store = useThreadContextSidebarStore.getState();
-    store.pin(child);
-    const other = { environmentId: EnvironmentId.make("remote"), threadId: owner.threadId };
-    expect(
-      selectContextThread(other, null, [], useThreadContextSidebarStore.getState().pinned),
-    ).toEqual(child);
-    store.pin(null);
-    expect(
-      selectContextThread(other, null, [], useThreadContextSidebarStore.getState().pinned),
-    ).toEqual(other);
-    expect(selectContextThread(null, null, [], null)).toBeNull();
-  });
-});
-
-describe("sidebar views", () => {
-  it("returns to threads from the active tool and remembers the last tool", () => {
-    const tools = { view: "threads", lastTool: "todos" } as const;
-    const artifacts = nextSidebarView(tools, "artifacts");
-    expect(artifacts).toEqual({ view: "artifacts", lastTool: "artifacts" });
-    expect(nextSidebarView(artifacts, "artifacts")).toEqual({
-      view: "threads",
-      lastTool: "artifacts",
-    });
-    expect(nextSidebarView(artifacts, "threads")).toEqual({
-      view: "threads",
-      lastTool: "artifacts",
-    });
-  });
-
-  it("toggles between threads and the last tool, opening a hidden sidebar on a tool", () => {
-    const threads = { view: "threads", lastTool: "links", hidden: [] } as const;
-    expect(toggleThreadToolsView(threads, true)).toEqual({
-      view: "links",
-      lastTool: "links",
-      revealPending: false,
-    });
-    expect(toggleThreadToolsView({ view: "links", lastTool: "links", hidden: [] }, true)).toEqual({
-      view: "threads",
-      lastTool: "links",
-      revealPending: false,
-    });
-    expect(toggleThreadToolsView(threads, false)).toEqual({
-      view: "links",
-      lastTool: "links",
-      revealPending: true,
-    });
-    expect(
-      toggleThreadToolsView({ view: "inspect", lastTool: "inspect", hidden: [] }, false),
-    ).toMatchObject({
-      view: "inspect",
-      revealPending: true,
-    });
+  it("has no thread without a route", () => {
+    expect(selectContextThread(null, null, [])).toBeNull();
   });
 });
 
@@ -238,17 +183,6 @@ describe("thread tools attention", () => {
 });
 
 describe("thread tool views", () => {
-  it("maps the retired right panel's views onto the sidebar's", () => {
-    expect(migrateThreadToolsView("list")).toBe("todos");
-    expect(migrateThreadToolsView("marks")).toBe("links");
-    expect(migrateThreadToolsView("ticket")).toBe("links");
-    expect(migrateThreadToolsView("context")).toBe("inspect");
-    expect(migrateThreadToolsView("environments")).toBe("environments");
-    expect(migrateThreadToolsView("timeline")).toBe("timeline");
-    expect(migrateThreadToolsView(undefined)).toBe("todos");
-    expect(firstVisibleThreadTool(["todos", "evidence", "artifacts"])).toBe("links");
-  });
-
   it("lists threads this one talked with, not siblings", () => {
     const shell = (id: string, parent: string | null = null, forkOf?: string) => ({
       id,
@@ -311,88 +245,137 @@ describe("thread tool views", () => {
   });
 });
 
-describe("thread tools store", () => {
-  const reset = () =>
+describe("thread views store", () => {
+  const reset = () => {
     useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
+    useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
+  };
 
-  it("hiding the open or last tool falls back to the thread list and the next visible tool", () => {
-    reset();
-    const store = useThreadContextSidebarStore.getState();
-    store.selectView("todos");
-    store.setHidden("todos", true);
-    expect(useThreadContextSidebarStore.getState()).toMatchObject({
-      view: "threads",
-      lastTool: "evidence",
-      hidden: ["todos"],
-    });
-    for (const tool of [
-      "evidence",
-      "artifacts",
-      "links",
-      "related",
-      "timeline",
-      "details",
-      "environments",
-      "inspect",
+  const lockedElsewhere = { locked: owner };
+  // One row per entry point that opened a rail view: [entry, view, target, side panel before, after].
+  it.each([
+    ["palette: open artifacts", "artifacts", {}, {}, { view: "artifacts", locked: null }],
+    ["palette: open environments", "environments", {}, {}, { view: "environments" }],
+    ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: owner }],
+    ["palette: open automations", "automations", {}, {}, { view: "automations" }],
+    ["palette: open evidence", "evidence", {}, {}, { view: "evidence" }],
+    [
+      "thread menu: todos, open thread",
+      "todos",
+      { thread: child },
+      lockedElsewhere,
+      { view: "todos", locked: null },
+    ],
+    [
+      "thread menu: todos, other thread",
+      "todos",
+      { thread: child, lock: true },
+      {},
+      { view: "todos", locked: child },
+    ],
+    [
+      "thread menu: automations, other thread",
       "automations",
-    ] as const)
-      store.setHidden(tool, true);
-    expect(firstVisibleThreadTool(useThreadContextSidebarStore.getState().hidden)).toBeNull();
-    store.toggleTools(true);
-    expect(useThreadContextSidebarStore.getState().view).toBe("threads");
+      { thread: child, lock: true },
+      {},
+      { view: "automations", locked: child },
+    ],
+    ["automation marker", "automations", {}, {}, { view: "automations" }],
+    [
+      "notification open",
+      "inbox",
+      { notification: { environmentId: "local", id: "n1" } },
+      {},
+      { view: "inbox" },
+    ],
+    [
+      "review reminder",
+      "artifacts",
+      { thread: child, artifactId: "r1" },
+      lockedElsewhere,
+      { view: "artifacts", locked: null },
+    ],
+    [
+      "review panel, reviews button",
+      "artifacts",
+      { thread: child },
+      { locked: child },
+      { view: "artifacts", locked: child },
+    ],
+    [
+      "todos summary, waiting strip row",
+      "todos",
+      { thread: child },
+      {},
+      { view: "todos", locked: null },
+    ],
+    ["evidence chat row", "evidence", {}, {}, { view: "evidence" }],
+    [
+      "links: open in environments",
+      "environments",
+      { thread: child, environmentId: "e" },
+      { locked: child },
+      { view: "environments", locked: child },
+    ],
+  ] as const)("opens %s in the side panel", (_entry, view, target, before, after) => {
+    reset();
+    // The side panel remembers what had focus when it opened.
+    vi.stubGlobal("document", { activeElement: null });
+    vi.stubGlobal("HTMLElement", Object);
+    useToolSidebarStore.setState(before);
+    useThreadContextSidebarStore.getState().show(view, target);
+    expect(useToolSidebarStore.getState()).toMatchObject({ open: true, ...after });
+    vi.unstubAllGlobals();
   });
 
-  it("opening a hidden tool from outside the strip unhides it and selects the artifact", () => {
+  it("opens a view on the item it names", () => {
     reset();
+    vi.stubGlobal("document", { activeElement: null });
+    vi.stubGlobal("HTMLElement", Object);
     const store = useThreadContextSidebarStore.getState();
-    store.setHidden("artifacts", true);
     store.show("artifacts", { thread: child, artifactId: "plan" });
-    expect(useThreadContextSidebarStore.getState()).toMatchObject({
-      view: "artifacts",
-      lastTool: "artifacts",
-      artifactSelection: { thread: child, id: "plan" },
-      pinned: child,
-      hidden: [],
-      revealPending: true,
+    expect(useThreadContextSidebarStore.getState().artifactSelection).toEqual({
+      thread: child,
+      id: "plan",
     });
-    store.selectView("artifacts");
-    store.selectView("artifacts");
-    expect(useThreadContextSidebarStore.getState().artifactSelection).toBeNull();
-    // An unpinned open still remembers its thread, so another thread doesn't inherit it.
-    store.pin(null);
     store.show("artifacts", { artifactThread: child, artifactId: "plan" });
-    expect(useThreadContextSidebarStore.getState()).toMatchObject({
-      artifactSelection: { thread: child, id: "plan" },
-      pinned: null,
+    expect(useThreadContextSidebarStore.getState().artifactSelection).toEqual({
+      thread: child,
+      id: "plan",
     });
+    store.show("environments", { thread: child, environmentId: "e" });
+    expect(useThreadContextSidebarStore.getState().environmentSelection).toEqual({
+      thread: child,
+      id: "e",
+    });
+    store.show("inbox", { notification: { environmentId: "local", id: "n1" } });
+    expect(useThreadContextSidebarStore.getState()).toMatchObject({
+      inboxTab: "inbox",
+      inboxSelection: { kind: "notification", environmentId: "local", id: "n1" },
+    });
+    vi.unstubAllGlobals();
   });
 
-  it("migrates the right panel's saved view and persists only viewer choices", () => {
-    const { migrate, partialize } = useThreadContextSidebarStore.persist.getOptions();
-    expect(migrate?.({ open: true, view: "marks" }, 0)).toEqual({
-      view: "threads",
-      lastTool: "links",
-    });
-    const current = { view: "inspect", lastTool: "inspect", hidden: ["inbox"] };
-    expect(migrate?.(current, 2)).toBe(current);
-    expect(migrate?.({ ...current, hidden: ["status", "links"] }, 1)).toEqual({
-      ...current,
-      hidden: ["inbox", "links"],
-    });
+  it("hands the rail's stored selection to the side panel once and keeps only view choices", () => {
     reset();
-    useThreadContextSidebarStore
-      .getState()
-      .show("environments", { thread: child, environmentId: "e" });
+    const { migrate, partialize } = useThreadContextSidebarStore.persist.getOptions();
+    const rail = {
+      view: "timeline",
+      lastTool: "timeline",
+      hidden: ["inbox"],
+      todoScope: "all",
+    };
+    expect(migrate?.(rail, 2)).toEqual({ todoScope: "all" });
+    expect(useToolSidebarStore.getState()).toMatchObject({
+      open: true,
+      view: "timeline",
+      threadView: "timeline",
+    });
+    useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
+    expect(migrate?.({ view: "links", lastTool: "links" }, 1)).toEqual({});
+    expect(useToolSidebarStore.getState().open).toBe(false);
     expect(
       Object.keys(partialize!(useThreadContextSidebarStore.getState()) as object).toSorted(),
-    ).toEqual([
-      "evidenceCoverageDismissed",
-      "hidden",
-      "lastTool",
-      "todoFilter",
-      "todoScope",
-      "todoShowClosed",
-      "view",
-    ]);
+    ).toEqual(["evidenceCoverageDismissed", "todoFilter", "todoScope", "todoShowClosed"]);
   });
 });

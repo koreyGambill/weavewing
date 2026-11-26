@@ -82,6 +82,7 @@ async function mountApp(threads: ReadonlyArray<FakeThread>, width: number, path?
     pinned: false,
     locked: null,
     maximized: false,
+    threadView: "details",
   });
   stack.use(installFakeEnvironment(threads));
   __setClientSettingsForTests({
@@ -133,6 +134,28 @@ it("covers the chat without changing the chat's or the thread list's width", asy
   await userEvent.click(panel.getByRole("button", { name: "Close side panel" }));
   await expect.element(panel).not.toBeInTheDocument();
   expect(widths()).toEqual(before);
+});
+
+it("gives the thread list the whole left sidebar and opens thread views on the right", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("no-rail", 1)], 1280);
+  await using _app = stack;
+  expect(document.querySelector('nav[aria-label="Sidebar views"]')).toBeNull();
+  const sidebar = document.querySelector('[data-app-sidebar] [data-sidebar="sidebar"]');
+  const list = document.querySelector('[data-app-sidebar] [data-slot="scroll-area-viewport"]');
+  expect(sidebar).not.toBeNull();
+  expect(list).not.toBeNull();
+  // The rail took 44 px beside the list; only the sidebar's border may remain.
+  expect(list!.getBoundingClientRect().width).toBeGreaterThanOrEqual(
+    sidebar!.getBoundingClientRect().width - 2,
+  );
+  await act(() => useToolSidebarStore.setState({ view: "status", threadView: "links" }));
+  await userEvent.keyboard("{Control>}{Alt>}i{/Alt}{/Control}");
+  await expect.element(screen.getByRole("complementary", { name: "Side panel" })).toBeVisible();
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "links" });
+  await userEvent.keyboard("{Control>}{Alt>}i{/Alt}{/Control}");
+  await expect
+    .element(screen.getByRole("complementary", { name: "Side panel" }))
+    .not.toBeInTheDocument();
 });
 
 it("moves focus into the side panel, tabs through it and out while pinned, and returns focus on Escape", async () => {
