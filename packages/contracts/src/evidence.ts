@@ -13,6 +13,8 @@ import {
 const Text = (max: number) => TrimmedNonEmptyString.check(Schema.isMaxLength(max));
 
 export const EVIDENCE_LIST_PAGE_SIZE = 20;
+/** The most notes one Notes page lists; a page holds whole landings, so it may list fewer. */
+export const EVIDENCE_NOTES_PAGE_LIMIT = 50;
 export const EVIDENCE_RECORD_MAX_BYTES = 64 * 1024;
 
 export const EvidenceSlug = Text(120).check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/));
@@ -107,7 +109,7 @@ export const EvidenceChange = Schema.Struct({
   attention: Schema.optional(
     Schema.Literals(["needs_you", "note"]).annotate({
       description:
-        "needs_you: the user must look at or decide something you could not, such as a visual change nobody has seen or the asked-for behavior never run; it raises a QA card. note (the default): routine gaps such as no device run or no live remote, kept in the thread's notes log with no card. Captures, a waived or changes-requested review and a failed or skipped check raise a card either way.",
+        "needs_you raises a QA card; note, the default, logs the change without one. Captures, a waived or changes-requested review, or a failed or skipped check raise a card either way.",
     }),
   ),
   evidenceDir: Schema.optional(Text(1024)),
@@ -214,6 +216,8 @@ export const EvidenceQaTally = Schema.Struct({
   confirmed: NonNegativeInt,
   problem: NonNegativeInt,
   waived: NonNegativeInt,
+  /** Of the quiet changes, those that are notes: they list gaps. */
+  noted: Schema.optional(NonNegativeInt),
 });
 export type EvidenceQaTally = typeof EvidenceQaTally.Type;
 
@@ -234,12 +238,18 @@ export const EvidenceLandingSummary = Schema.Struct({
   changeCount: NonNegativeInt,
   qa: EvidenceQaTally,
   /**
-   * With `notes`: the changes recorded without a card that list gaps, in record order. `title` is
-   * the summary's first line, else the ask's.
+   * With `notes`: the changes recorded without a card that list gaps, in record order, shortened
+   * for the list. `title` is the summary's first line, else the ask's; `gapPreviews` are the first
+   * gaps, each cut short, of `gapCount`. Reading the landing gives the full text.
    */
   notes: Schema.optional(
     Schema.Array(
-      Schema.Struct({ id: EvidenceSlug, title: Schema.String, gaps: EvidenceChange.fields.gaps }),
+      Schema.Struct({
+        id: EvidenceSlug,
+        title: Schema.String,
+        gapPreviews: Schema.Array(Schema.String),
+        gapCount: NonNegativeInt,
+      }),
     ),
   ),
 });
@@ -251,7 +261,10 @@ export const EvidenceListInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   /** Only landings with a pending or problem change. */
   needsQa: Schema.optional(Schema.Boolean),
-  /** Only landings with a note, each listing its notes. */
+  /**
+   * Only landings with a note, each listing its notes, at most `EVIDENCE_NOTES_PAGE_LIMIT` notes a
+   * page. With `threadId`, also the landings its delegated children recorded for it.
+   */
   notes: Schema.optional(Schema.Boolean),
   before: Schema.optional(EvidenceCursor),
 });
@@ -305,7 +318,10 @@ export const EvidenceThreadInput = Schema.Struct({
 });
 export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
 
-/** The landings a thread shows, recorded in it or for it: the newest, capped, plus any requested. */
+/**
+ * The landings a thread shows, recorded in it or for it: the newest, capped, plus any requested and
+ * any holding a QA change its waiting strip lists.
+ */
 export const EvidenceThreadResult = Schema.Struct({ landings: Schema.Array(EvidenceLanding) });
 export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
 
