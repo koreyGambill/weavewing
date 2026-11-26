@@ -1977,9 +1977,7 @@ const make = Effect.gen(function* () {
         },
         sideChat: true,
         rewindSummary: { runId: run.id, messageId: summary.messageId, text: summary.text.trim() },
-      }).pipe(
-        Effect.mapError((cause) => fail("rewind-failed", undefined, cause)),
-      );
+      }).pipe(Effect.mapError((cause) => fail("rewind-failed", undefined, cause)));
       return { archiveThreadId, summarizedTurns: turns };
     }).pipe(
       Effect.mapError((cause) =>
