@@ -919,12 +919,12 @@ export const ClaudeAiConnectorMode = Schema.Literals(
 export type ClaudeAiConnectorMode = typeof ClaudeAiConnectorMode.Type;
 
 // "inherit" left the connectors to Claude Code's own settings; Weavewing now always decides, and
-// that old default reads as the new one, Off.
-const ClaudeAiConnectorsSetting = Schema.Literals(["inherit", "off", "on"]).pipe(
+// that old default, like any value other than "on", reads as the new default, Off.
+const ClaudeAiConnectorsSetting = Schema.Unknown.pipe(
   Schema.decodeTo(
     ClaudeAiConnectorMode,
-    SchemaTransformation.transform<ClaudeAiConnectorMode, "inherit" | ClaudeAiConnectorMode>({
-      decode: (mode) => (mode === "inherit" ? "off" : mode),
+    SchemaTransformation.transform<ClaudeAiConnectorMode, unknown>({
+      decode: (mode) => (mode === "on" ? "on" : "off"),
       encode: (mode) => mode,
     }),
   ),
