@@ -467,7 +467,7 @@ function DropdownTerminalPanel() {
           (node instanceof Element &&
             // The side area sits beside the drop-down, or over it as a narrow sheet.
             (node.matches(
-              "[data-dropdown-terminal-toggle], [data-context-menu], [data-side-area]",
+              "[data-dropdown-terminal-toggle], [data-context-menu], [data-side-area], [data-side-area-toggle]",
             ) ||
               (isTerminalCloseConfirmPending() &&
                 node.matches(

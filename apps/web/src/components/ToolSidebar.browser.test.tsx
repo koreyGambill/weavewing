@@ -13,6 +13,8 @@ import "~/index.css";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
 import { useDropdownTerminalStore } from "~/dropdownTerminalStore";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { threadListRead } from "~/state/threadWorkspace";
 import { useToolSidebarStore } from "~/toolSidebarStore";
 import { SIDE_AREA_SETTLE_MS } from "./ToolSidebar";
 import {
@@ -171,7 +173,7 @@ it("hides the drop-down terminal under a full-width sheet and closes the sheet w
   const terminal = page.getByRole("region", { name: "Drop-down terminal" });
   await expect.element(terminal).toBeVisible();
   const terminalElement = terminal.element() as HTMLElement;
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "links" }));
+  await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   const close = panel.getByRole("button", { name: "Close side panel" });
   await expect.element(close).toBeVisible();
@@ -232,6 +234,7 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   const { stack, screen, router } = await mountApp(threads, 1280);
   await using _app = stack;
   const started: string[] = [];
+  const interrupted: string[] = [];
   const inFlight = new Map<ThreadId, number>();
   let maxThreadsInFlight = 0;
   const hold = (method: string) => (input: { readonly threadId: ThreadId }) =>
@@ -243,6 +246,7 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
+          interrupted.push(`${method} ${input.threadId}`);
           const left = (inFlight.get(input.threadId) ?? 1) - 1;
           if (left === 0) inFlight.delete(input.threadId);
           else inFlight.set(input.threadId, left);
@@ -272,11 +276,24 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   await vi.waitFor(() => expect(inFlight.size).toBe(0));
   await expect.element(panel.getByRole("region", { name: "Todos" })).toBeVisible();
   expect(panel.element().querySelector('[data-slot="skeleton"]')).toBeNull();
-  await act(() => vi.advanceTimersByTime(SIDE_AREA_SETTLE_MS));
+  interrupted.length = 0;
   const last = threads.at(-1)!.id;
+  const lastList = threadListRead({
+    environmentId: ENVIRONMENT_ID,
+    input: { threadId: last, all: true },
+  });
+  // The rest ends on a timer outside any act scope, as it does in the app. The final query must be
+  // subscribed in that same task: an unsubscribed node is collected by the registry's next task,
+  // which interrupts the request it just started.
+  vi.advanceTimersByTime(SIDE_AREA_SETTLE_MS);
+  expect(appAtomRegistry.getNodes().get(lastList)?.listeners.size ?? 0).toBeGreaterThan(0);
   await vi.waitFor(() =>
     expect(started.toSorted()).toEqual([`artifactList ${last}`, `listRead ${last}`]),
   );
+  await act(async () => {});
+  // The final thread's pair is sent once and kept, not sent, interrupted and sent again.
+  expect(started.toSorted()).toEqual([`artifactList ${last}`, `listRead ${last}`]);
+  expect(interrupted).toEqual([]);
   expect(maxThreadsInFlight).toBe(1);
   expect(useToolSidebarStore.getState().open).toBe(true);
 });
