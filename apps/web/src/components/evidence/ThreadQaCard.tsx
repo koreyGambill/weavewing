@@ -122,7 +122,7 @@ export function ThreadQaCard({
   const [expanded, setExpanded] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   // Where focus goes once the card changes shape under the button that was pressed.
-  const focusNext = useRef<"line" | "card" | null>(null);
+  const focusNext = useRef<"line" | "card" | "reason" | null>(null);
   const qa = answered !== null && answered.updatedAt > change.qa.updatedAt ? answered : change.qa;
   const status = qaCardStatus(qa, inComposer);
   const waiting = qa.state === "pending" || qa.state === "quiet";
@@ -159,12 +159,17 @@ export function ThreadQaCard({
     setExpanded(false);
     if (!(await answer("pending"))) focusNext.current = null;
   };
+  // The reason form replaces the button that opened it, so closing it hands focus back there.
+  const closeReason = () => {
+    focusNext.current = "reason";
+    setReason(null);
+  };
   const saveReason = async () => {
     if (reason === null) return;
     if (reason.trim() !== qa.note.trim() && !(await answer("waived", reason.trim()))) return;
-    setReason(null);
+    closeReason();
   };
-  const focusOnMount = (target: "line" | "card") => (node: HTMLButtonElement | null) => {
+  const focusOnMount = (target: "line" | "card" | "reason") => (node: HTMLButtonElement | null) => {
     if (node === null || focusNext.current !== target) return;
     focusNext.current = null;
     node.focus();
@@ -358,12 +363,12 @@ export function ThreadQaCard({
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
-                setReason(null);
+                closeReason();
               }
             }}
           />
           <div className="flex justify-end gap-1">
-            <Button size="xs" variant="ghost" type="button" onClick={() => setReason(null)}>
+            <Button size="xs" variant="ghost" type="button" onClick={closeReason}>
               Cancel
             </Button>
             <Button size="xs" type="submit" disabled={!usable}>
@@ -412,6 +417,7 @@ export function ThreadQaCard({
                 <HelpButton
                   help={HELP.reason}
                   aria-label={`${note ? "Edit" : "Add"} why ${ref} was dismissed`}
+                  ref={focusOnMount("reason")}
                   disabled={!usable}
                   onClick={() => setReason(qa.note)}
                 >

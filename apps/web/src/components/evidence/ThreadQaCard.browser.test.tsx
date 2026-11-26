@@ -155,4 +155,13 @@ it("dismisses in one click and takes an optional reason afterwards", async () =>
     note: "Covered by the toast tests.",
   });
   await expect.element(screen.getByText("Covered by the toast tests.")).toBeVisible();
+  // Closing the form by saving, Escape or Cancel hands focus back to the button that opened it.
+  const edit = screen.getByRole("button", { name: "Edit why QA1 was dismissed" });
+  await expect.element(edit).toHaveFocus();
+  await userEvent.click(edit);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(edit).toHaveFocus();
+  await userEvent.click(edit);
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await expect.element(edit).toHaveFocus();
 });
