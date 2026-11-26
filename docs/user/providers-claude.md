@@ -85,7 +85,8 @@ Claude process next starts.
 The **Tools** control under the composer counts what a Claude thread leaves out, for example
 "Tools 8 off", or reads "Tools all on". Open it to switch a left-out tool on for this thread
 only. Each row shows an estimate of the context the item adds. Switches take effect when you
-choose **Reload session**.
+choose **Reload session**. When the composer is too narrow for every control, Tools moves first
+into the thread menu (**⋯**), where its row shows the same count and opens the same popover.
 
 The popover also lists the MCP servers the thread's session can load, read when you open it, and
 marks the ones the current session has not loaded. Switching a server off keeps its tools out of
