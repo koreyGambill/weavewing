@@ -58,6 +58,7 @@ import * as LegacyV1ThreadImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as CommandReceiptStore from "../CommandReceiptStore.ts";
 import * as ThreadManagementService from "../ThreadManagementService.ts";
+import { projectThreadProjectionForWire } from "../WireProjection.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as EffectWorker from "../EffectWorker.ts";
 import * as EffectOutbox from "../EffectOutbox.ts";
@@ -6017,7 +6018,16 @@ describe("orchestration v2 provider switching", () => {
     const root = ThreadId.make("thread:rewind-summary");
     const withRewindSummaryHarness = <A, E, R>(
       name: string,
-      adapter: Pick<Parameters<typeof makeTestAdapter>[0], "failedRunOrdinals">,
+      adapter: Pick<
+        Parameters<typeof makeTestAdapter>[0],
+        | "failedRunOrdinals"
+        | "interruptedRunOrdinals"
+        | "failResumeOnce"
+        | "holdRunOrdinal"
+        | "holdFirstTurn"
+        | "releaseFirstTurn"
+        | "heldRunningToolCall"
+      >,
       body: (input: {
         readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
         readonly forkRequests: Ref.Ref<
@@ -6062,6 +6072,14 @@ describe("orchestration v2 provider switching", () => {
                   forkedFrom: { providerThreadId: input.sourceProviderThread.id },
                 };
               }),
+          }),
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: {},
+            capturedTurns,
           }),
         ]);
         return yield* body({ capturedTurns, forkRequests, workspaceFile }).pipe(
@@ -6124,6 +6142,9 @@ describe("orchestration v2 provider switching", () => {
     const sendTo = Effect.fn("RewindSummaryTest.send")(function* (
       targetThreadId: ThreadId,
       text: string,
+      overrides: Partial<
+        Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>
+      > = {},
     ) {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       yield* orchestrator.dispatch({
@@ -6139,6 +6160,7 @@ describe("orchestration v2 provider switching", () => {
         modelSelection: CLAUDE_MODEL_SELECTION,
         deliveryIntent: "auto",
         dispatchMode: { type: "start_immediately" },
+        ...overrides,
       });
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* waitForIdle(targetThreadId);
@@ -6159,6 +6181,24 @@ describe("orchestration v2 provider switching", () => {
       );
     const summaryHandoffs = (projection: OrchestrationV2ThreadProjection) =>
       projection.contextHandoffs.filter((handoff) => handoff.strategy === "checkpoint_summary");
+    const rewindAfterPrefix = Effect.fn("RewindSummaryTest.rewindAfterPrefix")(function* (
+      workspaceFile: string,
+    ) {
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const { before, prefixReply } = yield* setUpThread(workspaceFile);
+      return yield* threads.rewindWithSummary({
+        threadId: root,
+        runId: before.runs[0]!.id,
+        replyMessageId: prefixReply.messageId,
+        createdBy: "user",
+        creationSource: "web",
+      });
+    });
+    const pendingSummary = Effect.fn("RewindSummaryTest.pendingSummary")(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const [handoff] = summaryHandoffs(yield* orchestrator.getThreadProjection(root));
+      return handoff?.status === "ready" && handoff.delivery === undefined;
+    });
 
     it.live(
       "moves the later turns into an archive and sends the agent's summary once with the next message",
@@ -6200,8 +6240,10 @@ describe("orchestration v2 provider switching", () => {
                 (yield* Ref.get(forkRequests))[0]?.providerTurnId,
                 prefixReply.providerTurnId,
               );
-              const shown = main.visibleTurnItems.flatMap(({ item }) =>
-                item.type === "handoff" && item.strategy === "checkpoint_summary" ? [item] : [],
+              // What a client receives: the wire projection, not the stored row.
+              const shown = projectThreadProjectionForWire(main).visibleTurnItems.flatMap(
+                ({ item }) =>
+                  item.type === "handoff" && item.strategy === "checkpoint_summary" ? [item] : [],
               );
               assert.deepEqual(
                 shown.map((item) => [item.title, item.summary, item.runId]),
@@ -6222,7 +6264,7 @@ describe("orchestration v2 provider switching", () => {
               assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
               const after = yield* orchestrator.getThreadProjection(root);
               assert.isTrue(
-                after.visibleTurnItems.some(
+                projectThreadProjectionForWire(after).visibleTurnItems.some(
                   ({ item }) => item.type === "handoff" && item.summary === SUMMARY,
                 ),
               );
@@ -6230,61 +6272,228 @@ describe("orchestration v2 provider switching", () => {
         ),
     );
 
-    it.live("leaves the conversation as it was when the summary turn fails", () =>
-      withRewindSummaryHarness(
-        "rewind-summary-failed",
-        { failedRunOrdinals: new Set([3]) },
-        ({ forkRequests, workspaceFile }) =>
-          Effect.gen(function* () {
-            const orchestrator = yield* Orchestrator.OrchestratorV2;
-            const threads = yield* ThreadManagementService.ThreadManagementService;
-            const { before, prefixReply } = yield* setUpThread(workspaceFile);
+    it.live.each(["fails", "is stopped"] as const)(
+      "leaves the conversation as it was when the summary turn %s",
+      (ending) =>
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          return yield* withRewindSummaryHarness(
+            `rewind-summary-${ending === "fails" ? "failed" : "stopped"}`,
+            ending === "fails"
+              ? { failedRunOrdinals: new Set([3]) }
+              : {
+                  interruptedRunOrdinals: new Set([3]),
+                  holdRunOrdinal: 3,
+                  holdFirstTurn: started,
+                  releaseFirstTurn: release,
+                },
+            ({ forkRequests, workspaceFile }) =>
+              Effect.gen(function* () {
+                const orchestrator = yield* Orchestrator.OrchestratorV2;
+                const threads = yield* ThreadManagementService.ThreadManagementService;
+                const { before, prefixReply } = yield* setUpThread(workspaceFile);
 
-            const error = yield* threads
-              .rewindWithSummary({
-                threadId: root,
-                runId: before.runs[0]!.id,
-                replyMessageId: prefixReply.messageId,
-                createdBy: "user",
-                creationSource: "web",
-              })
-              .pipe(Effect.flip);
+                const rewinding = yield* threads
+                  .rewindWithSummary({
+                    threadId: root,
+                    runId: before.runs[0]!.id,
+                    replyMessageId: prefixReply.messageId,
+                    createdBy: "user",
+                    creationSource: "web",
+                  })
+                  .pipe(Effect.flip, Effect.forkChild);
+                if (ending === "is stopped") {
+                  yield* Deferred.await(started);
+                  const summaryRun = (yield* orchestrator.getThreadProjection(root)).runs.at(-1)!;
+                  // What the composer's Stop button dispatches.
+                  yield* orchestrator.dispatch({
+                    type: "run.interrupt",
+                    commandId: CommandId.make("rewind-summary:stop"),
+                    threadId: root,
+                    runId: summaryRun.id,
+                  });
+                  yield* Deferred.succeed(release, undefined);
+                }
+                const error = yield* Fiber.join(rewinding);
 
-            assert.equal(error.reason, "summary-failed");
-            const main = yield* orchestrator.getThreadProjection(root);
-            assert.equal(main.thread.activeProviderThreadId, before.thread.activeProviderThreadId);
-            assert.lengthOf(yield* Ref.get(forkRequests), 0);
-            assert.lengthOf(summaryHandoffs(main), 0);
-            assert.includeMembers(yield* conversation(root), [
-              "move this later turn",
-              "Later reply",
-            ]);
-            assert.equal(main.runs.at(-1)?.status, "failed");
-          }),
+                assert.equal(error.reason, "summary-failed");
+                const main = yield* orchestrator.getThreadProjection(root);
+                assert.equal(
+                  main.thread.activeProviderThreadId,
+                  before.thread.activeProviderThreadId,
+                );
+                assert.lengthOf(yield* Ref.get(forkRequests), 0);
+                assert.lengthOf(summaryHandoffs(main), 0);
+                assert.includeMembers(yield* conversation(root), [
+                  "move this later turn",
+                  "Later reply",
+                ]);
+                assert.equal(
+                  main.runs.at(-1)?.status,
+                  ending === "fails" ? "failed" : "interrupted",
+                );
+              }),
+          );
+        }),
+    );
+
+    it.live("keeps the summary for the user's next message, not a scheduled turn", () =>
+      withRewindSummaryHarness("rewind-summary-scheduled", {}, ({ capturedTurns, workspaceFile }) =>
+        Effect.gen(function* () {
+          yield* rewindAfterPrefix(workspaceFile);
+          yield* sendTo(root, "scheduled check", {
+            origin: { kind: "scheduled-task", title: "Nightly check" },
+            createdBy: "system",
+            creationSource: "server",
+          });
+          assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
+          assert.isTrue(yield* pendingSummary());
+
+          yield* sendTo(root, "now the user writes");
+          const next = (yield* Ref.get(capturedTurns)).at(-1)!;
+          assert.include(next.text, SUMMARY);
+          assert.include(next.text, "now the user writes");
+          assert.isFalse(yield* pendingSummary());
+        }),
       ),
     );
 
-    it.live("refuses a reply with no later conversation before asking for a summary", () =>
-      withRewindSummaryHarness("rewind-summary-refused", {}, ({ capturedTurns, workspaceFile }) =>
+    it.live("keeps the summary out of a fresh context started with /clear", () =>
+      withRewindSummaryHarness("rewind-summary-fresh", {}, ({ capturedTurns, workspaceFile }) =>
         Effect.gen(function* () {
-          const threads = yield* ThreadManagementService.ThreadManagementService;
-          const { before, laterReply } = yield* setUpThread(workspaceFile);
-
-          const error = yield* threads
-            .rewindWithSummary({
-              threadId: root,
-              runId: before.runs[1]!.id,
-              replyMessageId: laterReply.messageId,
-              createdBy: "user",
-              creationSource: "web",
-            })
-            .pipe(Effect.flip);
-
-          assert.equal(error.reason, "refused");
-          assert.equal(error.message, "There is no later conversation to move.");
-          assert.lengthOf(yield* Ref.get(capturedTurns), 2);
+          yield* rewindAfterPrefix(workspaceFile);
+          yield* sendTo(root, "start over", { freshContext: true });
+          assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
+          yield* sendTo(root, "and continue fresh");
+          assert.notInclude((yield* Ref.get(capturedTurns)).at(-1)!.text, SUMMARY);
+          assert.isTrue(yield* pendingSummary());
         }),
       ),
+    );
+
+    it.live("carries the summary to another provider in that switch's history", () =>
+      withRewindSummaryHarness("rewind-summary-switch", {}, ({ capturedTurns, workspaceFile }) =>
+        Effect.gen(function* () {
+          yield* rewindAfterPrefix(workspaceFile);
+          yield* sendTo(root, "over to codex", { modelSelection: CODEX_MODEL_SELECTION });
+          const switched = (yield* Ref.get(capturedTurns)).at(-1)!;
+          assert.equal(switched.driver, CODEX_DRIVER);
+          assert.include(switched.text, `Context rewind: summary of 1 turn\n\n${SUMMARY}`);
+          assert.notInclude(switched.text, "move this later turn");
+          // The continued Claude conversation has not seen it yet.
+          assert.isTrue(yield* pendingSummary());
+        }),
+      ),
+    );
+
+    it.live("rebuilds a conversation whose resume fails without the archived turns", () =>
+      Effect.gen(function* () {
+        const failResumeOnce = yield* Ref.make(false);
+        return yield* withRewindSummaryHarness(
+          "rewind-summary-recovery",
+          { failResumeOnce },
+          ({ capturedTurns, workspaceFile }) =>
+            Effect.gen(function* () {
+              const { archiveThreadId } = yield* rewindAfterPrefix(workspaceFile);
+              yield* sendTo(root, "continue from the prefix");
+              const orchestrator = yield* Orchestrator.OrchestratorV2;
+              // The split opened both conversations in one session; closing it makes the next
+              // turn resume the native conversation.
+              for (const threadId of [root, archiveThreadId]) {
+                const projection = yield* orchestrator.getThreadProjection(threadId);
+                const active = projection.providerThreads.find(
+                  (thread) => thread.id === projection.thread.activeProviderThreadId,
+                )!;
+                yield* orchestrator.dispatch({
+                  type: "provider-session.detach",
+                  commandId: CommandId.make(`rewind-summary:detach:${threadId}`),
+                  threadId,
+                  providerSessionId: active.providerSessionId!,
+                });
+              }
+              yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+              yield* Ref.set(failResumeOnce, true);
+              yield* sendTo(root, "after a lost session");
+              const rebuilt = (yield* Ref.get(capturedTurns)).at(-1)!;
+              assert.isFalse(yield* Ref.get(failResumeOnce));
+              assert.include(rebuilt.text, "Prefix reply");
+              assert.notInclude(rebuilt.text, "move this later turn");
+              assert.notInclude(rebuilt.text, "Later reply");
+              assert.equal(rebuilt.text.split(SUMMARY).length - 1, 1);
+            }),
+        );
+      }),
+    );
+
+    it.live(
+      "lets one of two simultaneous requests through and does not rewind after a steer joins its summary turn",
+      () =>
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          return yield* withRewindSummaryHarness(
+            "rewind-summary-steered",
+            {
+              holdRunOrdinal: 3,
+              holdFirstTurn: started,
+              releaseFirstTurn: release,
+              // A running provider turn takes the steer into the summary run.
+              heldRunningToolCall: { id: TurnItemId.make("rewind-summary:read"), toolName: "Read" },
+            },
+            ({ forkRequests, workspaceFile }) =>
+              Effect.gen(function* () {
+                const orchestrator = yield* Orchestrator.OrchestratorV2;
+                const threads = yield* ThreadManagementService.ThreadManagementService;
+                const { before, prefixReply } = yield* setUpThread(workspaceFile);
+                const request = threads
+                  .rewindWithSummary({
+                    threadId: root,
+                    runId: before.runs[0]!.id,
+                    replyMessageId: prefixReply.messageId,
+                    createdBy: "user",
+                    creationSource: "web",
+                  })
+                  .pipe(Effect.flip);
+                const both = yield* Effect.all([request, request], {
+                  concurrency: "unbounded",
+                }).pipe(Effect.forkChild);
+                yield* Deferred.await(started);
+                const summaryRun = (yield* orchestrator.getThreadProjection(root)).runs.at(-1)!;
+                yield* orchestrator.dispatch({
+                  type: "message.dispatch",
+                  commandId: CommandId.make("rewind-summary:steer"),
+                  origin: { kind: "user" },
+                  createdBy: "user",
+                  creationSource: "mobile",
+                  threadId: root,
+                  messageId: MessageId.make("rewind-summary:steer"),
+                  text: "also check the docs",
+                  attachments: [],
+                  modelSelection: CLAUDE_MODEL_SELECTION,
+                  deliveryIntent: "steer",
+                  dispatchMode: { type: "steer_active", targetRunId: summaryRun.id },
+                });
+                yield* Deferred.succeed(release, undefined);
+
+                const errors = yield* Fiber.join(both);
+                assert.sameMembers(
+                  errors.map((error) => error.message),
+                  [
+                    "A rewind with a summary is already running in this thread.",
+                    "The summary is written, but the conversation changed before the rewind could apply, so nothing was rewound. The summary turn stays in the thread.",
+                  ],
+                );
+                const after = yield* orchestrator.getThreadProjection(root);
+                assert.equal(
+                  after.messages.find((message) => message.id === "rewind-summary:steer")?.runId,
+                  summaryRun.id,
+                );
+                assert.lengthOf(yield* Ref.get(forkRequests), 0);
+                assert.lengthOf(summaryHandoffs(after), 0);
+              }),
+          );
+        }),
     );
   });
 });
