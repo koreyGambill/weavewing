@@ -1,87 +1,21 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, TileLayoutArea } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { GripVertical, Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { observeResize } from "../../lib/observeResize";
 import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
-import { TILE_LAYOUT_AREA_LABELS } from "../../savedTileLayouts";
 import { DeferEnvironmentQueries } from "../../state/query";
 import { getTileGroups } from "../../threadTileLayout";
-import { focusSideArea, useToolSidebarStore } from "../../toolSidebarStore";
 import { useViewDragStore, VIEW_DRAG_TYPE } from "../../views/viewDragStore";
 import { viewDefinition } from "../../views/viewRegistry";
-import {
-  isViewArea,
-  viewIdFromArea,
-  viewSurface,
-  viewTileThread,
-  type ViewSurface,
-} from "../../views/viewTiles.logic";
+import { viewTileThread, type ViewSurface } from "../../views/viewTiles.logic";
 import { useTileDetailsSetter } from "../threadToolsHost";
 import { LockedThreadBar, useLockedThreadState } from "../ToolSidebar";
 import { resolveViewLayout, SIDE_AREA_WIDE_MEDIA_QUERY, type ViewId } from "../ToolSidebar.logic";
 import { SIDE_AREA_SETTLE_MS } from "../ToolSidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-
-/** An area's name in layout menus and settings, or null for a view that no longer exists. */
-export function tileLayoutAreaLabel(area: TileLayoutArea): string | null {
-  if (!isViewArea(area)) return TILE_LAYOUT_AREA_LABELS[area];
-  const viewId = viewIdFromArea(area);
-  return viewId ? viewDefinition(viewId).title : null;
-}
-
-const focusTileContent = (surfaceId: string) =>
-  requestAnimationFrame(() =>
-    document
-      .querySelector<HTMLElement>(`[data-tile-content="${CSS.escape(surfaceId)}"]`)
-      ?.focus({ preventScroll: true }),
-  );
-
-/** After a view moves into a tile, an unpinned side panel closes and focus follows the view. */
-function finishPromotion(surfaceId: string) {
-  const side = useToolSidebarStore.getState();
-  if (!side.pinned) side.dispatch({ type: "close" });
-  focusTileContent(surfaceId);
-}
-
-/** Opens the side panel's view as a tab beside the chat of `owner`'s tiles. */
-export function promoteViewToTile(
-  owner: ScopedThreadRef,
-  viewId: ViewId,
-  thread: ScopedThreadRef | null,
-) {
-  useRightPanelStore.getState().openView(owner, viewId, thread, "tile-2");
-  finishPromotion(viewSurface(viewId, owner, thread).id);
-}
-
-/**
- * Places a view dropped from the side panel: it opens as a tab, then the tile drop's own action
- * moves it where it landed.
- */
-export function placeDroppedView(
-  owner: ScopedThreadRef,
-  drag: { readonly viewId: ViewId; readonly thread: ScopedThreadRef | null },
-  place: (surfaceId: string) => void,
-) {
-  const surfaceId = viewSurface(drag.viewId, owner, drag.thread).id;
-  useRightPanelStore.getState().openView(owner, drag.viewId, drag.thread);
-  place(surfaceId);
-  useViewDragStore.setState({ drag: null });
-  finishPromotion(surfaceId);
-}
-
-/** Returns a view tab to the side panel, locked to its thread when that is not the tile's own. */
-export function moveViewToSidePanel(owner: ScopedThreadRef, surface: ViewSurface) {
-  const side = useToolSidebarStore.getState();
-  if (viewTileThread(surface, owner) !== null) {
-    side.dispatch({ type: "lock", thread: surface.threadRef ?? null });
-  }
-  side.dispatch({ type: "show", view: surface.viewId });
-  useRightPanelStore.getState().closeSurface(owner, surface.id);
-  focusSideArea();
-}
 
 /** The side panel header's grip: dragging it onto the tiles opens the view there. */
 export function ViewDragGrip({

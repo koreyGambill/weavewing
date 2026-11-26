@@ -125,11 +125,12 @@ import {
 import {
   savedTileGroupCount,
   TILE_LAYOUT_AREA_LABELS,
+  tileLayoutAreaLabel,
   toSavedTileNode,
 } from "../../savedTileLayouts";
 import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
 import { SaveTileLayoutDialog, TileLayoutsMenu } from "./TileLayoutsMenu";
-import { moveViewToSidePanel, placeDroppedView, tileLayoutAreaLabel } from "./ViewTile";
+import { moveViewToSidePanel, placeDroppedView } from "./viewTileActions";
 import { useViewDragStore } from "../../views/viewDragStore";
 import { isViewArea, viewIdFromArea, viewSurface } from "../../views/viewTiles.logic";
 import { useSavedTileLayouts } from "./useSavedTileLayouts";

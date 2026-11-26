@@ -19,6 +19,7 @@ import { CalendarTool } from "../components/CalendarTool";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import {
   VIEW_IDS,
+  VIEW_TITLES,
   type ThreadViewId,
   type ViewId,
   type ViewLayout,
@@ -102,11 +103,11 @@ export interface ViewDefinition {
 
 function threadView<Id extends ThreadViewId>(
   id: Id,
-  title: string,
   icon: LucideIcon,
   about: string,
   PickerCount?: ViewDefinition["PickerCount"],
 ): ViewDefinition & { readonly id: Id } {
+  const title = VIEW_TITLES[id];
   return {
     id,
     title,
@@ -129,40 +130,35 @@ function threadView<Id extends ThreadViewId>(
 const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { readonly id: Id } } = {
   checklist: threadView(
     "checklist",
-    "Checklist",
     ListChecksIcon,
     "The agent's checklist for this thread and your follow-up flags. Agents update it with list_update; you can add and check items here.",
     ChecklistCount,
   ),
   artifacts: threadView(
     "artifacts",
-    "Artifacts",
     FilesIcon,
     "Documents and pages agents publish for this thread, with any questions they ask you. Agents write them with artifact_write; you answer here.",
     ArtifactsCount,
   ),
   links: threadView(
     "links",
-    "Links",
     LinkIcon,
     "What this thread points to: its ticket and pull requests, web links and files from the conversation, then the threads it delegated to, forked, messaged or heard from.",
     LinksCount,
   ),
   activity: threadView(
     "activity",
-    "Activity",
     ChartGanttIcon,
     "What happened here: when this thread and its delegates ran, on one clock, and the landings agents recorded for it, newest first.",
   ),
   details: threadView(
     "details",
-    "Details",
     IdCardIcon,
     "What the thread is and runs on: workspace, branch, scripts and automations, the Xwing environments it uses, and what the agent loaded and spent.",
   ),
   inbox: {
     id: "inbox",
-    title: "Inbox",
+    title: VIEW_TITLES.inbox,
     icon: BellIcon,
     about:
       "Notifications from automations, status sources and agents across every thread. Snooze, dismiss or open each one here.",
@@ -173,7 +169,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   },
   evidence: {
     id: "evidence",
-    title: "Evidence",
+    title: VIEW_TITLES.evidence,
     icon: ClipboardCheckIcon,
     about:
       "Proof for each land in every thread: what was asked, its commits, checks, review verdict and captures. Agents record it with evidence_record; you set each change's QA state here.",
@@ -182,13 +178,13 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
     render: ({ target }) =>
       createElement(
         GlobalViewBody,
-        { title: "Evidence" },
+        { title: VIEW_TITLES.evidence },
         createElement(EvidenceView, { threadRef: target.threadRef }),
       ),
   },
   automations: {
     id: "automations",
-    title: "Automations",
+    title: VIEW_TITLES.automations,
     icon: CalendarClockIcon,
     about:
       "Agents that run on a schedule, a webhook or an event. Switch them on or off for a thread, a project or the whole server, and open a run's thread from its history.",
@@ -197,13 +193,13 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
     render: ({ target }) =>
       createElement(
         GlobalViewBody,
-        { title: "Automations", flush: true },
+        { title: VIEW_TITLES.automations, flush: true },
         createElement(AutomationsView, { threadRef: target.threadRef }),
       ),
   },
   calendar: {
     id: "calendar",
-    title: "Calendar",
+    title: VIEW_TITLES.calendar,
     icon: CalendarIcon,
     about: "Your agenda for a day. Calendar sync is not available yet.",
     scope: "global",
@@ -213,7 +209,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   },
   status: {
     id: "status",
-    title: "Status",
+    title: VIEW_TITLES.status,
     icon: ActivityIcon,
     about:
       "The health of external tools from your status sources. Configure them under Settings → Status sources.",

@@ -15,6 +15,20 @@ export type ViewId = ThreadViewId | GlobalViewId;
 /** The view picker's order: thread views, then the views that span threads. */
 export const VIEW_IDS: ReadonlyArray<ViewId> = [...THREAD_VIEW_IDS, ...GLOBAL_VIEW_IDS];
 
+/** Each view's name, for hosts that label a view without rendering it. */
+export const VIEW_TITLES: { readonly [Id in ViewId]: string } = {
+  checklist: "Checklist",
+  evidence: "Evidence",
+  artifacts: "Artifacts",
+  links: "Links",
+  activity: "Activity",
+  details: "Details",
+  automations: "Automations",
+  inbox: "Inbox",
+  calendar: "Calendar",
+  status: "Status",
+};
+
 export function isViewId(value: string): value is ViewId {
   return VIEW_IDS.some((id) => id === value);
 }

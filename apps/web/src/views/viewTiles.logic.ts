@@ -2,7 +2,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { ScopedThreadRef } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { isGlobalViewId, isViewId, type ViewId } from "../components/ToolSidebar.logic";
+import { isGlobalViewId, migrateViewId, type ViewId } from "../components/ToolSidebar.logic";
 import type { RightPanelSurface } from "../rightPanelStore";
 
 export type ViewSurface = Extract<RightPanelSurface, { kind: "view" }>;
@@ -42,17 +42,24 @@ const StoredViewSurface = Schema.Struct({
 });
 const decodeStoredViewSurface = Schema.decodeUnknownOption(StoredViewSurface);
 
+/** The view a stored or saved view id opens, or null when it names none. */
+function normalizeStoredViewId(id: string): ViewId | null {
+  return migrateViewId(id);
+}
+
 /** A stored view tab, or null when its view no longer exists or its shape is wrong. */
 export function restoreViewSurface(value: unknown): ViewSurface | null {
   const decoded = decodeStoredViewSurface(value);
   if (decoded._tag === "None") return null;
-  const { id, viewId, threadRef } = decoded.value;
-  if (!isViewId(viewId)) return null;
-  const expected = threadRef ? `view:${viewId}:${scopedThreadKey(threadRef)}` : `view:${viewId}`;
-  if (id !== expected || (threadRef && isGlobalViewId(viewId))) return null;
+  const { id, viewId: storedViewId, threadRef } = decoded.value;
+  const storedId = threadRef
+    ? `view:${storedViewId}:${scopedThreadKey(threadRef)}`
+    : `view:${storedViewId}`;
+  const viewId = normalizeStoredViewId(storedViewId);
+  if (id !== storedId || viewId === null || (threadRef && isGlobalViewId(viewId))) return null;
   return threadRef
-    ? { id: expected as ViewSurface["id"], kind: "view", viewId, threadRef }
-    : { id: expected as ViewSurface["id"], kind: "view", viewId };
+    ? { id: `view:${viewId}:${scopedThreadKey(threadRef)}`, kind: "view", viewId, threadRef }
+    : { id: `view:${viewId}`, kind: "view", viewId };
 }
 
 export function isViewArea(area: string): area is `view:${string}` {
@@ -62,8 +69,7 @@ export function isViewArea(area: string): area is `view:${string}` {
 /** The view a saved-layout area opens, or null for other areas and views that no longer exist. */
 export function viewIdFromArea(area: string): ViewId | null {
   if (!isViewArea(area)) return null;
-  const id = area.slice("view:".length);
-  return isViewId(id) ? id : null;
+  return normalizeStoredViewId(area.slice("view:".length));
 }
 
 /** True for a `view:` area whose view no longer exists; restoring drops its tab. */

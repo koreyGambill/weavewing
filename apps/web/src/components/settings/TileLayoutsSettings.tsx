@@ -3,7 +3,7 @@ import { PencilIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { savedTileGroupCount, tileLayoutDeletePatch } from "../../savedTileLayouts";
-import { tileLayoutAreaLabel } from "../chat/ViewTile";
+import { tileLayoutAreaLabel } from "../../savedTileLayouts";
 import {
   AlertDialog,
   AlertDialogClose,

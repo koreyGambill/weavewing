@@ -17,7 +17,8 @@ import {
   type ThreadTileLayout,
   type TileNode,
 } from "./threadTileLayout";
-import { isRetiredViewArea } from "./views/viewTiles.logic";
+import { VIEW_TITLES } from "./components/ToolSidebar.logic";
+import { isRetiredViewArea, isViewArea, viewIdFromArea } from "./views/viewTiles.logic";
 
 export const TILE_LAYOUT_AREA_LABELS = {
   device: "Device",
@@ -31,6 +32,13 @@ export const TILE_LAYOUT_AREA_LABELS = {
   diff: "Diff",
   "pull-requests": "Pull requests",
 } as const satisfies Record<Exclude<TileLayoutArea, `view:${string}`>, string>;
+
+/** An area's name in layout menus and settings, or null for a view that no longer exists. */
+export function tileLayoutAreaLabel(area: TileLayoutArea): string | null {
+  if (!isViewArea(area)) return TILE_LAYOUT_AREA_LABELS[area];
+  const viewId = viewIdFromArea(area);
+  return viewId ? VIEW_TITLES[viewId] : null;
+}
 
 const tabArea = (tabId: string): TileLayoutArea | null =>
   tabId === CONVERSATION_TAB_ID ? "chat" : surfaceTileArea(tabId);

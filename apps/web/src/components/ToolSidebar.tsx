@@ -49,7 +49,8 @@ import {
   type ViewTarget,
 } from "../views/viewRegistry";
 import { useViewDragStore } from "../views/viewDragStore";
-import { promoteViewToTile, ViewDragGrip } from "./chat/ViewTile";
+import { ViewDragGrip } from "./chat/ViewTile";
+import { promoteViewToTile } from "./chat/viewTileActions";
 import { DropdownTerminalButton } from "./DropdownTerminal";
 import { useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
