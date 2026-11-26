@@ -1505,18 +1505,16 @@ it.effect(
         );
         assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead]);
         yield* evidence.setQa({ landingId: "by-child", changeId: "a", state: "confirmed" });
-        yield* evidence.setQa({
-          landingId: "by-child",
-          changeId: "b",
-          state: "problem",
-          note: "Overlaps",
-        });
         yield* evidence.markDiscussed({
           threadId: lead,
           messageId: MessageId.make("m1"),
           changes: [{ landingId: "by-child", changeId: "c" }],
         });
-        assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead, lead]);
+        assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead]);
+        // Only an agent records a problem, from the user's message in its turn.
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE evidence_qa SET state = 'problem', by = 'agent'
+          WHERE landing_id = 'by-child' AND change_id = 'b'`;
         assert.deepStrictEqual(yield* evidence.waitingQa(lead), [
           { kind: "qa", ref: "QA2", key: "by-child/b", title: "Changed b", state: "problem" },
           { kind: "qa", ref: "QA3", key: "by-child/c", title: "Changed c", state: "discussing" },
