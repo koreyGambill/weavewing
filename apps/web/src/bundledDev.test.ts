@@ -45,7 +45,18 @@ export const startup = Promise.resolve().then(() => globalThis.onStarted(Shared(
       publicDir: NodeURL.fileURLToPath(new URL("../public", import.meta.url)),
       logLevel: "silent",
       resolve: {
-        alias: { react: NodePath.dirname(NodeURL.fileURLToPath(import.meta.resolve("react"))) },
+        alias: [
+          {
+            find: "react",
+            replacement: NodePath.dirname(NodeURL.fileURLToPath(import.meta.resolve("react"))),
+          },
+          // The copied boot files import app and shared modules by their workspace paths.
+          { find: /^~\//, replacement: `${NodeURL.fileURLToPath(new URL(".", import.meta.url))}` },
+          {
+            find: /^@t3tools\/shared\/(.*)$/,
+            replacement: `${NodeURL.fileURLToPath(new URL("../../../packages/shared/src/", import.meta.url))}$1`,
+          },
+        ],
       },
       experimental: { bundledDev: true },
       plugins: [
