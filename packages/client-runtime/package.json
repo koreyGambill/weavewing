@@ -423,6 +423,18 @@
       "types": "./src/state/threadUndo.ts",
       "default": "./src/state/threadUndo.ts"
     },
+    "./state/question-surfaces": {
+      "types": "./src/state/questionSurfaces.ts",
+      "default": "./src/state/questionSurfaces.ts"
+    },
+    "./state/thread-question-card": {
+      "types": "./src/state/threadQuestionCard.ts",
+      "default": "./src/state/threadQuestionCard.ts"
+    },
+    "./state/thread-question-composer": {
+      "types": "./src/state/threadQuestionComposer.ts",
+      "default": "./src/state/threadQuestionComposer.ts"
+    },
     "./state/thread-questions": {
       "types": "./src/state/threadQuestions.ts",
       "default": "./src/state/threadQuestions.ts"

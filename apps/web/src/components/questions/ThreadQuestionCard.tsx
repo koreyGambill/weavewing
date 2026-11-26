@@ -30,8 +30,11 @@ import { QuestionNoteBox } from "./QuestionNoteBox";
 import { QuestionOptions } from "./QuestionOptions";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
 import { HelpButton, ThreadCard, ThreadCardClosedLine, ThreadCardHeading } from "./ThreadCardShell";
-import { closedQuestionOutcome, closedQuestionShownAnswer } from "./ThreadQuestionCard.logic";
-import { questionAnswerForComposer } from "./questionComposer.logic";
+import {
+  closedQuestionOutcome,
+  closedQuestionShownAnswer,
+} from "@t3tools/client-runtime/state/thread-question-card";
+import { questionAnswerForComposer } from "@t3tools/client-runtime/state/thread-question-composer";
 import {
   addQuestionAnswersToComposer,
   removeQuestionAnswerFromComposer,

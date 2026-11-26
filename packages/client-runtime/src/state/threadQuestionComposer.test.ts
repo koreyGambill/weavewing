@@ -1,7 +1,7 @@
 import type { ThreadQuestion, ThreadWorkspace } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { draftedAnswersForComposer, questionAnswerForComposer } from "./questionComposer.logic";
+import { draftedAnswersForComposer, questionAnswerForComposer } from "./threadQuestionComposer.ts";
 
 const question = (answer: ThreadQuestion["answer"], extra: Partial<ThreadQuestion> = {}) =>
   ({

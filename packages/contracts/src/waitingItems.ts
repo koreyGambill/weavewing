@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { threadQuestionTitle, type ListItem, type ThreadQuestion } from "./threadWorkspace.ts";
 
 /** What waits on the user: an agent's question, a landed change's QA, or a task only the user can do. */
 export const WaitingItemKind = Schema.Literals(["question", "qa", "task"]);
@@ -169,3 +170,54 @@ export const sameWaitingItems = (
   a: ReadonlyArray<WaitingItemSummary>,
   b: ReadonlyArray<WaitingItemSummary>,
 ): boolean => a.length === b.length && a.every((item, index) => sameItem(item, b[index]!));
+
+/**
+ * A thread workspace's questions as waiting rows: every open or deferred one, marked sent while
+ * a user message carries its answer and discussing while the user took it into chat, plus each
+ * one the user withdrew. A withdrawn question stays while the user's dismissal is unreported
+ * history, so the agent's next user-message turn can name it and the timeline can show it.
+ */
+export const questionWaitingItems = (workspace: {
+  readonly questions: ReadonlyArray<ThreadQuestion>;
+}): ReadonlyArray<WaitingItemSummary> =>
+  workspace.questions.flatMap((question): ReadonlyArray<WaitingItemSummary> => {
+    const common = {
+      kind: "question" as const,
+      ref: question.id,
+      key: question.id,
+      title: threadQuestionTitle(question.prompt),
+      ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
+    };
+    if (question.state === "open" || question.state === "deferred")
+      return [
+        {
+          ...common,
+          state: question.discussedInMessageId ? "discussing" : question.state,
+          ...(question.sentInMessageId ? { sent: true as const } : {}),
+          ...(question.discussedInMessageId && question.state === "deferred"
+            ? { deferred: true as const }
+            : {}),
+        },
+      ];
+    return question.state === "withdrawn" && question.userChangedAt
+      ? [{ ...common, state: "dismissed", settledBy: "user" }]
+      : [];
+  });
+
+/** A thread workspace's open user tasks as waiting rows, discussing while the user took one into chat. */
+export const taskWaitingItems = (workspace: {
+  readonly items: ReadonlyArray<ListItem>;
+}): ReadonlyArray<WaitingItemSummary> =>
+  workspace.items.flatMap((item) =>
+    item.owner === "you" && item.state === "open"
+      ? [
+          {
+            kind: "task" as const,
+            ref: item.ref ?? "T",
+            key: item.id,
+            title: threadQuestionTitle(item.text),
+            state: item.discussedInMessageId ? ("discussing" as const) : ("open" as const),
+          },
+        ]
+      : [],
+  );

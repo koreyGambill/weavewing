@@ -31,7 +31,7 @@ import {
   removeQuestionAnswerFromComposer,
   useQuestionsInComposer,
 } from "../questions/questionComposer";
-import { questionAnswerForComposer } from "../questions/questionComposer.logic";
+import { questionAnswerForComposer } from "@t3tools/client-runtime/state/thread-question-composer";
 import { questionDraftWriter } from "../questions/questionDraftWriter";
 import {
   revealQuestionInChat,

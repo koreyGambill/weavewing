@@ -1,7 +1,11 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
+import { MessageId } from "./baseSchemas.ts";
+import type { ListItem, ThreadQuestion } from "./threadWorkspace.ts";
 import {
+  questionWaitingItems,
+  taskWaitingItems,
   WAITING_ITEMS_LIMIT,
   WaitingCounts,
   waitingDisplayRows,
@@ -93,5 +97,106 @@ describe("waitingDisplayRows", () => {
     ]);
     expect(rows).toHaveLength(WAITING_ITEMS_LIMIT);
     expect(rows.every((row) => row.kind === "task")).toBe(true);
+  });
+});
+
+describe("questionWaitingItems", () => {
+  const question = (id: string, patch: Partial<ThreadQuestion> = {}): ThreadQuestion => ({
+    id,
+    prompt: `Should ${id} ship?`,
+    options: [],
+    recommendedOptionIds: [],
+    multiSelect: false,
+    state: "open",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    closedAt: null,
+    answer: null,
+    answeredBy: null,
+    replacedBy: null,
+    ...patch,
+  });
+  const message = MessageId.make("message-1");
+
+  it("maps each waiting question with its sent and discussing marks, and user dismissals", () => {
+    expect(
+      questionWaitingItems({
+        questions: [
+          question("Q1"),
+          question("Q2", { state: "deferred", userChangedAt: "2026-01-02T00:00:00.000Z" }),
+          question("Q3", { sentInMessageId: message }),
+          question("Q4", { state: "deferred", discussedInMessageId: message }),
+          question("Q5", { state: "withdrawn", userChangedAt: "2026-01-02T00:00:00.000Z" }),
+          question("Q6", { state: "withdrawn" }),
+          question("Q7", { state: "answered" }),
+        ],
+      }),
+    ).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Should Q1 ship?", state: "open" },
+      {
+        kind: "question",
+        ref: "Q2",
+        key: "Q2",
+        title: "Should Q2 ship?",
+        state: "deferred",
+        userChangedAt: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        kind: "question",
+        ref: "Q3",
+        key: "Q3",
+        title: "Should Q3 ship?",
+        state: "open",
+        sent: true,
+      },
+      {
+        kind: "question",
+        ref: "Q4",
+        key: "Q4",
+        title: "Should Q4 ship?",
+        state: "discussing",
+        deferred: true,
+      },
+      {
+        kind: "question",
+        ref: "Q5",
+        key: "Q5",
+        title: "Should Q5 ship?",
+        state: "dismissed",
+        settledBy: "user",
+        userChangedAt: "2026-01-02T00:00:00.000Z",
+      },
+    ]);
+  });
+});
+
+describe("taskWaitingItems", () => {
+  const task = (id: string, patch: Partial<ListItem> = {}): ListItem => ({
+    id,
+    text: `Task ${id}`,
+    state: "open",
+    owner: "you",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    doneAt: null,
+    details: "",
+    parentId: null,
+    links: [],
+    ref: `T${id}`,
+    ...patch,
+  });
+
+  it("maps only the user's open tasks, discussing while the user took one into chat", () => {
+    expect(
+      taskWaitingItems({
+        items: [
+          task("1"),
+          task("2", { discussedInMessageId: MessageId.make("message-1") }),
+          task("3", { state: "done" }),
+          task("4", { owner: "agent" }),
+        ],
+      }),
+    ).toEqual([
+      { kind: "task", ref: "T1", key: "1", title: "Task 1", state: "open" },
+      { kind: "task", ref: "T2", key: "2", title: "Task 2", state: "discussing" },
+    ]);
   });
 });

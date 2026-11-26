@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { questionSurfaceIdsToClose } from "./questionsSurface.logic";
+import { questionSurfaceIdsToClose } from "./questionSurfaces.ts";
 
 describe("questionSurfaceIdsToClose", () => {
   const surfaces = [
