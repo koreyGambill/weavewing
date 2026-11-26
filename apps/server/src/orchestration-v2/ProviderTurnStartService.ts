@@ -1267,12 +1267,18 @@ export const layer: Layer.Layer<
                     projection.thread,
                   )
                 : []),
+              // Rolled-back turns, including those a rewind to a reply archived, left the conversation.
               ...(yield* projectionStore.getTurnStartHistory(input.threadId)).filter((item) =>
                 item.runId === null
                   ? rewind === undefined
-                  : !archivedRunIds?.has(item.runId) &&
+                  : // A summary still waiting for this message goes inline instead.
+                    !(item.type === "handoff" && item.contextHandoffId === rewindSummary?.id) &&
+                    !archivedRunIds?.has(item.runId) &&
                     projection.runs.some(
-                      (source) => source.id === item.runId && source.ordinal < run.ordinal,
+                      (source) =>
+                        source.id === item.runId &&
+                        source.ordinal < run.ordinal &&
+                        source.status !== "rolled_back",
                     ),
               ),
             ],
