@@ -790,9 +790,9 @@ export function skipUnchangedThreadShells<A extends OrchestrationV2ShellStreamIt
 }
 
 /**
- * Leaves out a thread's waiting rows equal to the ones this subscription last received for it,
- * marking the update `waitingUnchanged`. Runs after coalescing, so it compares with what the
- * subscriber was sent; snapshots, first updates and periodic resends carry full rows.
+ * Leaves out a thread's non-empty waiting rows equal to the ones this subscription last received,
+ * marking the update `waitingUnchanged`, so a marker means the client holds rows. A periodic resend
+ * is marked too when coalescing replaced an earlier copy with it and the subscriber holds its rows.
  */
 export function omitUnchangedWaitingRows<A extends OrchestrationV2ShellStreamItem, E, R>(
   stream: Stream.Stream<A, E, R>,
@@ -816,8 +816,10 @@ export function omitUnchangedWaitingRows<A extends OrchestrationV2ShellStreamIte
             if (
               previous?.waiting === undefined ||
               item.thread.waiting === undefined ||
+              // `waiting: []` is shorter than the marker.
+              item.thread.waiting.length === 0 ||
               !sameWaitingItems(previous.waiting, item.thread.waiting) ||
-              // The same shell again is the periodic resend, which restates everything.
+              // A shell equal to the one this subscriber received is a resend; it restates its rows.
               sameThreadShell({ ...item.thread, updatedAt: previous.updatedAt }, previous)
             )
               return item;

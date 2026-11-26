@@ -6,6 +6,7 @@ import type {
   OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import {
+  OrchestrationV2ShellStreamItem as ShellStreamItemSchema,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -18,6 +19,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -758,6 +760,26 @@ describe("omitUnchangedWaitingRows", () => {
         { sequence: 1, rows: 2, unchanged: false, counts: true },
         { sequence: 2, rows: null, unchanged: true, counts: true },
       ]);
+    }),
+  );
+
+  it.effect("keeps an empty list on the wire, since the marker is longer than `[]`", () =>
+    Effect.gen(function* () {
+      const encode = Schema.encodeEffect(Schema.fromJsonString(ShellStreamItemSchema));
+      const items = [
+        updated(1, waitingShell("a", [])),
+        updated(2, waitingShell("a", [], { status: "idle" })),
+      ];
+      const bytes = (input: { readonly omitUnchangedWaiting?: true }) =>
+        Stream.fromIterable(items).pipe(
+          waitingRowsForSubscription(input),
+          Stream.mapEffect((item) => encode(item)),
+          Stream.map((json) => new TextEncoder().encode(json).byteLength),
+          Stream.runCollect,
+          Effect.map((sizes) => Array.from(sizes)),
+        );
+      expect(yield* bytes({ omitUnchangedWaiting: true })).toEqual(yield* bytes({}));
+      expect((yield* sent(items))[1]).toMatchObject({ rows: 0, unchanged: false });
     }),
   );
 
