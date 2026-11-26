@@ -1,92 +1,12 @@
 # Remote access
 
-Connect a phone, browser, or another desktop app to T3 Code running on a different
+Connect a phone, browser, or another desktop app to Weavewing running on a different
 machine. That machine must stay running and reachable while you work.
 
-## T3 Connect
-
-T3 Connect makes an environment available to your other devices without setting
-up router forwarding. In the desktop app on the host, open **Settings →
-Privacy**, sign in, and enable **T3 Connect** for that environment.
-
-For a command-line host, run:
-
-```bash
-t3 up
-```
-
-It asks how your other devices reach the machine: T3 Connect, the local network,
-or both. Choose T3 Connect and follow the sign-in instructions. It then runs
-T3 Code as a [background service](./background-service.md).
-`t3 connect` is the same as `t3 up --connect`. Run `t3 up` again to change your
-choice, and `t3 status` to see it.
-
-Instead of the background service, you can keep the desktop app running with
-its local environment enabled. Closing the desktop app's last window stops its
-local server. Saving your sign-in alone does not start a server or make the
-machine reachable.
-
-On your other device, sign in to the same T3 Connect account and choose the
-environment. On the app.t3.codes home page with no computer added yet, signing
-in adds compatible computers linked to your account. Over SSH, the CLI prints a
-browser link and a short code. Open the link on any device, confirm the code
-matches, and approve. The CLI continues on its own, so you do not need to forward
-an OAuth callback port.
-
-T3 Connect renews access credentials when needed without disconnecting a healthy
-connection. Pull request diffs and provider settings keep working after the
-previous credential expires. A failed renewal affects that request; it does not
-disconnect an otherwise healthy conversation.
-
-### Approve new devices
-
-By default, any device signed in to your T3 Connect account can open a linked
-machine. To require approval instead, turn on **Require approval for new
-devices** with the T3 Connect settings in **Settings → Privacy** on the
-host, or when you first set up T3 Connect. Then someone who takes over your T3
-Connect account cannot reach the machine from a new device without your
-approval. Review the devices that are already approved, described below.
-
-A new device waits and shows a code such as `K7QM-2XFD`. Approve it from a
-device that is already connected, using the prompt or **Settings → Privacy**.
-Check that the code matches the one on the waiting device. On a
-headless host, run `t3 auth connect-device list` and then
-`t3 auth connect-device approve K7QM-2XFD`. A request expires after 10 minutes,
-and the device asks again when it retries. Deny keeps that device out until its
-request expires.
-
-Each device is approved once. Revoke it from **T3 Connect devices** in the same
-settings page, or with `t3 auth connect-device revoke <code>`. With approval on,
-it has to ask again. With approval off, it can connect again on its own, so
-revoking in the app offers to turn approval on first. Devices that connected through T3 Connect while approval was off stay
-approved and appear in that list for you to review. A device that has not
-connected since you updated T3 Code asks for approval like a new one. Older apps
-cannot show the code, so update them before you turn approval on.
-
-### Scripts and agents
-
-`t3 up` asks nothing when you name a choice: `--connect`, `--lan`, or their
-`--no-` forms. Choices you do not name keep their settings, and `--yes` takes
-the defaults. Without a terminal:
-
-- T3 Connect sign-in prints a URL and a code. Approve it on any device.
-- A needed restart runs without asking, and stops running agent turns.
-- With nothing set up and no choice named, `t3 up` stops and names the flags.
-
-`t3 status --json` prints the settings. `t3 up --help` lists every flag with
-examples.
-
-### More machines with T3 Chat
-
-Each T3 Connect account can link up to 3 machines. Phones and browsers do not
-count. A paid T3 Chat plan raises the limit to 10 machines with Pro, or 100 with
-Premier.
-
-To link T3 Chat, open your account menu on the web or desktop app, go to
-**T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat in the window that
-opens and approve. The new limit applies the next time you add a machine. If you
-cancel or downgrade T3 Chat, machines you already linked stay linked, but you
-cannot add more until you are under the limit again.
+Weavewing pairs directly: over your local network or Tailscale
+([Pair over a LAN or private network](#pair-over-a-lan-or-private-network)), or over
+[SSH](#desktop-managed-ssh). Upstream T3 Code also offers a hosted service,
+[T3 Connect](#t3-connect), that Weavewing releases do not include.
 
 ## Pair over a LAN or private network
 
@@ -102,7 +22,7 @@ For a command-line host, choose the local network in `t3 up`, or run:
 t3 up --lan
 ```
 
-For a server in a terminal, run `t3 serve --lan`. Either way, T3 Code then
+For a server in a terminal, run `t3 serve --lan`. Either way, Weavewing then
 accepts connections from your local network and tailnet, so a pairing code is
 all that keeps other devices on them out.
 
@@ -143,7 +63,7 @@ that machine does not have yet; add that address with **Add route** instead.
 Pairing again over an address the machine already has still works. A new route
 is placed by speed, in that order, and you can reorder routes at any time.
 
-While connected through T3 Connect or a paired address, T3 Code also learns the
+While connected through T3 Connect or a paired address, Weavewing also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
 pairing once through T3 Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
@@ -154,10 +74,10 @@ You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
 reporting that address.
 
-T3 Code connects over the first route that answers. Away from home, a LAN
+Weavewing connects over the first route that answers. Away from home, a LAN
 address that does not answer is checked briefly and skipped. It is only tried
 again, after the other routes, if none of them connect. While connected over a
-later route, T3 Code checks the earlier ones when your network changes, when you
+later route, Weavewing checks the earlier ones when your network changes, when you
 return to the app, and every minute, and moves back as soon as one works.
 
 On web and desktop, select the route count under the machine's name in
@@ -180,7 +100,7 @@ work starts when you have not picked a machine: threads without a project, the d
 copy of a project that exists on several machines, and the first choice when adding a
 project. **Automatic** keeps the app's own server first. A machine you pick wins, a new
 thread in the current project stays on that project's machine, and existing threads
-never move. If the preferred machine is offline, T3 Code asks you to choose another
+never move. If the preferred machine is offline, Weavewing asks you to choose another
 instead of starting the work elsewhere. The choice is saved separately in each client;
 mobile keeps its own selection.
 
@@ -209,9 +129,9 @@ HTTPS** in **Settings → Privacy**. Turn it off there to remove that route.
 
 Your tailnet needs MagicDNS and HTTPS certificates enabled; see
 [Tailscale's HTTPS setup](https://tailscale.com/docs/how-to/set-up-https-certificates).
-On Linux, T3 Code also needs permission to manage Tailscale; see
+On Linux, Weavewing also needs permission to manage Tailscale; see
 [operator permission](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission)
-for non-root users. If any of these is missing, T3 Code still starts but can't
+for non-root users. If any of these is missing, Weavewing still starts but can't
 add the HTTPS route.
 
 To start a command-line server with Tailscale HTTPS:
@@ -245,8 +165,8 @@ to reach. On your phone or laptop, open and bookmark
 `http://<tailnet-ip>:<port>/tailnet`, for example
 `http://100.101.102.103:3773/tailnet`. The full MagicDNS name, such as
 `http://desk.tailnet-name.ts.net:3773/tailnet`, also works; the short name does
-not. The page lists that server and the T3
-Code servers it finds on your other online machines; tap **Pair** on one, then
+not. The page lists that server and the
+Weavewing servers it finds on your other online machines; tap **Pair** on one, then
 **Create pairing link**.
 
 The link works once and expires in five minutes. In the
@@ -286,7 +206,7 @@ on the host computer.
 
 ### Hosted web app
 
-[app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
+Upstream T3 Code hosts a web app at [app.t3.codes](https://app.t3.codes). It needs an HTTPS endpoint. It connects directly
 to your server; a hosted pairing link does not make an unreachable backend
 reachable or convert HTTP to HTTPS.
 
@@ -298,11 +218,11 @@ scheme uses HTTP, so include `https://` when your server uses HTTPS.
 
 In the desktop app, open **Settings → Environments → Connect a device or
 computer**, choose **Another computer** and **SSH**, and enter a host or SSH alias
-such as `user@example.com`. T3 Code starts or reuses a server there and opens
+such as `user@example.com`. Weavewing starts or reuses a server there and opens
 the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-If the T3 Code desktop app is open on that computer, the connection uses the
+If the Weavewing desktop app is open on that computer, the connection uses the
 app's server and installs nothing. Otherwise the remote
 host must be Linux or an Apple Silicon Mac with `curl` or `wget`, `tar`,
 `sha256sum` or `shasum`, and [provider setup](./install.md#providers). The
@@ -316,7 +236,7 @@ ssh user@example.com 'sh -lc "command -v claude codex"'
 ```
 
 If SSH reconnecting fails after an app update, retry the launch once. Removing
-the connection stops a server that T3 Code launched; a server that was already
+the connection stops a server that Weavewing launched; a server that was already
 running is left alone.
 
 Each desktop app keeps one session on the host for its SSH connection and reuses
@@ -358,13 +278,13 @@ apps.
 ### Local servers
 
 The browser lists ports held by processes your terminals and agents started.
-T3 Code reads which process holds each port and never connects to it, so a
+Weavewing reads which process holds each port and never connects to it, so a
 listed port opens as `http://localhost:<port>` and might not be a web page. For
 an HTTPS server or a specific path, set the **Preview URL** on the project
-script that starts it; T3 Code checks that address and opens it as written.
+script that starts it; Weavewing checks that address and opens it as written.
 
 To stop listing ports, set `T3CODE_PORT_DISCOVERY=0` in the environment that
-starts the T3 Code server, such as
+starts the Weavewing server, such as
 [`service.env`](./background-service.md#configure-the-service-environment) for
 the background service, and restart it. Script preview URLs still appear.
 
@@ -408,7 +328,7 @@ environment of an already running T3 server.
 
 ## Connect an outside agent
 
-Claude Code, Codex, ChatGPT and other agents T3 Code did not start can drive
+Claude Code, Codex, ChatGPT and other agents Weavewing did not start can drive
 threads on an environment through its MCP server. See
 [outside agents](./outside-agents.md) for setup.
 
@@ -538,13 +458,13 @@ files outside the workspace through a grant also requires `terminal:operate`,
 because shell and git configuration files can run commands. A client without it
 cannot create or remove grants, or save through a grant another client created.
 
-To remove an environment from T3 Connect, open your account menu's **T3 Connect**
+In a build configured for T3 Connect, to remove an environment from it, open your account menu's **T3 Connect**
 page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. When T3 Connect rejects a host's link, the host
 shows that it was removed from T3 Connect. To link it again, turn on
 **T3 Connect** in **Settings → Privacy** on a desktop host, or run
-`t3 connect link` on a command-line host and then restart T3 Code there. A
+`t3 connect link` on a command-line host and then restart Weavewing there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `t3 connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
@@ -558,8 +478,8 @@ creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
 T3 Connect also removes the tunnel of an environment running an older version of
-T3 Code once it has been offline for seven days. That environment shows a message
-asking you to update. Start T3 Code on that computer and update it to the latest
+Weavewing once it has been offline for seven days. That environment shows a message
+asking you to update. Start Weavewing on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
 
 On a command-line host, `t3 connect unlink` disables exposure while retaining
@@ -569,9 +489,99 @@ your login; `t3 connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
+## T3 Connect
+
+T3 Connect is upstream T3 Code's hosted service. It works only in a build configured
+for it; Weavewing releases are not, and `t3 up --connect` reports that T3 Connect is
+unavailable in this build. The rest of this section describes upstream's service.
+
+T3 Connect makes an environment available to your other devices without setting
+up router forwarding. In the desktop app on the host, open **Settings →
+Privacy**, sign in, and enable **T3 Connect** for that environment.
+
+For a command-line host, run upstream T3 Code's `t3` command, not the one from
+Weavewing Releases:
+
+```bash
+t3 up
+```
+
+It asks how your other devices reach the machine: T3 Connect, the local network,
+or both. Choose T3 Connect and follow the sign-in instructions. It then runs
+T3 Code as a [background service](./background-service.md).
+`t3 connect` is the same as `t3 up --connect`. Run `t3 up` again to change your
+choice, and `t3 status` to see it.
+
+Instead of the background service, you can keep the desktop app running with
+its local environment enabled. Closing the desktop app's last window stops its
+local server. Saving your sign-in alone does not start a server or make the
+machine reachable.
+
+On your other device, sign in to the same T3 Connect account and choose the
+environment. On upstream's hosted web app (app.t3.codes) home page with no computer added yet, signing
+in adds compatible computers linked to your account. Over SSH, the CLI prints a
+browser link and a short code. Open the link on any device, confirm the code
+matches, and approve. The CLI continues on its own, so you do not need to forward
+an OAuth callback port.
+
+T3 Connect renews access credentials when needed without disconnecting a healthy
+connection. Pull request diffs and provider settings keep working after the
+previous credential expires. A failed renewal affects that request; it does not
+disconnect an otherwise healthy conversation.
+
+### Approve new devices
+
+By default, any device signed in to your T3 Connect account can open a linked
+machine. To require approval instead, turn on **Require approval for new
+devices** with the T3 Connect settings in **Settings → Privacy** on the
+host, or when you first set up T3 Connect. Then someone who takes over your T3
+Connect account cannot reach the machine from a new device without your
+approval. Review the devices that are already approved, described below.
+
+A new device waits and shows a code such as `K7QM-2XFD`. Approve it from a
+device that is already connected, using the prompt or **Settings → Privacy**.
+Check that the code matches the one on the waiting device. On a
+headless host, run `t3 auth connect-device list` and then
+`t3 auth connect-device approve K7QM-2XFD`. A request expires after 10 minutes,
+and the device asks again when it retries. Deny keeps that device out until its
+request expires.
+
+Each device is approved once. Revoke it from **T3 Connect devices** in the same
+settings page, or with `t3 auth connect-device revoke <code>`. With approval on,
+it has to ask again. With approval off, it can connect again on its own, so
+revoking in the app offers to turn approval on first. Devices that connected through T3 Connect while approval was off stay
+approved and appear in that list for you to review. A device that has not
+connected since you updated T3 Code asks for approval like a new one. Older apps
+cannot show the code, so update them before you turn approval on.
+
+### Scripts and agents
+
+`t3 up` asks nothing when you name a choice: `--connect`, `--lan`, or their
+`--no-` forms. Choices you do not name keep their settings, and `--yes` takes
+the defaults. Without a terminal:
+
+- T3 Connect sign-in prints a URL and a code. Approve it on any device.
+- A needed restart runs without asking, and stops running agent turns.
+- With nothing set up and no choice named, `t3 up` stops and names the flags.
+
+`t3 status --json` prints the settings. `t3 up --help` lists every flag with
+examples.
+
+### More machines with T3 Chat
+
+Each T3 Connect account can link up to 3 machines. Phones and browsers do not
+count. A paid T3 Chat plan, which upstream sells, raises the limit to 10 machines with Pro, or 100 with
+Premier.
+
+To link T3 Chat, open your account menu on the web or desktop app, go to
+**T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat in the window that
+opens and approve. The new limit applies the next time you add a machine. If you
+cancel or downgrade T3 Chat, machines you already linked stay linked, but you
+cannot add more until you are under the limit again.
+
 ## T3 Connect troubleshooting
 
-When a T3 Connect connection fails, see
+In a build configured for T3 Connect, when a T3 Connect connection fails, see
 [T3 Connect troubleshooting](./t3-connect-troubleshooting.md). It explains each
 error, where the problem is, and how to fix it.
 
@@ -579,7 +589,7 @@ error, where the problem is, and how to fix it.
 
 If a computer should only drive work running elsewhere, turn off its local environment. In the
 desktop app, open **Settings → Environments** and switch off **Local
-environment**. T3 Code restarts without a local server: no local agents or terminals run, WSL
+environment**. Weavewing restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
 history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
 If a [background service](./background-service.md) on this computer uses the same T3 home, the

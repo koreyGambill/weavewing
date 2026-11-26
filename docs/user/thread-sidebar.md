@@ -67,8 +67,8 @@ or attaching anything, its row goes away; once you type, it stays as a draft.
 
 Set the folder in **Settings → Threads → Default folder for new threads**. Each machine
 has its own, and the path is on that machine.
-If the folder does not exist, T3 Code uses the `scratch` folder in its data directory.
-The start folder must sit outside a Git repository and cannot be your home, `~/.xwing`, or a parent of T3 Code's data folder. Threads share it without
+If the folder does not exist, Weavewing uses the `scratch` folder in its data directory.
+The start folder must sit outside a Git repository and cannot be your home, `~/.xwing`, or a parent of Weavewing's data folder. Threads share it without
 creating a separate visible folder per thread. Sandboxed agents run from a private
 thread folder and can read the shared folder. Full-access agents run there directly.
 Older threads keep their existing folders. Deleting a thread keeps its files.
@@ -108,7 +108,7 @@ red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
 Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.
 Critical notifications also send a desktop notification and play a sound, and
-warnings do when T3 Code is in the background,
+warnings do when Weavewing is in the background,
 following your settings under **Settings → General → Notifications**.
 
 Open **Status** in the right tools sidebar to check your status sources. Its alert
@@ -273,7 +273,7 @@ position, so using **Un-settle** returns it to the top. Pinning and snoozing pre
 position until you move it again. Thread activity does not change the order. The settled shelf
 continues to use settlement time.
 
-If dragging is unavailable for one environment, update the T3 Code server running in that
+If dragging is unavailable for one environment, update the Weavewing server running in that
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
@@ -285,7 +285,7 @@ To change how titles are written, add **Thread title instructions** in **Setting
 Text generation**, under Advanced, such as a length limit or an identifier to put first. They apply to new and
 regenerated titles. Select a project to give it its own instructions.
 
-Agents connected through T3 Code can use the same server-owned metadata workflow to
+Agents connected through Weavewing can use the same server-owned metadata workflow to
 rename a thread, regenerate its title, or link and unlink a pull request. These changes
 appear on web, desktop, and mobile without requiring the originating browser to remain
 open.
@@ -446,7 +446,7 @@ local servers that the thread's terminals or its Claude agent started, with thei
 serves a web page. A server the agent started stays listed after the agent's
 turn ends.
 Select a server to open it in the browser panel. **Stop** ends the server's job
-and keeps the agent, the terminal, and T3 Code running. Stop needs terminal
+and keeps the agent, the terminal, and Weavewing running. Stop needs terminal
 access to the environment and is not available on Windows.
 
 Use **Workspace actions** to open the working folder in an editor, run project

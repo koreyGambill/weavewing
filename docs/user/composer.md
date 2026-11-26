@@ -54,7 +54,7 @@ before an upload finishes requires you to attach that file again.
 You can drag or paste images into the web or desktop composer. HEIC and HEIF
 photos are converted to JPEG there and when selected from the mobile photo
 library; photos over the image limit are also resized to fit. On mobile, you can
-also send files to T3 Code through another app's system share sheet.
+also send files to Weavewing through another app's system share sheet.
 On Android, you can also drag images from another app into the message input
 in split screen.
 
@@ -120,7 +120,7 @@ instance:
 
 ## Model defaults
 
-T3 Code remembers your provider, model, and model options for new threads. A
+Weavewing remembers your provider, model, and model options for new threads. A
 project's configured model takes precedence; resetting that project setting
 returns to the remembered selection.
 
@@ -164,7 +164,7 @@ Turn on **Suggest next prompt** in Settings > Labs. After a Claude or Codex turn
 empty composer shows a predicted next message. Press `Tab` to fill it in, then edit or send it, or
 press `Escape` to dismiss it. Each suggestion is one extra request that reuses the turn's prompt
 cache, so it uses a little of your plan's usage. Claude skips suggestions on the first turn of a
-thread and near usage limits. Codex needs version 0.165 or later; if T3 Code manages
+thread and near usage limits. Codex needs version 0.165 or later; if Weavewing manages
 Codex, update it in Settings > Providers. Codex follows a change to the setting at once; open Claude
 threads follow it after they restart. Suggestions show on web and desktop.
 
@@ -217,7 +217,7 @@ speech recognition. If the chosen environment disconnects, dictation stops; it n
 switches hosts. Choose **This device** to revoke access and discard pending audio.
 For [cloud dictation](./voice-input.md#choose-where-audio-goes), open **Cloud providers**
 under the environment in **Settings → Voice** and confirm which provider may receive recordings.
-On Android, keep T3 Code open while recording and transcribing.
+On Android, keep Weavewing open while recording and transcribing.
 
 On-device dictation may need a network connection to download a speech model the
 first time. After that it works offline for that language. iPhone dictates in the
@@ -240,7 +240,7 @@ microphone on iOS. Swipe a device left to forget it. Android may use another inp
 when the preferred microphone cannot be routed. Devices with the same name may share
 a saved preference, but simultaneous same-name inputs remain separately selectable.
 
-T3 Code deletes the temporary recording from your phone after transcription or
+Weavewing deletes the temporary recording from your phone after transcription or
 cancellation. The transcript stays in your draft until you send the message to the agent.
 
 ## Queued messages
@@ -293,7 +293,7 @@ After you add or change skills, plugins, or MCP servers, use **Restart agent
 session** in the command palette on web and desktop. The conversation continues,
 and your next message starts the agent again with the new setup.
 
-Provider commands must start the message to run. T3 Code commands such as
+Provider commands must start the message to run. Weavewing commands such as
 `/model` and skill mentions work on any line.
 
 Send `/compact` in an existing conversation to reduce context usage when the
@@ -378,7 +378,7 @@ exist only as chips: deleting a file's last chip removes the file from the messa
 Copy text that holds chips and paste it into another draft, in the same thread or another one,
 and the chips come along with what they point to. Images and files are fetched again from the
 environment they came from; while that happens the chip shows a dashed outline, and if it cannot
-complete T3 Code tells you and leaves the chip for you to remove or replace. A chip whose
+complete Weavewing tells you and leaves the chip for you to remove or replace. A chip whose
 context is no longer available shows the same dashed outline; hover it for what to do.
 
 Copying a message with the copy button, or copying text out of it, gives other apps readable
@@ -447,7 +447,7 @@ Grants are saved on the environment. Every connected client allowed to write
 files and run terminals can use them. Agents edit files through their own tools,
 which these grants don't control. To turn editing off, select the
 **Editable outside workspace** badge. The badge lists every grant on the
-environment, and you can remove each one there. T3 Code never edits files in
+environment, and you can remove each one there. Weavewing never edits files in
 credential folders, git metadata, hard-linked files, or its own state.
 
 An HTML file outside the workspace cannot load scripts, styles, or images from
@@ -467,7 +467,7 @@ aliases such as `vim=nvim`.
 
 On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
-automatically. HTML previews cannot access your T3 Code session.
+automatically. HTML previews cannot access your Weavewing session.
 
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.

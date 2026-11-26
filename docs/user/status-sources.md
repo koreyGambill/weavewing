@@ -16,7 +16,7 @@ shows. Linked machines show shared sources in the same order.
 
 Choose **Wing status**, name it **Stormwing**, and use
 `http://127.0.0.1:4791/api/status`. Choose an icon or **Site favicon**, then save. Stormwing must
-be running on the same machine as the selected T3 Code server for this URL to work.
+be running on the same machine as the selected Weavewing server for this URL to work.
 
 ## Add an HTTP health URL
 

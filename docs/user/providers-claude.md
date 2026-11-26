@@ -1,6 +1,6 @@
 # Claude
 
-T3 Code uses Claude Code's login and configuration. Start with the default provider
+Weavewing uses Claude Code's login and configuration. Start with the default provider
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.
 
@@ -41,12 +41,12 @@ For presets that differ only in API keys or endpoints, use the instance's
 **Environment variables**. Variable assignments do not belong in **Launch arguments**.
 
 File paths in the `--settings` and `--append-system-prompt-file` launch arguments
-can start with `~` for the home directory of the machine running T3 Code. Any
+can start with `~` for the home directory of the machine running Weavewing. Any
 other relative path is read from the thread's project folder, or its worktree.
 
 Claude Code's verbose mode can stay enabled when you use Claude for text generation, including
 thread titles, branch names, commit messages, and pull request descriptions. On a remote connection,
-T3 Code uses the Claude configuration on the connected server.
+Weavewing uses the Claude configuration on the connected server.
 
 ## Compact long conversations
 
@@ -59,7 +59,7 @@ You can also send `/compact` in an existing conversation. Claude Code also
 compacts automatically. To see context usage, see
 [commands and skills](./composer.md#commands-and-skills).
 
-T3 Code sends `/compact` only when you request it. Returning to an idle thread or
+Weavewing sends `/compact` only when you request it. Returning to an idle thread or
 sending a message keeps the conversation history. Claude Code still compacts at
 its configured context threshold.
 
@@ -144,7 +144,7 @@ row in the thread; open it to see every step.
 ## Claude in Chrome
 
 Claude threads can use the Claude in Chrome extension, which works in your own
-Chrome with its sign-ins. T3 Code sessions load it only when asked: add `--chrome`
+Chrome with its sign-ins. Weavewing sessions load it only when asked: add `--chrome`
 to **Launch arguments** in the Claude instance's settings in **Settings > Providers**.
 It applies to sessions that start after you save. Set up the extension as you would
 for Claude Code first; see Claude Code's [Chrome guide](https://code.claude.com/docs/en/chrome).
@@ -170,11 +170,11 @@ If that Claude config directory has a cached Anthropic login, run `/logout` in a
 Claude Code session using that directory before starting the router setup. Cached
 login credentials can conflict with the router token.
 
-Select the model you want in T3 Code. For an OpenRouter model outside the built-in
+Select the model you want in Weavewing. For an OpenRouter model outside the built-in
 list, open that Claude instance in **Settings > Providers** and add its full model
 ID with **Add custom model**. Then select it in the chat model picker.
 `ANTHROPIC_DEFAULT_*_MODEL` variables map Claude Code aliases such as `sonnet`; they
-do not replace the explicit model ID selected in T3 Code. Custom models may have
+do not replace the explicit model ID selected in Weavewing. Custom models may have
 fewer effort, thinking, or context controls than built-in models.
 
 Verify the model used in OpenRouter's activity dashboard. For current compatibility

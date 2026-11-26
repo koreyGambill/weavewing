@@ -1,6 +1,6 @@
 # Prompt links
 
-A prompt link opens T3 Code with a prompt ready to send. Use one to share a prompt on social
+A prompt link opens Weavewing with a prompt ready to send. Use one to share a prompt on social
 media, or to put a one-click fix in a pull request comment.
 
 A link never runs anything. It opens a draft. You read the prompt, then press Send. A link cannot
@@ -12,7 +12,8 @@ Open the command palette and choose **Copy prompt link**. It copies the draft in
 When the project is on GitHub, **Copy prompt link with repo and model** also adds the repository
 and the model you picked. Sent messages have a **Copy prompt link** button too.
 
-You can also write a link by hand:
+You can also write a link by hand. These examples use upstream T3 Code's hosted web app,
+app.t3.codes, which copied links use by default:
 
 ```
 https://app.t3.codes/new?prompt=Rate%20my%20swearing
@@ -32,7 +33,7 @@ Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
 
 ## Open a link
 
-On app.t3.codes, the link first asks where to open it: the desktop or mobile app, this browser
+On upstream's hosted web app, the link first asks where to open it: the desktop or mobile app, this browser
 when it is connected to a machine, or the download page. Select **Remember my choice** to skip
 this step next time.
 
@@ -41,24 +42,24 @@ this step next time.
   counts only for its own owner. When you do not have the repository, choose **Clone** or **Use
   without project**.
 - **`provider` and `model`**: used when you have that provider set up. Otherwise your default
-  model is used, and T3 Code tells you.
+  model is used, and Weavewing tells you.
 - **`pr`**: opens the thread linked to that pull request on any connected machine, with the prompt
   in its composer. When no thread is linked, the draft goes on the pull request branch in a new
-  worktree. T3 Code checks the code out only after you confirm, because the checkout runs your
+  worktree. Weavewing checks the code out only after you confirm, because the checkout runs your
   setup script on it.
 
 A thread link with a prompt, such as `https://app.t3.codes/<environment>/<thread>?prompt=…`,
-puts the prompt in that thread's composer. If you already typed a draft there, T3 Code asks
+puts the prompt in that thread's composer. If you already typed a draft there, Weavewing asks
 before it replaces it.
 
-T3 Code removes characters you cannot see, such as zero-width and hidden tag characters, because
-they can hide instructions for the agent. When a prompt had them, T3 Code warns you that it may be
+Weavewing removes characters you cannot see, such as zero-width and hidden tag characters, because
+they can hide instructions for the agent. When a prompt had them, Weavewing warns you that it may be
 malicious.
 
 ## Share a thread
 
 **Copy thread** copies a link such as `https://app.t3.codes/threads/<environment>/<thread>`. Paste
-it anywhere, such as Slack, a GitHub comment, or your notes. On a phone with T3 Code installed, it
+it anywhere, such as Slack, a GitHub comment, or your notes. On a phone with the mobile app installed, it
 opens the thread in the app. Elsewhere, opening it asks where to open it, like a prompt link, then
-opens the thread. Only someone connected to the machine that runs the thread can see it. In T3 Code,
+opens the thread. Only someone connected to the machine that runs the thread can see it. In Weavewing,
 a thread link in a message opens the thread in the app.

@@ -139,8 +139,8 @@ itself belong to the same run. A run over its cost or token budget stops mid-tur
 and shows as stopped at its budget; the agent can't continue it until the next
 scheduled run. Cost counts the agent's priced usage plus an estimate for its
 subagents and compaction, so a run can stop a little early. With a subagent or
-budget limit, the agent's own subagent tools are off and subagents go through T3
-Code, on the task's model unless the agent was given others. The agent can't
+budget limit, the agent's own subagent tools are off and subagents go through
+Weavewing, on the task's model unless the agent was given others. The agent can't
 start, fork or message threads outside its run, answer or reorder their turns, or
 act in linked environments. Subagent limits work with Claude and Codex models. An
 agent in a task with limits can't create tasks, change limits or run tasks now. A
@@ -307,7 +307,7 @@ keeping its worktree settings. To run it, choose an existing checkout or re-enab
 ## Fast worktree checkout on macOS
 
 Fast worktree checkout is a beta. Turn it on for each Mac in **Settings → Labs → Fast worktree
-checkout**. T3 Code then keeps a few recent checkouts of each repository in the `caches` folder of
+checkout**. Weavewing then keeps a few recent checkouts of each repository in the `caches` folder of
 the T3 home directory. A new worktree is cloned from one of them with APFS copy-on-write, which is
 about twice as fast as writing every file and makes the first `git status` in it fast as well.
 Turning it off deletes the cache.
@@ -353,7 +353,7 @@ worktrees were removed or kept and why, plus any failures.
 Results also list folders in the worktree folder that no thread uses, with their sizes; cleanup never removes them, so remove them manually if you want.
 
 The inactive and settled retention periods also apply to the folders of
-[threads without a project](./thread-sidebar.md#start-without-a-project). Those folders are not
+[threads without a project](./thread-sidebar.md#start-in-the-default-folder). Those folders are not
 Git repositories, so their files are deleted with them and cannot be recovered; the thread stays,
 and its next turn starts in a new, empty folder. A folder is kept when it has a Git repository
 anywhere inside it or when its thread has an enabled scheduled task. Every file in such a folder
@@ -368,7 +368,7 @@ working. Current logs, message attachments, and browser profiles are kept.
 
 Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to
 every checkout in the project group and appears on connected clients. Choose **Automatic** to let
-T3 Code detect an icon again.
+Weavewing detect an icon again.
 
 Choose **Monogram** in the icon picker to set one or two letters or numbers and a color.
 
@@ -382,6 +382,6 @@ In Source control, enable **Automatically pull** to keep the default-branch chec
 with its configured upstream. Choose an environment to set the default or a project to override it.
 On mobile, use **Settings → Source control** to change selected environment defaults or project overrides.
 
-T3 Code only pulls when it can fast-forward and the checkout has no changed files, untracked files,
+Weavewing only pulls when it can fast-forward and the checkout has no changed files, untracked files,
 or local commits. It skips checkouts on another branch or without an upstream. If a checkout has
 local work, resolve it yourself before automatic pulls can resume.

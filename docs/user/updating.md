@@ -1,4 +1,4 @@
-# Updating T3 Code
+# Updating Weavewing
 
 The app you use and the server running your agents can be on different machines.
 When a server is behind your web or desktop app, the update button at the bottom
@@ -28,7 +28,7 @@ running, and you can retry. The confirmation lists each machine it skips and
 why, such as a machine that is offline or needs a manual update. Use
 **Settings → Environments** for those.
 
-If a desktop app restarts on its old version, T3 Code tells you the update did
+If a desktop app restarts on its old version, Weavewing tells you the update did
 not apply. It does not install that version again on its own, even when another
 device asks. Use the update button on that machine to retry.
 
@@ -38,7 +38,7 @@ below.
 
 ## Switch between Stable and Nightly
 
-In the desktop app, change **Settings → About → Update track**. T3 Code shows each
+In the desktop app, change **Settings → About → Update track**. Weavewing shows each
 connected machine it will move and each one it skips, then moves them in one
 step. Remote servers install the latest release on the new track. Remote desktop
 apps reinstall on the new track. This app reinstalls last. Your threads,
@@ -49,7 +49,7 @@ older than its Nightly, run `t3 update --channel stable --allow-downgrade` on
 that machine.
 
 A switch is blocked for a machine whose database already has changes the
-target release does not support, or when T3 Code cannot confirm that it does.
+target release does not support, or when Weavewing cannot confirm that it does.
 The dialog says why: update a machine on its current track first when its
 release is too old to check, or wait until the target track includes the
 changes. A Mac running the desktop app must switch on that Mac.
@@ -76,7 +76,7 @@ It resumes supported active threads after an update, crash, or machine
 restart. Changes are saved to connected environments that support this setting;
 update older servers first. If a supported environment was offline or has a
 different value, use **Apply to all** in Settings after it connects.
-T3 Code must start again on that machine;
+Weavewing must start again on that machine;
 the setting does not enable automatic startup. Terminal commands may still be
 interrupted, and threads without saved provider resume state need a new message.
 A thread that finished its turn to wait on a subagent, a background task, a Claude
@@ -90,7 +90,7 @@ are more than five minutes apart. A completed turn or a planned shutdown resets
 that limit.
 
 Updates from the previous orchestration system preserve conversation transcripts but cannot carry
-every kind of runtime history forward. Read [Threads from older T3 Code versions](./thread-migration.md)
+every kind of runtime history forward. Read [Threads from older Weavewing versions](./thread-migration.md)
 before continuing an important older thread.
 
 ## When versions don't match
@@ -99,7 +99,7 @@ A client and server must speak the same orchestration protocol. If they do not, 
 refused rather than running half-upgraded:
 
 - An app newer than the server is blocked before connecting, with a notice telling you to update
-  T3 Code on the machine named in the notice.
+  Weavewing on the machine named in the notice.
 - A server newer than your app refuses the connection with an update message.
 
 Update the side the notice names, then reconnect.
@@ -131,10 +131,6 @@ If you decline the restart for a background service installed by an older
 release, the service can stay down after a crash or reboot until you run
 `t3 service restart`.
 
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
-
 ## If an update fails
 
 Keep the client open until it reconnects or reports a failure. A failed service
@@ -150,7 +146,7 @@ directory and pair with the running server.
 
 ### macOS app does not reopen after an Alpha update
 
-Updating an older **T3 Code (Alpha)** installation can replace it with
+This applies to upstream T3 Code installs. Updating an older **T3 Code (Alpha)** installation can replace it with
 **T3 Code (Beta)** without reopening the app. Open **T3 Code (Beta)** from
 Applications, or run:
 
@@ -163,7 +159,7 @@ from Applications again.
 
 ## If the desktop app does not start
 
-If the desktop app's server keeps failing at startup, T3 Code shows a "T3 Code
+If the desktop app's server keeps failing at startup, Weavewing shows a "Weavewing
 could not start" window instead of the app. If a newer version is available,
 choose **Update** to install it. If not, the window links to the last version
 that started on your computer. Download and install it to go back. Use **Copy
@@ -171,12 +167,12 @@ details** to include the error in a bug report.
 
 ## Registries and proxies
 
-Each server checks T3 Code releases, and providers installed with npm, through
+Each server checks Weavewing releases, and providers installed with npm, through
 its own npm, so the checks use npm's configured registry, authentication, and
 proxy settings. Providers installed with Homebrew or pnpm check through those
 tools.
 Configure npm on the server's machine. If that registry cannot be reached, the
-release shows as unavailable; T3 Code does not try the public registry instead.
+release shows as unavailable; Weavewing does not try the public registry instead.
 Machines without npm check the public npm registry directly.
 
 ## Update providers
@@ -189,7 +185,7 @@ or when its instances use different update commands, such as two instances that
 run different CLI installs. Update those by hand, or point every instance of the
 provider at the same CLI.
 
-After a successful provider CLI update, T3 Code refreshes model discovery for
+After a successful provider CLI update, Weavewing refreshes model discovery for
 every enabled instance of that provider using its own configuration. Connected
 clients receive the refreshed catalogs automatically. Manual refreshes can download
 the latest model catalog even when automatic checks are off.

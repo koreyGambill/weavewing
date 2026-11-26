@@ -11,7 +11,10 @@ the CLI's normal settings.
 
 ## Relay connection diagnostics
 
-T3 Code sends relay connection traces to Axiom to diagnose T3 Connect connectivity. These are
+A server, desktop app, or web app sends relay connection traces only when its build has relay
+tracing configured, either at build time or through the `T3CODE_RELAY_CLIENT_OTLP_TRACES_*`
+environment variables on the server. Upstream T3 Code's builds send them to upstream's Axiom
+account to diagnose T3 Connect; a build without that configuration sends none. These are
 separate from product events. Depending on the client version, traces can include connection
 timings, environment identifiers and the connected machine's name. Failed spans can include error
 messages and stack traces; error text can quote a value the app was handling.
@@ -33,13 +36,14 @@ if the server has opted out. The browser app has no relay tracing toggle.
 
 ## Mobile app diagnostics
 
-When the iOS or Android app crashes or hits an error, it sends a report to T3 Code: the error
-message, the stack trace, the app version, and the device model and OS version. Each launch also
+A mobile build sends crash reports only when it is configured with a T3 Connect relay; a build
+without one sends none. Upstream T3 Code's store apps have one. When such an app crashes or hits
+an error, it sends a report to whoever runs that relay: the error message, the stack trace, the app version, and the device model and OS version. Each launch also
 sends startup timings, and every report carries a random ID for the install. Reports go through
-the T3 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
+the relay; upstream's relay forwards them to Axiom. They do not include your threads, prompts, or connection details,
 but an error message can quote a value the app was handling.
 
-To stop sending them, turn off **Send crash reports** in **Settings > About T3 Code > Diagnostics**.
+To stop sending them, turn off **Send crash reports** in **Settings > About > Diagnostics**.
 
 The mobile app also sends relay connection traces when its build has tracing configured. These
 carry an identifier for the current app session. **Send crash reports** does not control these
@@ -48,7 +52,7 @@ managed policy do not disable mobile tracing.
 
 ## Agent activity for mobile notifications
 
-When **Publish agent activity** is enabled on a host, it sends project and thread titles, model
+In a build configured for T3 Connect, when **Publish agent activity** is enabled on a host, it sends project and thread titles, model
 names, activity status, and environment and thread identifiers to the T3 Connect relay for
 [mobile notifications and live activities](./mobile-notifications.md). This is separate from
 product events and relay diagnostics. The telemetry opt-out does not disable it.

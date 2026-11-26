@@ -1,7 +1,7 @@
 # Welcome page
 
-T3 Code shows a Welcome page when you open a new installation. Existing
-workspaces skip it. It shows what T3 Code found on the computer you are using,
+Weavewing shows a Welcome page when you open a new installation. Existing
+workspaces skip it. It shows what Weavewing found on the computer you are using,
 on one page: your agents, projects from your Claude Code, Codex, and Pi history,
 and the phone app. Only an agent is needed to start chatting.
 
@@ -9,15 +9,15 @@ To see the page again, go to **Settings → About → Welcome page** and select
 **Open**, or choose **Import conversations and projects** in **Settings → Projects**.
 Each server in **Settings → Environments** also offers **Import conversations**. Direct links, such as Settings, open normally before setup is done.
 
-The hosted app at app.t3.codes does not open the page. With no computer connected,
+Upstream T3 Code's hosted web app at app.t3.codes does not open the page. With no computer connected,
 it asks you to sign in to T3 Connect, then to install T3 Code and run
 `t3 connect` on your computer. From home, it adds compatible computers linked to your account and
 opens the app. To add more computers later, use **Settings → Environments**.
 
-If T3 Code cannot confirm the workspace during startup, it shows
+If Weavewing cannot confirm the workspace during startup, it shows
 **Still connecting** instead of opening the app. Select **Reload** to try again.
 
-If T3 Code cannot read your saved settings, it shows **Could not read settings**.
+If Weavewing cannot read your saved settings, it shows **Could not read settings**.
 Select **Retry** after storage becomes available. Setup does not replace
 unreadable settings with defaults.
 
@@ -31,19 +31,19 @@ settings. A failed WSL startup leaves Windows setup available and can be retried
 
 ## Agents
 
-T3 Code lists the agents it found on the computer first, ready ones on top.
-**Add more agents** lists every other agent T3 Code supports, A to Z. When no agent
+Weavewing lists the agents it found on the computer first, ready ones on top.
+**Add more agents** lists every other agent Weavewing supports, A to Z. When no agent
 is found, it reads **Set up an agent** and opens by itself:
 
 - **Turn on** enables an agent that is off on this computer, including one only
-  some projects use. T3 Code then checks whether it is installed and signed in.
+  some projects use. Weavewing then checks whether it is installed and signed in.
 - For Claude Code, **Install** or **Sign in** opens a terminal with the correct
   command ready to run. Install uses the vendor's own installer, which keeps
   **Update now** working in Settings.
 - For Codex, **Set up** offers sign-in with your ChatGPT account or your own
   Codex CLI. **Use existing CLI** opens the terminal to install or sign in, and
   **Continue with ChatGPT** stays available until Codex is signed in.
-- When T3 Code knows an installed version does not work with it, **Update** opens
+- When Weavewing knows an installed version does not work with it, **Update** opens
   the agent in **Settings → Providers**, which shows the version to use and updates it
   when it can.
 - Other agents, and agents that could not load, open their page in
@@ -62,25 +62,25 @@ without one. Checked projects are still imported.
 
 ## Phone
 
-Select **Set up** and scan the code with your phone. It opens the App Store on an
-iPhone and Google Play on Android. Open **Settings → Privacy** to choose a remote
+Select **Set up** and scan the code with your phone. It opens upstream T3 Code's app in the App
+Store on an iPhone and Google Play on Android. Open **Settings → Privacy** to choose a remote
 connection route. On a desktop host, turn on **Allow remote devices**. For a server
 started with `t3 serve`, restart it with `--lan`. Then use **Open pairing** to create
 a one-time pairing link or QR code.
 
-The T3 Code app sends crash reports to T3 by default. Turn them off before pairing
+Upstream's store app sends crash reports to upstream by default. Turn them off before pairing
 in the app's **Settings → About → Diagnostics**. Connect over Tailscale or a VPN
 because Weavewing serves plain HTTP.
 
 ## Projects
 
-T3 Code finds directories that Claude Code, Codex or Pi has used. Git repositories
+Weavewing finds directories that Claude Code, Codex or Pi has used. Git repositories
 are listed first, newest activity on top. When the remote is on GitHub, the
 group shows the repository as `owner/name`. Clones with the same remote share
 one group. Directories that are not git repositories sit under "Other folders".
 
 The page offers git repositories active within the last 30 days with at least
-three conversations, already checked. Projects already in T3 Code are not checked
+three conversations, already checked. Projects already in Weavewing are not checked
 again. Uncheck the box to start without them, or
 select **Review all** to pick from everything found, with "Select all" and
 "Select none". Linked worktrees of bare repositories
@@ -89,11 +89,11 @@ count toward their main checkout, so a repository is offered even if you only
 worked in its worktrees. Codex scratch directories under `Documents/Codex`, and
 anything under `Downloads` are not offered.
 
-A large or malformed history can reach the scan limit. T3 Code keeps the
+A large or malformed history can reach the scan limit. Weavewing keeps the
 projects it found and warns when projects or conversations may be missing.
 
 Imported projects include Claude, Codex and Pi conversations active within the last
-30 days. You can continue those conversations in T3 Code. Pi is off by default:
+30 days. You can continue those conversations in Weavewing. Pi is off by default:
 open **Add more agents** and select **Turn on** next to Pi, and the page looks for
 its sessions too. Pi sessions
 are read from each enabled Pi provider's session directory, which follows
@@ -103,15 +103,15 @@ Pi conversation imports its active branch, the one Pi reopens.
 Open an imported Claude Code conversation to follow its **Terminal activity**.
 This view checks the original transcript every 5 seconds while expanded and shows
 the latest messages separately from imported history. The original terminal
-still controls the session. Importing and following do not move it into T3 Code.
-Finish the terminal turn before continuing in T3 Code, which closes this view.
+still controls the session. Importing and following do not move it into Weavewing.
+Finish the terminal turn before continuing in Weavewing, which closes this view.
 
-Conversation import is best effort. T3 Code keeps the first user prompt and the
+Conversation import is best effort. Weavewing keeps the first user prompt and the
 newest remaining visible user and assistant messages, with 200 messages total.
 It omits tool activity and attachments. For Codex, it omits generated setup
 context only when a canonical user event and a valid shared turn ID identify the
 same user turn. Ambiguous legacy or response-only context stays in the imported
-conversation so T3 Code does not remove user text. It reads one conversation at
+conversation so Weavewing does not remove user text. It reads one conversation at
 a time and skips files larger than 4 GiB. It also skips a conversation when the
 message text and metadata it keeps need more than 32 MiB of memory. Tool output
 does not count toward that limit. It skips a conversation with more than 100,000
@@ -125,6 +125,6 @@ continue a large batch, open the Welcome page again and pick the project in
 **Review all**. Completed conversations are not imported again. You can continue
 without the remaining history.
 
-You can start without importing. While an import runs, T3 Code stays on the
+You can start without importing. While an import runs, Weavewing stays on the
 Welcome page. If you quit, open the Welcome page again from **Settings → About**; the
 projects you started stay checked.
