@@ -154,19 +154,23 @@ records, in the provider thread's native metadata, digests of the append section
 holds. The record is server state; the wire projection leaves it out. When a process opens by
 resuming, the [comparison](../../apps/server/src/orchestration-v2/Adapters/ClaudeInstructionUpdates.ts)
 puts one marked `<system-reminder>` ahead of the next ordinary prompt. The reminder gives added and
-changed sections in full and names removed ones. The record moves forward only when Claude Code
-echoes that prompt or reports that it started, so a lost process sends the notice again rather
-than dropping it. The record follows Claude Code's own behaviour:
+changed sections in full and names removed ones. The record moves forward when Claude Code echoes
+that prompt or reports that it started, so a lost process sends the notice again rather than
+dropping it. Without either signal, the record counts the prompts whose own result completed them
+while carrying the notice and assumes delivery after two, so a notice goes out at most twice. The
+record follows Claude Code's own behaviour:
 
 - Compaction and `/clear` rebuild the prompt from the running process's append.
 - A fork at the head replays its source's prompt and notices.
 - A context rewind keeps the turn's prompt and later messages, so it keeps the record.
-- A rollback cut or an earlier fork holds an unknown mix of notices, so the record becomes unknown.
+- A rollback cut or an earlier fork holds an unknown mix of notices, so the rollback or fork
+  stores an unknown record at once.
 - A session with an unknown record gets the complete current set once, which retires any earlier
   section it does not repeat.
 
-The session importer strips the marked notice, so an imported Claude session does not show it as
-the user's text. The context breakdown reports the recorded start append, not the one T3 passed,
+The session importer strips the marked notice from Claude sessions only, and only when the span
+from its marker line to its own closing tag is exact, so an imported Claude session does not show
+it as the user's text. The context breakdown reports the recorded start append, not the one T3 passed,
 and charges the notice to the turn whose prompt carries it. Tool descriptions are not covered: a
 tool Claude already loaded keeps its old description, so guidance whose change must reach existing
 threads belongs in the instruction text.
