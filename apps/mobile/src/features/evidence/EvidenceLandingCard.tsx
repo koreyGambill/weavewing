@@ -125,7 +125,7 @@ function LandingChanges(props: {
             <Text selectable className="font-sans text-sm text-danger-foreground">
               Could not load this landing: {query.error}
             </Text>
-            <Button label="Try again" size="compact" onPress={query.refresh} />
+            <Button label="Try again" onPress={query.refresh} />
           </>
         )}
       </View>
@@ -150,7 +150,6 @@ function LandingChanges(props: {
           label="Open thread"
           icon="arrow.up.right"
           tone="text"
-          size="compact"
           accessibilityHint="Closes Evidence and opens the thread that shows this landing's QA"
           onPress={() => props.onOpenThread({ environmentId, threadId: qaThreadId })}
         />

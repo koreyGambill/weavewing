@@ -4,7 +4,6 @@ import type {
   EvidenceLandingSummary,
   EvidenceListResult,
   EvidenceQaState,
-  EvidenceQaTally,
   WaitingCounts,
 } from "@t3tools/contracts";
 
@@ -67,9 +66,6 @@ export function landingQaSummary(
   ].join(" · ");
 }
 
-/** The server's Needs QA rule: a change still pending, or a problem the agent owes. */
-export const landingNeedsQa = (tally: EvidenceQaTally) => tally.pending + tally.problem > 0;
-
 /** "main · 0123456": where a landing went. */
 export const landingTargetLine = (landing: Pick<EvidenceLandingSummary, "target">) =>
   `${landing.target.branch} · ${landing.target.sha.slice(0, 7)}`;
@@ -78,19 +74,13 @@ export const landingTargetLine = (landing: Pick<EvidenceLandingSummary, "target"
 export const landingQaThreadId = (landing: Pick<EvidenceLanding, "threadId" | "qaThreadId">) =>
   landing.qaThreadId ?? landing.threadId;
 
-/** Which group a page of landings fills: the Needs QA list, or everything else. */
-export type EvidenceGroup = "needs-qa" | "landed";
-
 /**
- * The landings a group shows from one page. The Landed group reads the unfiltered list, so it
- * drops what Needs QA already lists, and no landing shows twice.
+ * Which list a group reads: the server's Needs QA filter, or every landing, unfiltered, as web's
+ * "All landings" shows them. A landing that needs QA shows in both; filtering the second by the
+ * QA tally would hide one whose only pending change the user is discussing, which Needs QA leaves
+ * out while the tally still counts it as pending.
  */
-export function groupLandings(
-  group: EvidenceGroup,
-  items: ReadonlyArray<EvidenceLandingSummary>,
-): ReadonlyArray<EvidenceLandingSummary> {
-  return group === "needs-qa" ? items : items.filter((landing) => !landingNeedsQa(landing.qa));
-}
+export type EvidenceGroup = "needs-qa" | "all";
 
 /** One environment's first pages: null until they load. */
 export interface EvidenceFirstPages {
@@ -105,8 +95,8 @@ export type EvidenceSheetState =
       readonly kind: "listed";
       /** Every environment answered and none has a landing that needs QA. */
       readonly needsQaEmpty: boolean;
-      /** Every environment answered and none has another landing, on this page or older. */
-      readonly landedEmpty: boolean;
+      /** Every environment answered and none has a landing at all. */
+      readonly allEmpty: boolean;
     };
 
 /**
@@ -121,18 +111,14 @@ export function evidenceSheetState(
   const needsQaAnswered = !failed && environments.every((entry) => entry.needsQa !== null);
   const allAnswered = !failed && environments.every((entry) => entry.all !== null);
   const needsQaListed = environments.some((entry) => (entry.needsQa?.items.length ?? 0) > 0);
-  const landedListed = environments.some(
-    (entry) =>
-      entry.all !== null &&
-      (entry.all.next !== null || groupLandings("landed", entry.all.items).length > 0),
-  );
-  if (!failed && !needsQaListed && !landedListed) {
+  const allListed = environments.some((entry) => (entry.all?.items.length ?? 0) > 0);
+  if (!failed && !needsQaListed && !allListed) {
     return needsQaAnswered && allAnswered ? { kind: "empty" } : { kind: "loading" };
   }
   return {
     kind: "listed",
     needsQaEmpty: needsQaAnswered && !needsQaListed,
-    landedEmpty: allAnswered && !landedListed,
+    allEmpty: allAnswered && !allListed,
   };
 }
 

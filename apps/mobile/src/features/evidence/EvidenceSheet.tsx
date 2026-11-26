@@ -14,7 +14,6 @@ import { createInboxDismissal } from "../inbox/inboxDismissal";
 import {
   evidenceEnvironmentHeading,
   evidenceSheetState,
-  groupLandings,
   threadsWaitingPhrase,
   type EvidenceEnvironment,
   type EvidenceGroup,
@@ -28,7 +27,9 @@ import {
 
 /**
  * Landed work across every connected environment's threads, newest first: what needs QA, then
- * the rest, as web's Evidence view filters it. Mounted only while open.
+ * every landing, web's two Evidence filters one above the other. Only the newest landing that
+ * needs QA opens by itself, so the sheet reads one landing's changes until the user opens more.
+ * Mounted only while open.
  */
 export function EvidenceSheet(props: {
   readonly environments: ReadonlyArray<EvidenceEnvironment>;
@@ -48,9 +49,14 @@ export function EvidenceSheet(props: {
     setLeavingTo(thread);
     dismissal.arm(() => props.onClose(thread));
   };
-  const state = evidenceSheetState(useEvidenceFirstPages(props.environments));
+  const firstPages = useEvidenceFirstPages(props.environments);
+  const state = evidenceSheetState(firstPages);
   const groupProps = {
     environments: props.environments,
+    // The newest landing that needs QA in the first environment that has one.
+    openEnvironmentId:
+      props.environments[firstPages.findIndex((pages) => (pages.needsQa?.items.length ?? 0) > 0)]
+        ?.environmentId ?? null,
     expandedChange,
     onToggleChange: (key: string) => setExpandedChange(expandedChange === key ? null : key),
     onOpenThread: leave,
@@ -93,10 +99,10 @@ export function EvidenceSheet(props: {
             ) : (
               <EvidenceGroupLists group="needs-qa" {...groupProps} />
             )}
-            {state.landedEmpty ? null : (
+            {state.allEmpty ? null : (
               <>
-                <GroupHeading title="Landed" detail={null} />
-                <EvidenceGroupLists group="landed" {...groupProps} />
+                <GroupHeading title="All landings" detail={null} />
+                <EvidenceGroupLists group="all" {...groupProps} />
               </>
             )}
           </>
@@ -121,6 +127,8 @@ function GroupHeading(props: { readonly title: string; readonly detail: string |
 
 interface GroupListProps {
   readonly environments: ReadonlyArray<EvidenceEnvironment>;
+  /** The environment whose first Needs QA landing opens by itself. */
+  readonly openEnvironmentId: EnvironmentId | null;
   readonly expandedChange: string | null;
   readonly onToggleChange: (key: string) => void;
   readonly onOpenThread: (thread: InboxThreadTarget) => void;
@@ -128,7 +136,15 @@ interface GroupListProps {
 
 /** One group's landings per environment, under the environment's name when there are several. */
 function EvidenceGroupLists(props: GroupListProps & { readonly group: EvidenceGroup }) {
-  const { environments, group, ...rest } = props;
+  const { environments, group, openEnvironmentId, expandedChange, onToggleChange, onOpenThread } =
+    props;
+  // A landing that needs QA lists in both groups, so each group opens its own copy of a card.
+  const prefix = `${group}|`;
+  const rest = {
+    expandedChange: expandedChange?.startsWith(prefix) ? expandedChange.slice(prefix.length) : null,
+    onToggleChange: (key: string) => onToggleChange(prefix + key),
+    onOpenThread,
+  };
   return environments.map((environment) => {
     const heading = evidenceEnvironmentHeading(environment, environments.length);
     return (
@@ -143,6 +159,7 @@ function EvidenceGroupLists(props: GroupListProps & { readonly group: EvidenceGr
           group={group}
           first
           labelled={heading !== null}
+          openFirst={group === "needs-qa" && environment.environmentId === openEnvironmentId}
         />
       </View>
     );
@@ -151,13 +168,15 @@ function EvidenceGroupLists(props: GroupListProps & { readonly group: EvidenceGr
 
 /** One page of landings; "Load older landings" chains the next page from this page's cursor. */
 function LandingPage(
-  props: Omit<GroupListProps, "environments"> & {
+  props: Omit<GroupListProps, "environments" | "openEnvironmentId"> & {
     readonly environmentId: EnvironmentId;
     readonly input: EvidenceListInput;
     readonly group: EvidenceGroup;
     readonly first: boolean;
     /** Several environments are listed, so an empty one says so under its name. */
     readonly labelled: boolean;
+    /** Opens this page's first landing, the newest that needs QA in the sheet. */
+    readonly openFirst: boolean;
   },
 ) {
   const [more, setMore] = useState(false);
@@ -172,39 +191,39 @@ function LandingPage(
         <Text selectable className="font-sans text-sm text-danger-foreground">
           Could not load evidence: {page.error}
         </Text>
-        <Button label="Try again" size="compact" onPress={page.refresh} />
+        <Button label="Try again" onPress={page.refresh} />
       </View>
     );
-  const shown = groupLandings(props.group, page.data.items);
+  const shown = page.data.items;
   const next = page.data.next;
   return (
     <>
       {props.first && props.labelled && shown.length === 0 && next === null ? (
         <Text className="px-1 font-sans text-sm text-foreground-secondary">
-          {props.group === "needs-qa" ? "Nothing waiting for your QA." : "No other landings."}
+          {props.group === "needs-qa" ? "Nothing waiting for your QA." : "No landings yet."}
         </Text>
       ) : null}
-      {shown.map((landing) => (
+      {shown.map((landing, index) => (
         <EvidenceLandingCard
           key={landing.id}
           environmentId={props.environmentId}
           landing={landing}
-          defaultOpen={props.group === "needs-qa"}
+          defaultOpen={props.openFirst && index === 0}
           expandedChange={props.expandedChange}
           onToggleChange={props.onToggleChange}
           onOpenThread={props.onOpenThread}
         />
       ))}
       {next === null ? null : more ? (
-        <LandingPage {...props} input={{ ...props.input, before: next }} first={false} />
+        <LandingPage
+          {...props}
+          input={{ ...props.input, before: next }}
+          first={false}
+          openFirst={false}
+        />
       ) : (
         <View className="items-start px-1">
-          <Button
-            label="Load older landings"
-            tone="text"
-            size="compact"
-            onPress={() => setMore(true)}
-          />
+          <Button label="Load older landings" tone="text" onPress={() => setMore(true)} />
         </View>
       )}
     </>
