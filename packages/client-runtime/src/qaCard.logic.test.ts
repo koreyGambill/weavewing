@@ -1,7 +1,7 @@
 import { MessageId, type EvidenceChangeQa } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { qaCardOutcome, qaCardStatus, qaCardTitle, qaPresence } from "./qaCard.logic.ts";
+import { qaCardOutcome, qaCardStatus, qaCardTitle, qaNoted, qaPresence } from "./qaCard.logic.ts";
 
 const qa = (overrides: Partial<EvidenceChangeQa>): EvidenceChangeQa => ({
   state: "pending",
@@ -58,5 +58,15 @@ describe("qaCardTitle", () => {
     expect(qaCardTitle({ id: "a", summary: "", ask: "Show retries\nin the toast" })).toBe(
       "Show retries",
     );
+  });
+});
+
+describe("qaNoted", () => {
+  it("calls a quiet change with gaps a note, and nothing else", () => {
+    const gaps = ["Not run on a phone."];
+    expect(qaNoted({ qa: qa({ state: "quiet", raised: [] }), gaps })).toBe(true);
+    expect(qaNoted({ qa: qa({ state: "quiet", raised: [] }), gaps: [] })).toBe(false);
+    expect(qaNoted({ qa: qa({}), gaps })).toBe(false);
+    expect(qaNoted({ qa: qa({ state: "confirmed", by: "user" }), gaps })).toBe(false);
   });
 });

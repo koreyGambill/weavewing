@@ -13,6 +13,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { qaNoted } from "@t3tools/client-runtime/qa-card";
 import {
   ArrowUpRightIcon,
   CheckIcon,
@@ -104,13 +105,19 @@ function useLandingThread(environmentId: EnvironmentId | null, threadId: ThreadI
     shell?.title ?? Option.getOrNull(Option.map(detail.data, ({ thread }) => thread.title));
   return { missing: state === "missing", title };
 }
-const setEvidenceView = (next: { scope?: "thread" | "all"; needsQa?: boolean }) =>
+const setEvidenceView = (next: { scope?: "thread" | "all"; show?: "all" | "needs-qa" | "notes" }) =>
   useThreadContextSidebarStore.getState().setEvidenceView(next);
+
+const SHOW_TOOLTIPS = {
+  all: "Showing all landings",
+  "needs-qa": "Showing landings that need QA",
+  notes: "Showing notes: changes recorded without a QA card",
+} as const;
 
 export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null }) {
   const environmentId = useEvidenceEnvironment(threadRef);
   const storedScope = useThreadContextSidebarStore((state) => state.evidenceScope);
-  const needsQa = useThreadContextSidebarStore((state) => state.evidenceNeedsQa);
+  const show = useThreadContextSidebarStore((state) => state.evidenceShow);
   const scope = threadRef === null ? "all" : (storedScope ?? "thread");
   const threadProjectId = useThreadShell(threadRef)?.projectId;
   const root = useRef<HTMLDivElement>(null);
@@ -139,7 +146,8 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   }
   const filter: EvidenceListInput = {
     ...(scope === "thread" && threadRef ? { threadId: threadRef.threadId } : {}),
-    ...(needsQa ? { needsQa: true } : {}),
+    ...(show === "needs-qa" ? { needsQa: true } : {}),
+    ...(show === "notes" ? { notes: true } : {}),
   };
   return (
     <div ref={root} className="@container/evidence flex min-w-0 flex-col gap-2 text-xs">
@@ -161,21 +169,27 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
         <Menu>
           <ToolFilterMenuTrigger
             label="Evidence filter"
-            tooltip={needsQa ? "Showing landings that need QA" : "Showing all landings"}
-            active={needsQa}
+            tooltip={SHOW_TOOLTIPS[show]}
+            active={show !== "all"}
           />
           <MenuPopup align="end">
             <MenuGroup>
               <MenuGroupLabel>Show</MenuGroupLabel>
               <MenuRadioGroup
-                value={needsQa ? "needs-qa" : "all"}
-                onValueChange={(next) => setEvidenceView({ needsQa: next === "needs-qa" })}
+                value={show}
+                onValueChange={(next) => {
+                  if (next === "all" || next === "needs-qa" || next === "notes")
+                    setEvidenceView({ show: next });
+                }}
               >
                 <MenuRadioItem value="all">
                   <CheckedLabel>All landings</CheckedLabel>
                 </MenuRadioItem>
                 <MenuRadioItem value="needs-qa">
                   <CheckedLabel>Needs QA</CheckedLabel>
+                </MenuRadioItem>
+                <MenuRadioItem value="notes">
+                  <CheckedLabel>Notes</CheckedLabel>
                 </MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
@@ -337,11 +351,13 @@ function LandingPage({
     return (
       <Empty size="compact">
         <EmptyMedia variant="icon">
-          {input.needsQa ? <CheckIcon /> : <ClipboardCheckIcon />}
+          {input.needsQa || input.notes ? <CheckIcon /> : <ClipboardCheckIcon />}
         </EmptyMedia>
         <EmptyDescription>
           {input.needsQa ? (
             "Nothing waiting for your QA."
+          ) : input.notes ? (
+            `No notes ${input.threadId ? "for this thread" : "yet"}.`
           ) : (
             <>
               No landings recorded {input.threadId ? "for this thread " : ""}yet. The lead records
@@ -349,8 +365,8 @@ function LandingPage({
             </>
           )}
         </EmptyDescription>
-        {input.needsQa ? (
-          <Button variant="link" size="micro" onClick={() => setEvidenceView({ needsQa: false })}>
+        {input.needsQa || input.notes ? (
+          <Button variant="link" size="micro" onClick={() => setEvidenceView({ show: "all" })}>
             Show all landings
           </Button>
         ) : null}
@@ -453,10 +469,73 @@ function LandingCard({
           ) : null}
         </span>
       </button>
+      {landing.notes && !open ? (
+        <LandingNotes environmentId={environmentId} landingId={landing.id} notes={landing.notes} />
+      ) : null}
       {open ? (
         <LandingChanges environmentId={environmentId} landingId={landing.id} needsQa={needsQa} />
       ) : null}
     </section>
+  );
+}
+
+/** A landing's notes: each change's title and gaps, and Needs me to raise it as a QA card. */
+function LandingNotes({
+  environmentId,
+  landingId,
+  notes,
+}: {
+  environmentId: EnvironmentId;
+  landingId: string;
+  notes: NonNullable<EvidenceLandingSummary["notes"]>;
+}) {
+  const setQa = useSetQa();
+  const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
+  const raise = async (changeId: string, trigger: HTMLElement) => {
+    if (!(await setQa({ environmentId, input: { landingId, changeId, state: "pending" } }))) return;
+    toastManager.add({ type: "success", title: "Raised as a QA card in its thread." });
+    // The raised note leaves the list; focus stays on its landing while other notes remain.
+    if (notes.length === 1) focusAfterCardLeaves(trigger);
+    else trigger.closest("section")?.querySelector<HTMLElement>("[data-evidence-card]")?.focus();
+    reloadEvidence();
+  };
+  return (
+    <ul className="min-w-0 space-y-2 border-t border-border p-2">
+      {notes.map((note) => (
+        <li key={note.id} className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-start gap-1">
+            <span className="min-w-0 flex-1 break-words font-medium">{note.title}</span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="micro"
+                    className="shrink-0"
+                    disabled={!canSet}
+                    aria-label={`Needs me: ${note.title}`}
+                    onClick={(event) => void raise(note.id, event.currentTarget)}
+                  />
+                }
+              >
+                Needs me
+              </TooltipTrigger>
+              <TooltipPopup side="top">Show it as a QA card in its thread</TooltipPopup>
+            </Tooltip>
+          </div>
+          {note.gaps.map((gap, index) => (
+            <p
+              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+              key={`${index}:${gap}`}
+              className="flex items-start gap-1.5 text-muted-foreground"
+            >
+              <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+              <span className="min-w-0 break-words">{gap}</span>
+            </p>
+          ))}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -731,7 +810,8 @@ function QaMenu({
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
   const trigger = useRef<HTMLButtonElement>(null);
-  const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
+  const state = QA_STATES.find((entry) => entry.state === change.qa.state)!;
+  const current = qaNoted(change) ? { ...state, label: "Noted" } : state;
   const choose = async (next: EvidenceSetQaInput["state"]) => {
     if (next === change.qa.state) return;
     if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))

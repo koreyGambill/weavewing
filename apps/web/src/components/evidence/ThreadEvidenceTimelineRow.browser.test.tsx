@@ -38,3 +38,48 @@ it("says a landing the read asked for and did not get is no longer available", a
     .element(screen.getByText("Landing deleted-landing is no longer available."))
     .toBeVisible();
 });
+
+it("says noted for a quiet change with gaps and nothing to check for one without", async () => {
+  const quiet = { state: "quiet", note: "", updatedAt: "2026-11-26T10:00:00.000Z", raised: [] };
+  const change = (id: string, gaps: ReadonlyArray<string>) => ({
+    id,
+    ask: `Ask ${id}`,
+    commits: ["a1b2c3d"],
+    summary: `Changed ${id}`,
+    review: { verdict: "approved", check: "unverified" },
+    captures: [],
+    gaps,
+    qa: quiet,
+  });
+  const landing = {
+    id: "landing-1",
+    title: "Landing",
+    target: { branch: "main", sha: "abc1234def" },
+    verifications: [],
+    changes: [change("routine", ["Not run on a phone."]), change("clean", [])],
+    threadId: threadRef.threadId,
+    projectId: null,
+    landedAt: "2026-11-26T10:00:00.000Z",
+    updatedAt: "2026-11-26T10:00:00.000Z",
+  };
+  await using screen = await render(
+    <ThreadEvidenceContext
+      value={
+        {
+          data: { landings: [landing] },
+          error: null,
+          supported: true,
+          requested: new Set(["landing-1"]),
+        } as never
+      }
+    >
+      <ThreadEvidenceTimelineRow threadRef={threadRef} landingIds={["landing-1"]} />
+    </ThreadEvidenceContext>,
+  );
+  await expect
+    .element(screen.getByText("Landed on main · abc1234 · Changed routine · noted"))
+    .toBeVisible();
+  await expect
+    .element(screen.getByText("Landed on main · abc1234 · Changed clean · nothing to check"))
+    .toBeVisible();
+});

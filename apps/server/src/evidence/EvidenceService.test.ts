@@ -107,6 +107,7 @@ const change = (id: string, overrides: Partial<EvidenceChange> = {}): EvidenceCh
   review: { verdict: "approved", by: "opus" },
   captures: [],
   gaps: ["Not tried on a slow network."],
+  attention: "needs_you",
   ...overrides,
 });
 const recordInput = (
@@ -156,7 +157,7 @@ it.effect(
       Effect.gen(function* () {
         const evidence = yield* Service.EvidenceService;
         const first = yield* evidence.record(recordInput("batch-1", [change("a"), change("b")]));
-        const unverified = ["gaps"] as const;
+        const unverified = ["needs_you"] as const;
         assert.deepStrictEqual(first.changes, [
           { id: "a", qa: "pending", raised: [...unverified], ref: 1 },
           { id: "b", qa: "pending", raised: [...unverified], ref: 2 },
@@ -1241,7 +1242,7 @@ it.effect("lists a skipped check's reason and leaves it off checks without one",
 
 it("raises QA for each reason on its own and records a change with none quietly", () => {
   const verified = { verdict: "approved", check: "verified" } as const;
-  const base = { captures: [], gaps: [], review: verified };
+  const base = { captures: [], gaps: [], review: verified, attention: "note" } as const;
   const pass = [{ label: "gate", result: "pass" }] as const;
   const capture = { path: "/home/u/evidence/a.png", caption: "After" };
   const cases = [
@@ -1257,17 +1258,26 @@ it("raises QA for each reason on its own and records a change with none quietly"
     ],
     [base, [{ label: "unit", result: "fail" }], ["check_failed"]],
     [base, [{ label: "e2e", result: "skipped", reason: "No display." }], ["check_skipped"]],
-    [{ ...base, gaps: ["Not run on Safari."] }, pass, ["gaps"]],
+    // Gaps alone are a note; the agent's needs_you raises a card with or without them.
+    [{ ...base, gaps: ["Not run on Safari."] }, pass, []],
+    [{ ...base, gaps: ["Not run on Safari."], attention: undefined }, pass, []],
+    [{ ...base, gaps: ["Not run on Safari."], attention: "needs_you" }, pass, ["needs_you"]],
+    [{ ...base, attention: "needs_you" }, pass, ["needs_you"]],
+    [{ ...base, captures: [capture], gaps: ["Not on Safari."] }, pass, ["captures"]],
   ] as const;
   for (const [change, verifications, reasons] of cases)
     assert.deepStrictEqual(Service.qaRaiseReasons(change, verifications), reasons);
+  // A change whose gaps raised a card before agents marked changes keeps raising for them.
+  const gapsOnly = { ...base, gaps: ["Not run on Safari."], attention: undefined };
+  assert.deepStrictEqual(Service.qaRaiseReasons(gapsOnly, pass, true), ["gaps"]);
+  assert.deepStrictEqual(Service.qaRaiseReasons(base, pass, true), []);
 });
 
 it.effect("records an approval alone quietly, recomputes reasons and keeps the user's answer", () =>
   withHome((_home, root) =>
     Effect.gen(function* () {
       const evidence = yield* Service.EvidenceService;
-      const approvedOnly = { gaps: [] };
+      const approvedOnly = { gaps: [], attention: "note" } as const;
       const captured = change("a", {
         ...approvedOnly,
         captures: [{ path: `${root}/a.png`, caption: "After" }],
@@ -1294,7 +1304,7 @@ it.effect("records an approval alone quietly, recomputes reasons and keeps the u
         again.changes.map((item) => [item.qa, item.raised, item.ref]),
         [
           ["confirmed", [], 1],
-          ["pending", ["gaps"], 2],
+          ["pending", ["needs_you"], 2],
           ["pending", ["review_changes_requested"], 3],
         ],
       );
@@ -1303,7 +1313,7 @@ it.effect("records an approval alone quietly, recomputes reasons and keeps the u
         landing.changes.map(({ qa }) => [qa.state, qa.by, qa.raised]),
         [
           ["confirmed", "user", []],
-          ["pending", "server", ["gaps"]],
+          ["pending", "server", ["needs_you"]],
           ["pending", "server", ["review_changes_requested"]],
         ],
       );
@@ -1489,7 +1499,7 @@ it.effect("closes an agent's problem when a later landing names it in fixes", ()
       assert.deepStrictEqual(fix.changes[0], {
         id: "toast-fix",
         qa: "pending",
-        raised: ["gaps"],
+        raised: ["needs_you"],
         ref: 2,
       });
       assert.deepStrictEqual(fix.warnings, [
@@ -1697,7 +1707,10 @@ it.effect(
         );
         // An approval with no gaps raises nothing, so it never waits.
         yield* evidence.record(
-          recordInput("quiet", [change("d", { gaps: [] })], { threadId: lead, landedAt }),
+          recordInput("quiet", [change("d", { gaps: [], attention: "note" })], {
+            threadId: lead,
+            landedAt,
+          }),
         );
         assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead]);
         yield* evidence.setQa({ landingId: "by-child", changeId: "a", state: "confirmed" });
@@ -1742,7 +1755,9 @@ it.effect("dismisses only what still waits for QA before a date, as the user, in
         ),
       );
       yield* evidence.record(
-        recordInput("old-quiet", [change("quiet", { gaps: [] })], { landedAt: old }),
+        recordInput("old-quiet", [change("quiet", { gaps: [], attention: "note" })], {
+          landedAt: old,
+        }),
       );
       yield* evidence.record(
         recordInput("old-other", [change("legacy")], { threadId: other, landedAt: old }),
@@ -1899,6 +1914,192 @@ it.effect("compares the cutoff as an instant, however it is written", () =>
       assert.deepStrictEqual(yield* listed("2026-11-26T00:00:00-07:00"), ["before"]);
       for (const before of ["zzz", "", "2026-13-45T99:00:00Z"])
         assert.isTrue(Exit.isFailure(decodeBulkExit({ before, dryRun: true })), before);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+const unmarked = (id: string, overrides: Partial<EvidenceChange> = {}): EvidenceChange => {
+  const { attention: _attention, ...rest } = change(id, overrides);
+  return rest;
+};
+
+it.effect(
+  "records gaps alone as a note: no card, nothing waiting, listed in its thread's notes",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        const other = ThreadId.make("other");
+        const recorded = yield* evidence.record(
+          recordInput(
+            "noted",
+            [
+              unmarked("routine", { summary: "Quote commas\nin CSV cells" }),
+              change("marked", { attention: "note", gaps: ["No live remote."] }),
+              change("default-gaps", { attention: "note" }),
+              change("clean", { attention: "note", gaps: [] }),
+            ],
+            {
+              landedAt: "2026-11-26T10:00:00.000Z",
+              verifications: [],
+            },
+          ),
+        );
+        assert.deepStrictEqual(
+          recorded.changes.map((item) => [item.id, item.qa, item.raised, item.ref]),
+          [
+            ["routine", "quiet", [], undefined],
+            ["marked", "quiet", [], undefined],
+            ["default-gaps", "quiet", [], undefined],
+            ["clean", "quiet", [], undefined],
+          ],
+        );
+        // A skipped check raises a card whatever the mark.
+        const floor = yield* evidence.record(
+          recordInput("floor", [change("noted-but-skipped", { attention: "note" })], {
+            landedAt: "2026-11-26T11:00:00.000Z",
+            verifications: [{ label: "e2e", result: "skipped", reason: "No display." }],
+          }),
+        );
+        assert.deepStrictEqual(floor.changes[0]!.raised, ["check_skipped"]);
+        yield* evidence.record(
+          recordInput("elsewhere", [unmarked("theirs")], {
+            threadId: other,
+            landedAt: "2026-11-26T12:00:00.000Z",
+          }),
+        );
+
+        assert.deepStrictEqual(yield* evidence.waitingQa(lead), [
+          {
+            kind: "qa",
+            ref: "QA1",
+            key: "floor/noted-but-skipped",
+            title: "Changed noted-but-skipped",
+            state: "open",
+          },
+        ]);
+        assert.deepStrictEqual(yield* qaCounts, { pending: 1, problem: 0 });
+        const needsQa = yield* evidence.list({ threadId: lead, needsQa: true });
+        assert.deepStrictEqual(
+          needsQa.items.map((item) => item.id),
+          ["floor"],
+        );
+        assert.isUndefined(needsQa.items[0]!.notes);
+
+        const notes = yield* evidence.list({ threadId: lead, notes: true });
+        assert.deepStrictEqual(
+          notes.items.map((item) => [item.id, item.notes]),
+          [
+            [
+              "noted",
+              [
+                { id: "routine", title: "Quote commas", gaps: ["Not tried on a slow network."] },
+                { id: "marked", title: "Changed marked", gaps: ["No live remote."] },
+                {
+                  id: "default-gaps",
+                  title: "Changed default-gaps",
+                  gaps: ["Not tried on a slow network."],
+                },
+              ],
+            ],
+          ],
+        );
+        const everywhere = yield* evidence.list({ notes: true });
+        assert.deepStrictEqual(
+          everywhere.items.map((item) => item.id),
+          ["elsewhere", "noted"],
+        );
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("never turns a stored card into a note unless the agent marks it a note", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* evidence.record(
+        recordInput("older", [change("gaps"), change("legacy"), change("agent")]),
+      );
+      // Cards stored before agents marked changes: raised for gaps, or from before reasons were kept.
+      yield* sql`UPDATE evidence_qa SET raised_json = '["gaps"]' WHERE change_id = 'gaps'`;
+      yield* sql`UPDATE evidence_qa SET raised_json = NULL WHERE change_id = 'legacy'`;
+
+      const again = yield* evidence.record(
+        recordInput("older", [unmarked("gaps"), unmarked("legacy"), unmarked("agent")]),
+      );
+      assert.deepStrictEqual(
+        again.changes.map((item) => [item.id, item.qa, item.raised, item.ref]),
+        [
+          ["gaps", "pending", ["gaps"], 1],
+          ["legacy", "pending", ["gaps"], 2],
+          ["agent", "pending", ["needs_you"], 3],
+        ],
+      );
+      const demoted = yield* evidence.record(
+        recordInput("older", [
+          change("gaps", { attention: "note" }),
+          change("legacy", { attention: "note" }),
+          change("agent", { attention: "note" }),
+        ]),
+      );
+      assert.deepStrictEqual(
+        demoted.changes.map((item) => [item.qa, item.raised]),
+        [
+          ["quiet", []],
+          ["quiet", []],
+          ["quiet", []],
+        ],
+      );
+      assert.deepStrictEqual(yield* evidence.waitingQa(lead), []);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("the user's Needs me raises a note's card, and a later record keeps it", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      const moved = yield* Queue.unbounded<ThreadId>();
+      yield* Stream.runForEach(evidence.qaThreadChanges, (threadId) =>
+        Queue.offer(moved, threadId),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* evidence.record(recordInput("mixed", [change("card"), unmarked("note")]));
+      yield* Queue.takeAll(moved);
+
+      const promoted = yield* evidence.setQa({
+        landingId: "mixed",
+        changeId: "note",
+        state: "pending",
+      });
+      assert.deepInclude(promoted, { state: "pending", by: "user", ref: 2, raised: ["needs_you"] });
+      assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead]);
+      assert.deepStrictEqual(
+        (yield* evidence.waitingQa(lead)).map((item) => item.key),
+        ["mixed/card", "mixed/note"],
+      );
+      assert.deepStrictEqual((yield* evidence.list({ notes: true })).items, []);
+
+      // The agent's note on a later record does not undo the user's choice.
+      const again = yield* evidence.record(
+        recordInput("mixed", [change("card"), change("note", { attention: "note" })]),
+      );
+      assert.deepStrictEqual(again.changes[1], {
+        id: "note",
+        qa: "pending",
+        raised: ["needs_you"],
+        ref: 2,
+      });
+      // Reopening a change that already has a card keeps its number and reasons.
+      yield* evidence.setQa({ landingId: "mixed", changeId: "card", state: "confirmed" });
+      const reopened = yield* evidence.setQa({
+        landingId: "mixed",
+        changeId: "card",
+        state: "pending",
+      });
+      assert.deepInclude(reopened, { ref: 1, raised: ["needs_you"] });
     }),
   ).pipe(Effect.provide(testLayer)),
 );

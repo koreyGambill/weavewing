@@ -10,7 +10,7 @@ import {
   EvidenceQaRaiseReason,
   EvidenceRecord,
   type EvidenceAgentQaInput,
-  type EvidenceChange,
+  EvidenceChange,
   type EvidenceBulkSetQaInput,
   type EvidenceBulkSetQaResult,
   type EvidenceReviewThread,
@@ -184,14 +184,16 @@ const QA_COLUMNS =
   "landing_id, change_id, state, note, updated_at, by, ref, raised_json, message_id, discussed_message_id";
 
 /**
- * Why a change asks for the user's QA; a change with none is recorded quietly. Every review claim
- * is unverified, so that alone tells the user nothing and raises no card; the card still says so.
+ * Why a change asks for the user's QA; with none it is recorded quietly, as a note if it has gaps.
+ * An unverified review claim alone raises nothing. Gaps raise a card only through `keepsGaps`,
+ * for a change whose card they raised before agents marked changes.
  *
- * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // [..., "gaps"]
+ * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // []
  */
 export function qaRaiseReasons(
-  change: Pick<EvidenceChange, "captures" | "gaps" | "review">,
+  change: Pick<EvidenceChange, "captures" | "gaps" | "review" | "attention">,
   verifications: EvidenceRecord["verifications"],
+  keepsGaps = false,
 ): ReadonlyArray<EvidenceQaRaiseReason> {
   const reasons: EvidenceQaRaiseReason[] = [];
   if (change.captures.length > 0) reasons.push("captures");
@@ -199,8 +201,36 @@ export function qaRaiseReasons(
   if (change.review.verdict === "changes_requested") reasons.push("review_changes_requested");
   if (verifications.some((check) => check.result === "fail")) reasons.push("check_failed");
   if (verifications.some((check) => check.result === "skipped")) reasons.push("check_skipped");
-  if (change.gaps.length > 0) reasons.push("gaps");
+  if (change.attention === "needs_you") reasons.push("needs_you");
+  else if (keepsGaps && change.gaps.length > 0) reasons.push("gaps");
   return reasons;
+}
+
+/**
+ * The reasons a recorded change raises, given what its stored QA row raised. Left unmarked, a
+ * change keeps its earlier mark, and one whose gaps raised a card keeps it, so a re-record never
+ * turns a card into a note by omission. The user's `needs_you` also outlasts the agent's `note`.
+ */
+function recordedRaiseReasons(
+  change: EvidenceChange,
+  verifications: EvidenceRecord["verifications"],
+  row: QaRow | undefined,
+): ReadonlyArray<EvidenceQaRaiseReason> {
+  const stored =
+    row === undefined || row.raised_json === null
+      ? []
+      : Option.getOrElse(decodeRaised(row.raised_json), () => []);
+  const unmarked = change.attention === undefined;
+  const needsYou =
+    change.attention === "needs_you" ||
+    (stored.includes("needs_you") && (unmarked || row?.by === "user"));
+  const keepsGaps =
+    unmarked && (stored.includes("gaps") || (row?.raised_json === null && row.state === "pending"));
+  return qaRaiseReasons(
+    needsYou ? { ...change, attention: "needs_you" } : change,
+    verifications,
+    keepsGaps,
+  );
 }
 
 const RecordJson = Schema.fromJsonString(EvidenceRecord);
@@ -218,8 +248,24 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
     verifications: Schema.fromJsonString(EvidenceLandingSummary.fields.verifications),
     qa: Schema.fromJsonString(EvidenceLandingSummary.fields.qa),
     exempt: Schema.optional(Schema.fromJsonString(EvidenceExempt)),
+    notes: Schema.optional(
+      Schema.fromJsonString(
+        Schema.Array(
+          Schema.Struct({
+            id: EvidenceChange.fields.id,
+            summary: Schema.String,
+            ask: Schema.String,
+            gaps: EvidenceChange.fields.gaps,
+          }),
+        ),
+      ),
+    ),
   }),
 );
+const firstLine = (text: string) => text.split("\n", 1)[0]!.trim();
+/** A note's title, as its QA card would read: the summary's first line, else the ask's. */
+const noteTitle = (note: { readonly id: string; readonly summary: string; readonly ask: string }) =>
+  firstLine(note.summary) || firstLine(note.ask) || note.id;
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
 const RaisedJson = Schema.fromJsonString(Schema.Array(EvidenceQaRaiseReason));
 const encodeRaised = Schema.encodeEffect(RaisedJson);
@@ -465,6 +511,11 @@ const make = Effect.gen(function* () {
     return review.verdict === "waived" ? review : { ...review, check: "unverified" };
   };
 
+  // A note: a change recorded without a card that lists gaps. `c` is the change in record_json.
+  const isNote = sql.literal(
+    "q.state = 'quiet' AND q.change_id = json_extract(c.value, '$.id') AND json_array_length(c.value, '$.gaps') > 0",
+  );
+
   // A change the user is discussing waits on the agent, so it leaves what waits on the user.
   const waitingOrFixing = sql.literal(
     "((q.state = 'pending' AND q.discussed_message_id IS NULL) OR q.state = 'problem')",
@@ -523,9 +574,7 @@ const make = Effect.gen(function* () {
       return yield* invalid(
         `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
       );
-    const raised = new Map(
-      changes.map((change) => [change.id, qaRaiseReasons(change, input.verifications)]),
-    );
+    const raised = new Map<string, ReadonlyArray<EvidenceQaRaiseReason>>();
     const qaThreadId = yield* resolveQaThread(input.threadId);
     const now = DateTime.formatIso(yield* DateTime.now);
     const qa = yield* sql
@@ -555,10 +604,12 @@ const make = Effect.gen(function* () {
           const existing = new Map(
             (yield* readQa([input.id])).map((row) => [row.change_id, row] as const),
           );
-          for (const id of ids) {
-            const reasons = raised.get(id) ?? [];
-            const raisedJson = yield* encodeRaised(reasons);
+          for (const change of changes) {
+            const id = change.id;
             const row = existing.get(id);
+            const reasons = recordedRaiseReasons(change, input.verifications, row);
+            raised.set(id, reasons);
+            const raisedJson = yield* encodeRaised(reasons);
             const ref =
               reasons.length > 0 && row?.ref == null ? yield* nextRef : (row?.ref ?? null);
             if (row === undefined) {
@@ -636,11 +687,13 @@ const make = Effect.gen(function* () {
       readonly change_count: number;
       readonly qa: string;
       readonly exempt: string | null;
+      readonly notes: string | null;
     }>`WITH page AS (
           SELECT landing_id, thread_id, project_id, landed_at, record_json FROM evidence_landings l
           WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
             AND ${before === undefined ? sql`1 = 1` : sql`(l.landed_at < ${before.landedAt} OR (l.landed_at = ${before.landedAt} AND l.landing_id < ${before.id}))`}
             AND ${input.needsQa === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q WHERE q.landing_id = l.landing_id AND ${waitingOrFixing})` : sql`1 = 1`}
+            AND ${input.notes === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q, json_each(l.record_json, '$.changes') c WHERE q.landing_id = l.landing_id AND ${isNote})` : sql`1 = 1`}
           ORDER BY l.landed_at DESC, l.landing_id DESC
           LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1})
         SELECT p.landing_id AS id, json_extract(p.record_json, '$.title') AS title, p.thread_id, p.project_id, p.landed_at,
@@ -656,10 +709,19 @@ const make = Effect.gen(function* () {
               'quiet', count(*) FILTER (WHERE state = 'quiet'),
               'confirmed', count(*) FILTER (WHERE state = 'confirmed'),
               'problem', count(*) FILTER (WHERE state = 'problem'), 'waived', count(*) FILTER (WHERE state = 'waived'))
-            FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa
+            FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa,
+          ${
+            input.notes === true
+              ? sql`(SELECT json_group_array(json_object('id', q.change_id,
+                    'summary', json_extract(c.value, '$.summary'), 'ask', json_extract(c.value, '$.ask'),
+                    'gaps', json_extract(c.value, '$.gaps')))
+                  FROM json_each(p.record_json, '$.changes') c JOIN evidence_qa q ON q.landing_id = p.landing_id
+                  WHERE ${isNote})`
+              : sql`NULL`
+          } AS notes
         FROM page p
         ORDER BY p.landed_at DESC, p.landing_id DESC`;
-    const items = yield* Effect.forEach(rows.slice(0, EVIDENCE_LIST_PAGE_SIZE), (row) =>
+    const decoded = yield* Effect.forEach(rows.slice(0, EVIDENCE_LIST_PAGE_SIZE), (row) =>
       decodeSummaryRow({
         id: row.id,
         title: row.title,
@@ -671,7 +733,20 @@ const make = Effect.gen(function* () {
         changeCount: row.change_count,
         qa: row.qa,
         ...(row.exempt === null ? {} : { exempt: row.exempt }),
+        ...(row.notes === null ? {} : { notes: row.notes }),
       }),
+    );
+    const items = decoded.map(({ notes, ...item }) =>
+      notes === undefined
+        ? item
+        : {
+            ...item,
+            notes: notes.map(({ id, gaps, ...text }) => ({
+              id,
+              title: noteTitle({ id, ...text }),
+              gaps,
+            })),
+          },
     );
     const last = items.at(-1);
     return {
@@ -818,10 +893,18 @@ const make = Effect.gen(function* () {
       return yield* invalid("The agent recorded this; reopen it to change it.");
     // A note given replaces the old one; none keeps it on the same state and clears it on a change.
     // A change still waiting from before reasons were kept stays marked once it is answered.
+    // Reopening a quiet change raises its card: it is marked needs_you and gets the next QA number.
+    const promote = sql.literal(input.state === "pending" ? "state = 'quiet'" : "0 = 1");
     const [row] = yield* sql<QaRow>`UPDATE evidence_qa SET
           note = coalesce(${input.note ?? null}, CASE WHEN state = ${input.state} THEN note ELSE '' END),
-          raised_json = CASE WHEN raised_json IS NULL AND state = 'pending'
-            THEN '["legacy"]' ELSE raised_json END,
+          raised_json = CASE WHEN raised_json IS NULL AND state = 'pending' THEN '["legacy"]'
+            WHEN ${promote} THEN json_insert(coalesce(raised_json, '[]'), '$[#]', 'needs_you')
+            ELSE raised_json END,
+          ref = CASE WHEN ref IS NULL AND ${promote} THEN (SELECT coalesce(max(q.ref), 0) + 1
+              FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+              WHERE coalesce(l.qa_thread_id, l.thread_id) = (SELECT coalesce(qa_thread_id, thread_id)
+                FROM evidence_landings WHERE landing_id = ${input.landingId}))
+            ELSE ref END,
           state = ${input.state}, by = ${input.by}, message_id = ${input.messageId},
           discussed_message_id = NULL, updated_at = ${now}
         WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}

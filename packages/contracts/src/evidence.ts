@@ -33,6 +33,7 @@ export type EvidenceQaState = typeof EvidenceQaState.Type;
 /**
  * Why a recorded change asks for the user's QA. A change with none is recorded quietly. `legacy`
  * marks a change that was waiting on the user before reasons were kept, once it is answered.
+ * `needs_you` is the agent's or the user's mark; `gaps` raised a card before agents marked changes.
  */
 export const EvidenceQaRaiseReason = Schema.Literals([
   "legacy",
@@ -42,6 +43,7 @@ export const EvidenceQaRaiseReason = Schema.Literals([
   "check_failed",
   "check_skipped",
   "gaps",
+  "needs_you",
 ]);
 export type EvidenceQaRaiseReason = typeof EvidenceQaRaiseReason.Type;
 
@@ -102,6 +104,12 @@ export const EvidenceChange = Schema.Struct({
     Schema.isMaxLength(12),
   ),
   gaps: Schema.Array(Text(300)).check(Schema.isMaxLength(10)),
+  attention: Schema.optional(
+    Schema.Literals(["needs_you", "note"]).annotate({
+      description:
+        "needs_you: the user must look at or decide something you could not, such as a visual change nobody has seen or the asked-for behavior never run; it raises a QA card. note (the default): routine gaps such as no device run or no live remote, kept in the thread's notes log with no card. Captures, a waived or changes-requested review and a failed or skipped check raise a card either way.",
+    }),
+  ),
   evidenceDir: Schema.optional(Text(1024)),
   /** Earlier changes the agent recorded as `problem` that this change fixes. */
   fixes: Schema.optional(
@@ -247,6 +255,15 @@ export const EvidenceLandingSummary = Schema.Struct({
   changeCount: NonNegativeInt,
   qa: EvidenceQaTally,
   exempt: Schema.optional(EvidenceExempt),
+  /**
+   * With `notes`: the changes recorded without a card that list gaps, in record order. `title` is
+   * the summary's first line, else the ask's.
+   */
+  notes: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ id: EvidenceSlug, title: Schema.String, gaps: EvidenceChange.fields.gaps }),
+    ),
+  ),
 });
 export type EvidenceLandingSummary = typeof EvidenceLandingSummary.Type;
 
@@ -256,6 +273,8 @@ export const EvidenceListInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   /** Only landings with a pending or problem change. */
   needsQa: Schema.optional(Schema.Boolean),
+  /** Only landings with a note, each listing its notes. */
+  notes: Schema.optional(Schema.Boolean),
   before: Schema.optional(EvidenceCursor),
 });
 export type EvidenceListInput = typeof EvidenceListInput.Type;
