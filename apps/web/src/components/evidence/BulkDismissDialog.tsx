@@ -1,4 +1,5 @@
-import { EVIDENCE_BULK_DISMISS_DEFAULT_REASON, type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, EvidenceChangeKey } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { useEffect, useEffectEvent, useState } from "react";
 
 import { evidenceBulkSetQa } from "../../state/evidence";
@@ -17,13 +18,24 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
-import { bulkDismissBefore, localDateInputValue } from "./bulkDismiss.logic";
+import { bulkDismissBefore } from "./bulkDismiss.logic";
+import { useBulkDismissStore } from "./bulkDismissStore";
 
 const changes = (count: number) => `${count} ${count === 1 ? "change" : "changes"}`;
 
+type Preview =
+  | {
+      readonly day: string;
+      readonly status: "ready";
+      readonly changes: ReadonlyArray<EvidenceChangeKey>;
+      readonly more: boolean;
+    }
+  | { readonly day: string; readonly status: "failed" };
+
 /**
- * Dismisses, as the user, every change in this environment still waiting for QA that landed
- * before a chosen day, with one reason. It shows how many that is before anything changes.
+ * Dismisses, as the user, the changes in this environment still waiting for QA that landed
+ * before a chosen day, with one reason. It lists them first, and the dismissal acts only on that
+ * list, so a change that starts waiting meanwhile is left for the next one.
  */
 export function BulkDismissDialog({
   environmentId,
@@ -32,40 +44,60 @@ export function BulkDismissDialog({
   readonly environmentId: EnvironmentId;
   readonly onClose: () => void;
 }) {
-  const [day, setDay] = useState(() => localDateInputValue(new Date()));
-  const [reason, setReason] = useState(EVIDENCE_BULK_DISMISS_DEFAULT_REASON);
-  const [count, setCount] = useState<{ readonly day: string; readonly count: number } | null>(null);
+  const { day, reason, setDay, setReason } = useBulkDismissStore();
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const bulkSetQa = useAtomCommand(evidenceBulkSetQa, { label: "Dismiss pending QA" });
-  const countFor = useAtomCommand(evidenceBulkSetQa, { reportFailure: false });
+  const list = useAtomCommand(evidenceBulkSetQa, { reportFailure: false });
   const before = bulkDismissBefore(day);
-  const requestCount = useEffectEvent((at: string) =>
-    countFor({ environmentId, input: { before: at, dryRun: true } }),
-  );
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server how many changes the chosen day covers, so the count shows before the user confirms
+  // What the day covers, as the dialog shows it.
+  const load = async (at: string, forDay: string): Promise<Preview> => {
+    const result = await list({
+      environmentId,
+      input: { before: DateTime.makeUnsafe(at), dryRun: true },
+    });
+    return result._tag === "Success"
+      ? {
+          day: forDay,
+          status: "ready",
+          changes: result.value.changes ?? [],
+          more: result.value.more === true,
+        }
+      : { day: forDay, status: "failed" };
+  };
+  const loadFor = useEffectEvent(load);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server which changes the chosen day covers, so the user sees them counted before confirming
   useEffect(() => {
     if (before === null) return;
     let current = true;
-    void requestCount(before).then((result) => {
-      if (current && result._tag === "Success") setCount({ day, count: result.value.count });
+    void loadFor(before, day).then((next) => {
+      if (current) setPreview(next);
     });
     return () => {
       current = false;
     };
   }, [before, day]);
-  const shown = count !== null && count.day === day ? count.count : null;
+  const shown = preview !== null && preview.day === day ? preview : null;
+  const listed = shown?.status === "ready" ? shown.changes : null;
   const note = reason.trim();
-  const usable = before !== null && note !== "" && shown !== null && shown > 0 && !busy;
+  const usable = before !== null && note !== "" && listed !== null && listed.length > 0 && !busy;
   const confirm = async () => {
     if (!usable) return;
     setBusy(true);
-    const result = await bulkSetQa({ environmentId, input: { before, note } });
+    const result = await bulkSetQa({
+      environmentId,
+      input: { before: DateTime.makeUnsafe(before), note, changes: [...listed] },
+    });
     setBusy(false);
     if (result._tag !== "Success") return;
+    const skipped = listed.length - result.value.count;
     toastManager.add({
       type: "success",
       title: `Dismissed ${changes(result.value.count)}`,
-      description: "Each keeps your reason and can be reopened from its card.",
+      description:
+        skipped > 0
+          ? `${changes(skipped)} had changed since they were counted and stayed open.`
+          : "Each keeps your reason and can be reopened from its card.",
     });
     onClose();
   };
@@ -116,15 +148,40 @@ export function BulkDismissDialog({
                 <p className="text-xs text-destructive-foreground">Say why they are dismissed.</p>
               ) : null}
             </div>
-            <p aria-live="polite" className="text-sm text-muted-foreground">
-              {before === null
-                ? "Pick a day."
-                : shown === null
-                  ? "Counting…"
-                  : shown === 0
-                    ? "Nothing waits for QA from before that day."
-                    : `${changes(shown)} will be dismissed.`}
-            </p>
+            <div
+              aria-live="polite"
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+            >
+              {before === null ? (
+                "Pick a day."
+              ) : shown === null ? (
+                "Counting…"
+              ) : shown.status === "failed" ? (
+                <>
+                  <span>The count did not load.</span>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => {
+                      if (before === null) return;
+                      setPreview(null);
+                      void load(before, day).then((next) => {
+                        // A day picked meanwhile has its own count on the way.
+                        if (useBulkDismissStore.getState().day === day) setPreview(next);
+                      });
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </>
+              ) : shown.changes.length === 0 ? (
+                "Nothing waits for QA from before that day."
+              ) : shown.more ? (
+                `The oldest ${changes(shown.changes.length)} will be dismissed; run it again for the rest.`
+              ) : (
+                `${changes(shown.changes.length)} will be dismissed.`
+              )}
+            </div>
           </form>
         </DialogPanel>
         <DialogFooter>
@@ -132,7 +189,9 @@ export function BulkDismissDialog({
             Cancel
           </Button>
           <Button type="submit" form="bulk-dismiss" variant="destructive" disabled={!usable}>
-            {shown === null || shown === 0 ? "Dismiss" : `Dismiss ${changes(shown)}`}
+            {listed === null || listed.length === 0
+              ? "Dismiss"
+              : `Dismiss ${changes(listed.length)}`}
           </Button>
         </DialogFooter>
       </DialogPopup>

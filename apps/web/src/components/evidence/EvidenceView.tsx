@@ -54,6 +54,7 @@ import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { formatDayAwareTimestamp } from "../../timestampFormat";
 import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
 import { BulkDismissDialog } from "./BulkDismissDialog";
+import { useBulkDismissStore } from "./bulkDismissStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
@@ -128,7 +129,7 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   );
   const anyDismissed = shown.length < (coverage?.length ?? 0);
   const canBulkDismiss = useAtomValue(evidenceBulkSetQa.permissionAtom(environmentId));
-  const [bulkDismissing, setBulkDismissing] = useState(false);
+  const bulkDismissing = useBulkDismissStore((state) => state.open);
   if (environmentId === null) {
     return (
       <Empty size="compact">
@@ -192,7 +193,9 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
             ) : null}
             {canBulkDismiss ? <MenuSeparator /> : null}
             {canBulkDismiss ? (
-              <MenuItem onClick={() => setBulkDismissing(true)}>Dismiss pending before…</MenuItem>
+              <MenuItem onClick={() => useBulkDismissStore.getState().start()}>
+                Dismiss pending before…
+              </MenuItem>
             ) : null}
           </MenuPopup>
         </Menu>
@@ -201,7 +204,7 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
         <BulkDismissDialog
           environmentId={environmentId}
           onClose={() => {
-            setBulkDismissing(false);
+            useBulkDismissStore.getState().close();
             root.current?.querySelector<HTMLElement>('[aria-label="Evidence filter"]')?.focus();
           }}
         />

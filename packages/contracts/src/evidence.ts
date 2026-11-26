@@ -293,17 +293,39 @@ export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
 /** The reason a bulk dismissal offers until the user changes it. */
 export const EVIDENCE_BULK_DISMISS_DEFAULT_REASON = "backlog cleared, not individually checked";
 
+/** The most changes one bulk dismissal previews and acts on; the oldest come first. */
+export const EVIDENCE_BULK_DISMISS_LIMIT = 5000;
+
+export const EvidenceChangeKey = Schema.Struct({ landingId: EvidenceSlug, changeId: EvidenceSlug });
+export type EvidenceChangeKey = typeof EvidenceChangeKey.Type;
+
+const EvidenceBulkDismissChanges = Schema.Array(EvidenceChangeKey).check(
+  Schema.isMaxLength(EVIDENCE_BULK_DISMISS_LIMIT),
+);
+
 /**
- * The user's dismissal, with a reason, of every change still waiting for QA that landed before
- * `before`, in every thread; or, with `dryRun`, a count of them that changes nothing.
+ * The user's bulk dismissal of changes still waiting for QA that landed before `before`, an
+ * instant, in every thread. A dry run lists them and changes nothing; the dismissal names the
+ * listed changes and acts only on those still waiting, so nothing new is swept in.
  */
 export const EvidenceBulkSetQaInput = Schema.Union([
-  Schema.Struct({ before: IsoDateTime, dryRun: Schema.Literal(true) }),
-  Schema.Struct({ before: IsoDateTime, note: Text(2000) }),
+  Schema.Struct({ before: Schema.DateTimeUtcFromString, dryRun: Schema.Literal(true) }),
+  Schema.Struct({
+    before: Schema.DateTimeUtcFromString,
+    note: Text(2000),
+    changes: EvidenceBulkDismissChanges,
+  }),
 ]);
 export type EvidenceBulkSetQaInput = typeof EvidenceBulkSetQaInput.Type;
 
-export const EvidenceBulkSetQaResult = Schema.Struct({ count: NonNegativeInt });
+export const EvidenceBulkSetQaResult = Schema.Struct({
+  /** Changes listed, on a dry run; changes dismissed, otherwise. */
+  count: NonNegativeInt,
+  /** A dry run's changes, oldest first, to send back with the dismissal. */
+  changes: Schema.optional(EvidenceBulkDismissChanges),
+  /** A dry run found more than it lists; dismiss these, then run it again. */
+  more: Schema.optional(Schema.Boolean),
+});
 export type EvidenceBulkSetQaResult = typeof EvidenceBulkSetQaResult.Type;
 
 export const EvidenceCoverageInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });

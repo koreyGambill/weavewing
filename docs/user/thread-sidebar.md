@@ -174,8 +174,10 @@ in **Settings → Threads**.
 To clear an old backlog at once, open the Evidence filter menu and choose **Dismiss
 pending before…**. Pick a day and give a reason; the dialog shows how many changes in
 every thread landed before that day and still wait for your QA before you confirm.
-Changes you are discussing and problems the agent is fixing stay open. Each dismissed
-card keeps your reason and can be reopened.
+Changes you are discussing and problems the agent is fixing stay open. Only the
+changes it counted are dismissed, and only those still waiting when you confirm; one
+that starts waiting meanwhile stays for next time. Each dismissed card keeps your
+reason and can be reopened.
 
 Each change's review shows as **Unverified review** with the verdict the agent
 reported, such as "agent reported approved". Weavewing does not yet check that

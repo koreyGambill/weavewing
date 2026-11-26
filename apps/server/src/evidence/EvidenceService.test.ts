@@ -5,6 +5,7 @@ import { assert, it } from "@effect/vitest";
 import {
   EvidenceRecord,
   EvidenceRecordInput,
+  EvidenceBulkSetQaInput,
   EvidenceSetQaInput,
   MessageId,
   ProjectId,
@@ -14,7 +15,9 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as Deferred from "effect/Deferred";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -1536,6 +1539,10 @@ it.effect(
     ).pipe(Effect.provide(testLayer)),
 );
 
+const instant = (iso: string) => DateTime.makeUnsafe(iso);
+const decodeBulk = Schema.decodeUnknownSync(EvidenceBulkSetQaInput);
+const decodeBulkExit = Schema.decodeUnknownExit(EvidenceBulkSetQaInput);
+
 it.effect("dismisses only what still waits for QA before a date, as the user, in one pass", () =>
   withHome(() =>
     Effect.gen(function* () {
@@ -1572,16 +1579,23 @@ it.effect("dismisses only what still waits for QA before a date, as the user, in
       // A change from before raise reasons were kept.
       yield* sql`UPDATE evidence_qa SET raised_json = NULL
         WHERE landing_id = 'old-other' AND change_id = 'legacy'`;
-      const before = "2026-11-20T00:00:00.000Z";
+      const before = instant("2026-11-20T00:00:00.000Z");
       const note = "backlog cleared, not individually checked";
 
+      const preview = yield* evidence.bulkSetQa({ before, dryRun: true });
+      assert.deepStrictEqual(preview, {
+        count: 2,
+        changes: [
+          { landingId: "old-lead", changeId: "pending" },
+          { landingId: "old-other", changeId: "legacy" },
+        ],
+      });
       assert.strictEqual(
-        (yield* Effect.flip(evidence.bulkSetQa({ before, note: "   " }))).code,
+        (yield* Effect.flip(
+          evidence.bulkSetQa({ before, note: "   ", changes: preview.changes ?? [] }),
+        )).code,
         "invalid",
       );
-      assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, dryRun: true }), {
-        count: 2,
-      });
       assert.deepStrictEqual(yield* qaCounts, { pending: 3, problem: 1 });
 
       const moved = yield* Queue.unbounded<ThreadId>();
@@ -1589,7 +1603,10 @@ it.effect("dismisses only what still waits for QA before a date, as the user, in
         Queue.offer(moved, threadId),
       ).pipe(Effect.forkScoped);
       yield* Effect.yieldNow;
-      assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, note }), { count: 2 });
+      assert.deepStrictEqual(
+        yield* evidence.bulkSetQa({ before, note, changes: preview.changes ?? [] }),
+        { count: 2 },
+      );
       // Each thread whose changes moved is rebuilt once, however many of its changes moved.
       assert.sameMembers([...(yield* Queue.takeAll(moved))], [lead, other]);
 
@@ -1619,6 +1636,7 @@ it.effect("dismisses only what still waits for QA before a date, as the user, in
       assert.strictEqual(qa.get("recent")?.state, "pending");
       assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, dryRun: true }), {
         count: 0,
+        changes: [],
       });
       // A dismissed card keeps Reopen.
       const reopened = yield* evidence.setQa({
@@ -1627,6 +1645,78 @@ it.effect("dismisses only what still waits for QA before a date, as the user, in
         state: "pending",
       });
       assert.strictEqual(reopened.state, "pending");
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("dismisses only the listed changes still waiting, never ones that joined since", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(
+        recordInput("old", [change("a"), change("b"), change("c")], {
+          landedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      );
+      yield* evidence.setQa({ landingId: "old", changeId: "c", state: "confirmed" });
+      const before = instant("2026-11-20T00:00:00.000Z");
+      const preview = yield* evidence.bulkSetQa({ before, dryRun: true });
+      assert.deepStrictEqual(
+        preview.changes?.map((key) => key.changeId),
+        ["a", "b"],
+      );
+      // Between the list and the confirmation, c is reopened and b is discussed.
+      yield* evidence.setQa({ landingId: "old", changeId: "c", state: "pending" });
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("m1"),
+        changes: [{ landingId: "old", changeId: "b" }],
+      });
+      assert.deepStrictEqual(
+        yield* evidence.bulkSetQa({
+          before,
+          note: "backlog cleared",
+          changes: preview.changes ?? [],
+        }),
+        { count: 1 },
+      );
+      const states = (yield* evidence.get({ landingId: "old" })).changes.map((item) => [
+        item.id,
+        item.qa.state,
+      ]);
+      assert.deepStrictEqual(states, [
+        ["a", "waived"],
+        ["b", "pending"],
+        ["c", "pending"],
+      ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("compares the cutoff as an instant, however it is written", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(
+        recordInput("at-cutoff", [change("at")], { landedAt: "2026-11-26T07:00:00.000Z" }),
+      );
+      yield* evidence.record(
+        recordInput("just-before", [change("before")], {
+          landedAt: "2026-11-26T06:59:59.999Z",
+        }),
+      );
+      const listed = (before: string) =>
+        evidence
+          .bulkSetQa(decodeBulk({ before, dryRun: true }))
+          .pipe(Effect.map((result) => result.changes?.map((key) => key.changeId)));
+      // The same instant, with and without milliseconds; a landing exactly at it stays.
+      assert.deepStrictEqual(yield* listed("2026-11-26T07:00:00.000Z"), ["before"]);
+      assert.deepStrictEqual(yield* listed("2026-11-26T07:00:00Z"), ["before"]);
+      assert.deepStrictEqual(yield* listed("2026-11-26T00:00:00-07:00"), ["before"]);
+      for (const before of ["zzz", "", "2026-13-45T99:00:00Z"])
+        assert.isTrue(Exit.isFailure(decodeBulkExit({ before, dryRun: true })), before);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

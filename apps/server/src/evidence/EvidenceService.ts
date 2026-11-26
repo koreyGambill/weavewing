@@ -26,6 +26,7 @@ import {
   type EvidenceThreadResult,
   threadQuestionTitle,
   type WaitingItemSummary,
+  EVIDENCE_BULK_DISMISS_LIMIT,
   EVIDENCE_THREAD_LANDING_LIMIT,
   type MessageId,
   ProjectId,
@@ -831,23 +832,44 @@ const make = Effect.gen(function* () {
     input: EvidenceBulkSetQaInput,
   ) {
     // Only what still waits on the user: a discussed change waits on the agent, a problem is the
-    // agent's to fix, and a settled one has its answer.
+    // agent's to fix, and a settled one has its answer. Landings compare as instants, since a
+    // stored time and the cutoff may spell the same instant differently.
     const waiting = sql`q.state = 'pending' AND q.discussed_message_id IS NULL
-      AND q.landing_id IN (SELECT landing_id FROM evidence_landings WHERE landed_at < ${input.before})`;
+      AND q.landing_id IN (SELECT landing_id FROM evidence_landings
+        WHERE julianday(landed_at) < julianday(${DateTime.formatIso(input.before)}))`;
     if ("dryRun" in input) {
-      const [row] = yield* sql<{
-        readonly count: number;
-      }>`SELECT count(*) AS count FROM evidence_qa q WHERE ${waiting}`;
-      return { count: row?.count ?? 0 };
+      const rows = yield* sql<{
+        readonly landing_id: string;
+        readonly change_id: string;
+      }>`SELECT q.landing_id, q.change_id FROM evidence_qa q
+          JOIN evidence_landings l ON l.landing_id = q.landing_id
+          WHERE ${waiting}
+          ORDER BY julianday(l.landed_at), q.landing_id, q.change_id
+          LIMIT ${EVIDENCE_BULK_DISMISS_LIMIT + 1}`;
+      const changes = rows
+        .slice(0, EVIDENCE_BULK_DISMISS_LIMIT)
+        .map((row) => ({ landingId: row.landing_id, changeId: row.change_id }));
+      return {
+        count: changes.length,
+        changes,
+        ...(rows.length > EVIDENCE_BULK_DISMISS_LIMIT ? { more: true } : {}),
+      };
     }
     const note = input.note.trim();
     if (note === "") return yield* invalid("Say why these changes are dismissed.");
+    if (input.changes.length === 0) return { count: 0 };
     const now = DateTime.formatIso(yield* DateTime.now);
+    // Only the changes the user saw listed, and only those still waiting: a change that became
+    // eligible since the list was read is left for the next dismissal.
+    const listed = JSON.stringify(input.changes);
     const dismissed = yield* sql<{ readonly landing_id: string }>`UPDATE evidence_qa AS q SET
         note = ${note},
         raised_json = CASE WHEN raised_json IS NULL THEN '["legacy"]' ELSE raised_json END,
         state = 'waived', by = 'user', message_id = NULL, updated_at = ${now}
       WHERE ${waiting}
+        AND EXISTS (SELECT 1 FROM json_each(${listed}) k
+          WHERE json_extract(k.value, '$.landingId') = q.landing_id
+            AND json_extract(k.value, '$.changeId') = q.change_id)
       RETURNING landing_id`;
     if (dismissed.length > 0) {
       yield* publish;
