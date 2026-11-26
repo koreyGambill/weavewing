@@ -290,8 +290,21 @@ export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
 export const EvidenceThreadResult = Schema.Struct({ landings: Schema.Array(EvidenceLanding) });
 export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
 
-export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, problem: NonNegativeInt });
-export type EvidenceCounts = typeof EvidenceCounts.Type;
+/** The reason a bulk dismissal offers until the user changes it. */
+export const EVIDENCE_BULK_DISMISS_DEFAULT_REASON = "backlog cleared, not individually checked";
+
+/**
+ * The user's dismissal, with a reason, of every change still waiting for QA that landed before
+ * `before`, in every thread; or, with `dryRun`, a count of them that changes nothing.
+ */
+export const EvidenceBulkSetQaInput = Schema.Union([
+  Schema.Struct({ before: IsoDateTime, dryRun: Schema.Literal(true) }),
+  Schema.Struct({ before: IsoDateTime, note: Text(2000) }),
+]);
+export type EvidenceBulkSetQaInput = typeof EvidenceBulkSetQaInput.Type;
+
+export const EvidenceBulkSetQaResult = Schema.Struct({ count: NonNegativeInt });
+export type EvidenceBulkSetQaResult = typeof EvidenceBulkSetQaResult.Type;
 
 export const EvidenceCoverageInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
 export type EvidenceCoverageInput = typeof EvidenceCoverageInput.Type;

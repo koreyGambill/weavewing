@@ -8,6 +8,7 @@ import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
 } from "@t3tools/client-runtime/state/runtime";
+import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect } from "react";
 
@@ -79,6 +80,13 @@ export const evidenceCoverage = createEnvironmentRpcQueryAtomFamily(connectionAt
 export const evidenceSetQa = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "evidence:setQa",
   tag: WS_METHODS.evidenceSetQa,
+});
+/** Dismisses every change waiting for QA before a date, or counts them on a dry run. */
+export const evidenceBulkSetQa = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "evidence:bulkSetQa",
+  tag: WS_METHODS.evidenceBulkSetQa,
+  // One refetch of the evidence being read, however many changes moved.
+  onSuccess: ({ input }) => Effect.sync(() => ("dryRun" in input ? undefined : reloadEvidence())),
 });
 
 /** The environment Evidence shows: the tools' thread's, else the primary one, if it records evidence. */

@@ -107,6 +107,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.notificationsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.notificationsMarkAllRead]: AuthOrchestrationOperateScope,
   [WS_METHODS.evidenceSetQa]: AuthOrchestrationOperateScope,
+  [WS_METHODS.evidenceBulkSetQa]: AuthOrchestrationOperateScope,
   [WS_METHODS.messageFollowUpsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.statusSourcesUpsert]: AuthSettingsWriteScope,
   [WS_METHODS.statusSourcesDelete]: AuthSettingsWriteScope,

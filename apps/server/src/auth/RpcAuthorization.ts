@@ -149,7 +149,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.evidenceList]: AuthOrchestrationReadScope,
   [WS_METHODS.evidenceGet]: AuthOrchestrationReadScope,
   [WS_METHODS.evidenceThread]: AuthOrchestrationReadScope,
-  [WS_METHODS.evidenceCounts]: AuthOrchestrationReadScope,
   [WS_METHODS.evidenceSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.evidenceCoverage]: AuthOrchestrationReadScope,
   [WS_METHODS.messageFollowUpsList]: AuthOrchestrationReadScope,

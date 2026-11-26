@@ -72,9 +72,15 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.reviewsSave,
       WS_METHODS.reviewsSubmit,
       WS_METHODS.messageFollowUpsUpdate,
+      WS_METHODS.evidenceSetQa,
+      WS_METHODS.evidenceBulkSetQa,
       ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,
     ])
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    // A read-only connection sees no bulk dismiss, and the server refuses one it sends anyway.
+    expect(clientRpcRequiredScopes(WS_METHODS.evidenceBulkSetQa, {})).toEqual([
+      AuthOrchestrationOperateScope,
+    ]);
   });
 
   it("lets read-only connections discover Xwing environments but not move threads into one", () => {

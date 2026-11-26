@@ -40,6 +40,7 @@ import {
   resolveThreadRouteRenderState,
 } from "../../threadRoutes";
 import {
+  evidenceBulkSetQa,
   evidenceCoverage,
   evidenceGet,
   evidenceList,
@@ -52,6 +53,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { formatDayAwareTimestamp } from "../../timestampFormat";
 import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
+import { BulkDismissDialog } from "./BulkDismissDialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
@@ -125,6 +127,8 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
     (project) => dismissed[coverageKey(project.projectId)] !== project.head,
   );
   const anyDismissed = shown.length < (coverage?.length ?? 0);
+  const canBulkDismiss = useAtomValue(evidenceBulkSetQa.permissionAtom(environmentId));
+  const [bulkDismissing, setBulkDismissing] = useState(false);
   if (environmentId === null) {
     return (
       <Empty size="compact">
@@ -186,9 +190,22 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
                 Show uncovered merges
               </MenuItem>
             ) : null}
+            {canBulkDismiss ? <MenuSeparator /> : null}
+            {canBulkDismiss ? (
+              <MenuItem onClick={() => setBulkDismissing(true)}>Dismiss pending before…</MenuItem>
+            ) : null}
           </MenuPopup>
         </Menu>
       </div>
+      {bulkDismissing ? (
+        <BulkDismissDialog
+          environmentId={environmentId}
+          onClose={() => {
+            setBulkDismissing(false);
+            root.current?.querySelector<HTMLElement>('[aria-label="Evidence filter"]')?.focus();
+          }}
+        />
+      ) : null}
       {shown.map((project) => (
         <CoverageNotice
           key={project.projectId}

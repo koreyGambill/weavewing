@@ -121,6 +121,17 @@ const recordInput = (
   ...extra,
 });
 
+/** Changes waiting for the user's QA, and problems the agent owes a fix for, in every thread. */
+const qaCounts = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly state: string; readonly count: number }>`SELECT state,
+      count(*) AS count FROM evidence_qa
+      WHERE (state = 'pending' AND discussed_message_id IS NULL) OR state = 'problem'
+      GROUP BY state`;
+  const of = (state: string) => rows.find((row) => row.state === state)?.count ?? 0;
+  return { pending: of("pending"), problem: of("problem") };
+});
+
 /** A scoped home with an evidence root, so nothing touches the real one. */
 const withHome = <A, E, R>(body: (home: string, root: string) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
@@ -154,7 +165,7 @@ it.effect(
           note: "Not worth checking",
         });
         yield* evidence.setQa({ landingId: "batch-1", changeId: "b", state: "confirmed" });
-        assert.deepStrictEqual(yield* evidence.counts(), { pending: 0, problem: 0 });
+        assert.deepStrictEqual(yield* qaCounts, { pending: 0, problem: 0 });
 
         const again = yield* evidence.record(recordInput("batch-1", [change("a"), change("c")]));
         assert.deepStrictEqual(again.changes, [
@@ -169,7 +180,7 @@ it.effect(
             ["c", "pending", ""],
           ],
         );
-        assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, problem: 0 });
+        assert.deepStrictEqual(yield* qaCounts, { pending: 1, problem: 0 });
 
         // Another thread reusing the id is refused, so it can neither take the landing nor reset QA.
         const other = ThreadId.make("other");
@@ -1253,7 +1264,7 @@ it.effect("lets an agent settle QA only from a user's own message in its current
         [recorded.state, recorded.by, recorded.messageId, recorded.note],
         ["problem", "agent", "message-user", "The count overlaps the close button."],
       );
-      assert.deepStrictEqual(yield* evidence.counts(), { pending: 5, problem: 1 });
+      assert.deepStrictEqual(yield* qaCounts, { pending: 5, problem: 1 });
       // Another thread's QA is settled in that thread.
       assert.strictEqual(
         yield* errorOf(
@@ -1305,7 +1316,7 @@ it.effect("closes an agent's problem when a later landing names it in fixes", ()
         by: "agent",
         note: "Fixed by second · toast-fix",
       });
-      assert.deepStrictEqual(yield* evidence.counts(), { pending: 2, problem: 0 });
+      assert.deepStrictEqual(yield* qaCounts, { pending: 2, problem: 0 });
     }),
   ).pipe(Effect.provide(testLayer)),
 );
@@ -1433,13 +1444,13 @@ it.effect("leaves a change the user is discussing out of what waits on them", ()
       yield* seedThread({ id: "lead" });
       yield* evidence.record(recordInput("first", [change("a")]));
       yield* evidence.record(recordInput("second", [change("b")]));
-      assert.deepStrictEqual(yield* evidence.counts(), { pending: 2, problem: 0 });
+      assert.deepStrictEqual(yield* qaCounts, { pending: 2, problem: 0 });
       yield* evidence.markDiscussed({
         threadId: lead,
         messageId: MessageId.make("message-discuss"),
         changes: [{ landingId: "first", changeId: "a" }],
       });
-      assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, problem: 0 });
+      assert.deepStrictEqual(yield* qaCounts, { pending: 1, problem: 0 });
       assert.deepStrictEqual(
         (yield* evidence.list({ needsQa: true })).items.map((item) => item.id),
         ["second"],
@@ -1523,4 +1534,99 @@ it.effect(
         assert.deepStrictEqual(yield* evidence.waitingQaThreads(), [lead]);
       }),
     ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("dismisses only what still waits for QA before a date, as the user, in one pass", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      const other = ThreadId.make("other-lead");
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({ id: "other-lead" });
+      const old = "2026-11-01T10:00:00.000Z";
+      yield* evidence.record(
+        recordInput(
+          "old-lead",
+          [change("pending"), change("discussed"), change("fixing"), change("checked")],
+          { landedAt: old },
+        ),
+      );
+      yield* evidence.record(
+        recordInput("old-quiet", [change("quiet", { gaps: [] })], { landedAt: old }),
+      );
+      yield* evidence.record(
+        recordInput("old-other", [change("legacy")], { threadId: other, landedAt: old }),
+      );
+      yield* evidence.record(
+        recordInput("new-lead", [change("recent")], { landedAt: "2026-11-25T10:00:00.000Z" }),
+      );
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("m1"),
+        changes: [{ landingId: "old-lead", changeId: "discussed" }],
+      });
+      yield* evidence.setQa({ landingId: "old-lead", changeId: "checked", state: "confirmed" });
+      yield* sql`UPDATE evidence_qa SET state = 'problem', by = 'agent'
+        WHERE landing_id = 'old-lead' AND change_id = 'fixing'`;
+      // A change from before raise reasons were kept.
+      yield* sql`UPDATE evidence_qa SET raised_json = NULL
+        WHERE landing_id = 'old-other' AND change_id = 'legacy'`;
+      const before = "2026-11-20T00:00:00.000Z";
+      const note = "backlog cleared, not individually checked";
+
+      assert.strictEqual(
+        (yield* Effect.flip(evidence.bulkSetQa({ before, note: "   " }))).code,
+        "invalid",
+      );
+      assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, dryRun: true }), {
+        count: 2,
+      });
+      assert.deepStrictEqual(yield* qaCounts, { pending: 3, problem: 1 });
+
+      const moved = yield* Queue.unbounded<ThreadId>();
+      yield* Stream.runForEach(evidence.qaThreadChanges, (threadId) =>
+        Queue.offer(moved, threadId),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, note }), { count: 2 });
+      // Each thread whose changes moved is rebuilt once, however many of its changes moved.
+      assert.sameMembers([...(yield* Queue.takeAll(moved))], [lead, other]);
+
+      const qa = new Map(
+        (yield* sql<{
+          readonly change_id: string;
+          readonly state: string;
+          readonly by: string;
+          readonly note: string;
+          readonly raised_json: string | null;
+        }>`SELECT change_id, state, by, note, raised_json FROM evidence_qa`).map((row) => [
+          row.change_id,
+          row,
+        ]),
+      );
+      assert.deepInclude(qa.get("pending"), { state: "waived", by: "user", note });
+      assert.deepInclude(qa.get("legacy"), {
+        state: "waived",
+        by: "user",
+        note,
+        raised_json: '["legacy"]',
+      });
+      assert.strictEqual(qa.get("discussed")?.state, "pending");
+      assert.strictEqual(qa.get("fixing")?.state, "problem");
+      assert.deepInclude(qa.get("checked"), { state: "confirmed", by: "user" });
+      assert.strictEqual(qa.get("quiet")?.state, "quiet");
+      assert.strictEqual(qa.get("recent")?.state, "pending");
+      assert.deepStrictEqual(yield* evidence.bulkSetQa({ before, dryRun: true }), {
+        count: 0,
+      });
+      // A dismissed card keeps Reopen.
+      const reopened = yield* evidence.setQa({
+        landingId: "old-lead",
+        changeId: "pending",
+        state: "pending",
+      });
+      assert.strictEqual(reopened.state, "pending");
+    }),
+  ).pipe(Effect.provide(testLayer)),
 );

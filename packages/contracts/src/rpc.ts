@@ -9,7 +9,8 @@ import {
 } from "./notification.ts";
 import {
   EvidenceChangeQa,
-  EvidenceCounts,
+  EvidenceBulkSetQaInput,
+  EvidenceBulkSetQaResult,
   EvidenceCoverageInput,
   EvidenceError,
   EvidenceGetInput,
@@ -799,7 +800,7 @@ export const WS_METHODS = {
   evidenceGet: "evidence.get",
   evidenceThread: "evidence.thread",
   evidenceSetQa: "evidence.setQa",
-  evidenceCounts: "evidence.counts",
+  evidenceBulkSetQa: "evidence.bulkSetQa",
   evidenceSubscribe: "evidence.subscribe",
   evidenceCoverage: "evidence.coverage",
   messageFollowUpsList: "messageFollowUps.list",
@@ -2697,9 +2698,9 @@ const WsEvidenceSubscribeRpc = Rpc.make(WS_METHODS.evidenceSubscribe, {
   error: evidenceErrors,
   stream: true,
 });
-const WsEvidenceCountsRpc = Rpc.make(WS_METHODS.evidenceCounts, {
-  payload: Schema.Struct({}),
-  success: EvidenceCounts,
+const WsEvidenceBulkSetQaRpc = Rpc.make(WS_METHODS.evidenceBulkSetQa, {
+  payload: EvidenceBulkSetQaInput,
+  success: EvidenceBulkSetQaResult,
   error: evidenceErrors,
 });
 const WsEvidenceCoverageRpc = Rpc.make(WS_METHODS.evidenceCoverage, {
@@ -2924,7 +2925,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsEvidenceGetRpc,
   WsEvidenceThreadRpc,
   WsEvidenceSetQaRpc,
-  WsEvidenceCountsRpc,
+  WsEvidenceBulkSetQaRpc,
   WsEvidenceSubscribeRpc,
   WsEvidenceCoverageRpc,
   WsMessageFollowUpsListRpc,

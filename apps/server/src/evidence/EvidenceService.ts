@@ -9,7 +9,8 @@ import {
   EvidenceRecord,
   type EvidenceAgentQaInput,
   type EvidenceChange,
-  type EvidenceCounts,
+  type EvidenceBulkSetQaInput,
+  type EvidenceBulkSetQaResult,
   type EvidenceReviewThread,
   type EvidenceCoverageInput,
   type EvidenceProjectCoverage,
@@ -91,7 +92,13 @@ export class EvidenceService extends Context.Service<
     readonly agentSetQa: (input: AgentSetQaInput) => Effect.Effect<EvidenceChangeQa, EvidenceError>;
     /** Marks pending changes as discussed by a user message sent with a Discuss reference. */
     readonly markDiscussed: (input: MarkDiscussedInput) => Effect.Effect<void, EvidenceError>;
-    readonly counts: () => Effect.Effect<EvidenceCounts, EvidenceError>;
+    /**
+     * Dismisses, as the user, every change still waiting for QA that landed before a date, in
+     * every thread; a dry run only counts them.
+     */
+    readonly bulkSetQa: (
+      input: EvidenceBulkSetQaInput,
+    ) => Effect.Effect<EvidenceBulkSetQaResult, EvidenceError>;
     readonly subscribe: () => Stream.Stream<number>;
     /** The thread's QA changes still waiting on someone: pending, discussed or a problem. */
     readonly waitingQa: (
@@ -820,14 +827,36 @@ const make = Effect.gen(function* () {
     return rows.map((row) => ThreadId.make(row.thread_id));
   }, Effect.mapError(storage));
 
-  const counts = Effect.fn("EvidenceService.counts")(function* () {
-    const rows = yield* sql<{
-      readonly state: EvidenceQaState;
-      readonly count: number;
-    }>`SELECT state, count(*) AS count FROM evidence_qa q WHERE ${waitingOrFixing} GROUP BY state`;
-    const of = (state: EvidenceQaState) => rows.find((row) => row.state === state)?.count ?? 0;
-    return { pending: of("pending"), problem: of("problem") };
-  }, Effect.mapError(storage));
+  const bulkSetQa = Effect.fn("EvidenceService.bulkSetQa")(function* (
+    input: EvidenceBulkSetQaInput,
+  ) {
+    // Only what still waits on the user: a discussed change waits on the agent, a problem is the
+    // agent's to fix, and a settled one has its answer.
+    const waiting = sql`q.state = 'pending' AND q.discussed_message_id IS NULL
+      AND q.landing_id IN (SELECT landing_id FROM evidence_landings WHERE landed_at < ${input.before})`;
+    if ("dryRun" in input) {
+      const [row] = yield* sql<{
+        readonly count: number;
+      }>`SELECT count(*) AS count FROM evidence_qa q WHERE ${waiting}`;
+      return { count: row?.count ?? 0 };
+    }
+    const note = input.note.trim();
+    if (note === "") return yield* invalid("Say why these changes are dismissed.");
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const dismissed = yield* sql<{ readonly landing_id: string }>`UPDATE evidence_qa AS q SET
+        note = ${note},
+        raised_json = CASE WHEN raised_json IS NULL THEN '["legacy"]' ELSE raised_json END,
+        state = 'waived', by = 'user', message_id = NULL, updated_at = ${now}
+      WHERE ${waiting}
+      RETURNING landing_id`;
+    if (dismissed.length > 0) {
+      yield* publish;
+      yield* publishQaThreads(
+        yield* qaThreadsOf([...new Set(dismissed.map((row) => row.landing_id))]),
+      );
+    }
+    return { count: dismissed.length };
+  }, Effect.mapError(passStorage));
 
   const runGit = (cwd: string, args: ReadonlyArray<string>, stdin?: string) =>
     git
@@ -947,7 +976,7 @@ const make = Effect.gen(function* () {
     setQa,
     agentSetQa,
     markDiscussed,
-    counts,
+    bulkSetQa,
     waitingQa,
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),

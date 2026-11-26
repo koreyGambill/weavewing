@@ -171,6 +171,12 @@ change it at any time. Changes waiting for your QA count in each thread's
 **Waiting on you** strip, and QA cards show only while **Waiting-on-you cards** is on
 in **Settings → Threads**.
 
+To clear an old backlog at once, open the Evidence filter menu and choose **Dismiss
+pending before…**. Pick a day and give a reason; the dialog shows how many changes in
+every thread landed before that day and still wait for your QA before you confirm.
+Changes you are discussing and problems the agent is fixing stay open. Each dismissed
+card keeps your reason and can be reopened.
+
 Each change's review shows as **Unverified review** with the verdict the agent
 reported, such as "agent reported approved". Weavewing does not yet check that
 verdict against the reviewer. When the agent names the reviewer thread, a
