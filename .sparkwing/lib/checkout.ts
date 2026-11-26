@@ -115,71 +115,126 @@ export function comparisonBase(root: string, ref?: string): string {
   return closest.base;
 }
 
+/** NUL-separated paths from git, so no name is quoted or split by a newline. */
+function gitPaths(root: string, ...args: string[]): string[] {
+  return NodeChildProcess.execFileSync("git", ["-C", root, ...args, "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+    .split("\0")
+    .filter(Boolean);
+}
+
 /** Changed and untracked paths against base, as check:changed and CI see them. */
 export function changedFiles(root: string, base: string): string[] {
-  const lines = (...args: string[]) => git(root, ...args).split("\n").filter(Boolean);
   return [
     ...new Set([
-      ...lines("diff", "--name-only", "--no-renames", base, "--"),
-      ...lines("ls-files", "--others", "--exclude-standard"),
+      ...gitPaths(root, "diff", "--name-only", "--no-renames", base, "--"),
+      ...gitPaths(root, "ls-files", "--others", "--exclude-standard"),
     ]),
   ].sort();
 }
 
 export interface CheckChangedInputs {
-  /** Sources and install state: anything an edit during a gate can change. */
+  /** Sources, selection, environment and install state: anything an edit during a gate can change. */
   readonly sources: string;
-  /** Ignored outputs the checks regenerate themselves (astro check, mobile generators). */
+  /** Ignored files, which the checks may regenerate themselves (astro check, mobile generators). */
   readonly generated: string;
+  /** False when a tracked symlink leads outside the checkout, whose target the key cannot see. */
+  readonly memoizable: boolean;
 }
+
+// Ignored dependencies, build outputs, caches and dev state that checks do not read as sources.
+// Installed packages count through the lockfile and install metadata instead.
+const IGNORED_SKIP = /(^|\/)(node_modules|dist|dist-[^/]+|target|\.t3|\.alchemy|\.turbo|\.cache)(\/|$)|\.tsbuildinfo$/;
+// Variables that the checks, their configs or the tests read to decide behaviour.
+const CHECK_ENV = /^(CI|CHECK_CHANGED_\w+|NODE_\w+|VITE_\w+|VITEST_\w+|T3CODE_\w+|T3_\w+|EFFECT_\w+|PLAYWRIGHT_\w+|VERCEL_\w+|GITHUB_REPOSITORY|APP_VERSION|PORT|HOST)$/;
 
 /**
  * The content check:changed reads, never where it sits, so checkouts of one tree share a pass:
  * - base: the commit check:changed compares against, which fixes every unchanged tracked file;
- * - the binary diff against base and the raw bytes of changed files: edits, staged or not;
- * - untracked files, including ones only a local exclude rule hides, since typecheck and tests
- *   read them while the repository's own .gitignore files are tracked content;
- * - ignored generated files and .env files, which checks read;
- * - install state, without pnpm's prune timestamp, which differs per install of one lockfile;
- * - CI, which changes test behaviour, and the host platform.
+ * - the selection: the changed and untracked paths check:changed itself will check;
+ * - the binary diff against base and the bytes of changed and untracked files, including files
+ *   only a local exclude rule hides, since typecheck and tests read them;
+ * - ignored files outside IGNORED_SKIP, and .env files, which checks read;
+ * - install state, without pnpm's prune timestamp, which differs per install of one lockfile.
+ *   Installed package files themselves are not hashed: an edit inside node_modules that keeps
+ *   the lockfile and install metadata goes unseen, and `vp i` or `--no-memo` is the remedy;
+ * - the CHECK_ENV variables of `env`, and the host platform.
+ * Every path and content is a length-prefixed record, so no two input sets hash alike.
  */
-export function checkChangedInputs(root: string, base: string): CheckChangedInputs {
+export function checkChangedInputs(
+  root: string,
+  base: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): CheckChangedInputs {
   const sources = NodeCrypto.createHash("sha256");
   const generated = NodeCrypto.createHash("sha256");
-  sources.update(`${base}\0${process.env.CI ?? ""}\0${process.platform}\0${process.arch}\0`);
-  sources.update(
+  const record = (hash: NodeCrypto.Hash, value: string | Buffer) => {
+    const bytes = typeof value === "string" ? Buffer.from(value) : value;
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    hash.update(length).update(bytes);
+  };
+  const add = (hash: NodeCrypto.Hash, file: string) => {
+    record(hash, file);
+    const path = NodePath.join(root, file);
+    const link = NodeFS.lstatSync(path, { throwIfNoEntry: false });
+    if (link?.isSymbolicLink()) record(hash, `link:${NodeFS.readlinkSync(path)}`);
+    if (!NodeFS.statSync(path, { throwIfNoEntry: false })?.isFile()) return record(hash, link ? "other" : "missing");
+    const bytes = NodeFS.readFileSync(path);
+    record(hash, file === MODULES_YAML ? bytes.toString("utf8").replace(/^\s*"prunedAt":.*$/m, "") : bytes);
+  };
+
+  for (const part of [base, process.platform, process.arch]) record(sources, part);
+  for (const [name, value] of Object.entries(env).filter(([name]) => CHECK_ENV.test(name)).sort())
+    record(sources, `${name}=${value}`);
+  const selected = changedFiles(root, base);
+  record(sources, `selected:${selected.length}`);
+  for (const file of selected) record(sources, file);
+  record(
+    sources,
     NodeChildProcess.execFileSync(
       "git",
       ["-C", root, "diff", "--binary", "--no-renames", "--no-ext-diff", "--no-textconv", base, "--"],
       { maxBuffer: 1024 * 1024 * 1024 },
     ),
   );
-  const ignored = git(
-    root,
-    "ls-files", "--others", "--ignored", "--exclude-standard", "--",
-    ":(glob)**/.generated/**",
-    ":(glob)**/.astro/**",
-    ":(glob)**/*.d.ts",
-    ":(glob)**/.env*",
-    ":(exclude,glob)**/node_modules/**",
-  )
-    .split("\n")
-    .filter(Boolean);
-  const untracked = git(root, "ls-files", "--others", "--exclude-per-directory=.gitignore")
-    .split("\n")
-    .filter(Boolean);
-  const add = (hash: NodeCrypto.Hash, file: string) => {
-    hash.update(`\0${file}\0`);
-    const path = NodePath.join(root, file);
-    if (!NodeFS.statSync(path, { throwIfNoEntry: false })?.isFile()) return;
-    const bytes = NodeFS.readFileSync(path);
-    hash.update(file === MODULES_YAML ? bytes.toString("utf8").replace(/^\s*"prunedAt":.*$/m, "") : bytes);
-  };
-  const files = new Set([...changedFiles(root, base), ...untracked]);
-  for (const file of [...files].sort()) add(sources, file);
+  const untracked = gitPaths(root, "ls-files", "--others", "--exclude-per-directory=.gitignore");
+  const files = [...new Set([...selected, ...untracked])].sort();
+  record(sources, `files:${files.length}`);
+  for (const file of files) add(sources, file);
   for (const file of [MODULES_YAML, "node_modules/.pnpm/lock.yaml"]) add(sources, file);
+
+  const ignored = gitPaths(root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory")
+    .filter((entry) => !IGNORED_SKIP.test(entry))
+    .flatMap((entry) =>
+      entry.endsWith("/")
+        ? NodeFS.readdirSync(NodePath.join(root, entry), { recursive: true, withFileTypes: true })
+            .filter((dirent) => !dirent.isDirectory())
+            .map((dirent) => NodePath.relative(root, NodePath.join(dirent.parentPath, dirent.name)))
+        : [entry],
+    )
+    .filter((file) => !IGNORED_SKIP.test(file))
+    .sort();
   for (const file of ignored) add(/(^|\/)\.env[^/]*$/.test(file) ? sources : generated, file);
-  return { sources: sources.digest("hex"), generated: generated.digest("hex") };
+
+  const realRoot = NodeFS.realpathSync(root);
+  const memoizable = NodeChildProcess.execFileSync("git", ["-C", root, "ls-files", "-s", "-z"], {
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  })
+    .split("\0")
+    .filter((entry) => entry.startsWith("120000 "))
+    .every((entry) => {
+      const link = NodePath.join(realRoot, entry.slice(entry.indexOf("\t") + 1));
+      if (!NodeFS.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) return true;
+      let target = NodePath.resolve(NodePath.dirname(link), NodeFS.readlinkSync(link));
+      try {
+        target = NodeFS.realpathSync(link);
+      } catch {
+        // A dangling link is judged by where it points.
+      }
+      return target === realRoot || target.startsWith(realRoot + NodePath.sep);
+    });
+  return { sources: sources.digest("hex"), generated: generated.digest("hex"), memoizable };
 }
 
 const MODULES_YAML = "node_modules/.modules.yaml";

@@ -1,10 +1,11 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import { definePipeline, memoKey } from "@sparkwing/sdk";
+import { definePipeline, memoKey, noMemo } from "@sparkwing/sdk";
 
 import {
   changedFiles,
+  type Checkout,
   type CheckChangedInputs,
   checkChangedInputs,
   checkout,
@@ -46,12 +47,16 @@ function pipelineDepsMatchLockfile(root: string): boolean {
 }
 const CHECK_CHANGED_CONCURRENCY = String(GATE_CORES);
 
+/** The environment check:changed runs with, which the key covers. */
+const checksEnv = (co: Checkout) => ({ ...process.env, ...co.env, CHECK_CHANGED_CONCURRENCY });
+
 definePipeline({
   name: "Gate",
   short: "vp run check:changed, admitted by cores instead of the checks lock",
   help:
     "The exit code is the verdict. Resubmitting identical content against the same base, from any checkout run " +
-    "with the same -C, returns the recorded pass without a new log; a tree edited during the run fails instead of passing.",
+    "with the same -C, returns the recorded pass without a new log; a tree edited during the run fails instead of passing. " +
+    "The key does not read installed package files: after editing inside node_modules, run vp i or pass --no-memo.",
   args: [
     ...checkoutArgs,
     { name: "ref", type: "string", description: "Compare against the merge base with this ref" },
@@ -87,11 +92,11 @@ definePipeline({
       const base = comparisonBase(co.root, ref || undefined);
       const before: CheckChangedInputs = NodeFS.existsSync(keyFile(co.evidence))
         ? JSON.parse(NodeFS.readFileSync(keyFile(co.evidence), "utf8"))
-        : checkChangedInputs(co.root, base);
+        : checkChangedInputs(co.root, base, checksEnv(co));
       const log = await logged(ctx, co, "check-changed", ["vp", "run", "check:changed", ...(ref ? [ref] : [])], {
         CHECK_CHANGED_CONCURRENCY,
       });
-      const after = checkChangedInputs(co.root, base);
+      const after = checkChangedInputs(co.root, base, checksEnv(co));
       if (after.sources !== before.sources)
         throw new Error("The worktree changed during the gate, so this pass is not recorded; rerun the gate.");
       if (after.generated !== before.generated)
@@ -102,7 +107,8 @@ definePipeline({
       .cores(GATE_CORES)
       .memo((ctx) => {
         const co = checkout(ctx);
-        const inputs = checkChangedInputs(co.root, comparisonBase(co.root, ctx.args.ref || undefined));
+        const inputs = checkChangedInputs(co.root, comparisonBase(co.root, ctx.args.ref || undefined), checksEnv(co));
+        if (!inputs.memoizable) return noMemo;
         NodeFS.writeFileSync(keyFile(co.evidence), JSON.stringify(inputs));
         return memoKey(
           "check-changed/v4",
