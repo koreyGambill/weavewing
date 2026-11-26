@@ -503,6 +503,22 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("keeps the attachments of a reply that only reacts", () => {
+    const attachment = {
+      type: "image" as const,
+      id: "screenshot",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 1,
+    };
+    const feed = buildThreadFeed([
+      projected({ ...assistantMessage(), text: "[react 1:ack]", attachments: [attachment] }, 0),
+    ]);
+    expect(
+      feed.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+    ).toMatchObject([{ role: "assistant", text: "", attachments: [attachment] }]);
+  });
+
   it("keeps async answers in question history instead of user bubbles", () => {
     const requestId = RuntimeRequestId.make("question");
     const question: OrchestrationV2TurnItem = {
