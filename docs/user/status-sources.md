@@ -73,5 +73,5 @@ moves to **Dismissed**; a later episode can raise a new alert.
 
 Choose **Snooze** and select a time or duration to mute a source's notifications while its status continues updating.
 Choose **Unsnooze** to resume early. Remove a source to stop checking it. No sources are added
-automatically. Status sources are available in web and desktop. Mobile configuration and status
-display are not supported.
+automatically. Configure sources in the web or desktop app. In the mobile app, **Settings > Status**
+shows each source's state and checks, read-only.
