@@ -1772,6 +1772,11 @@ export const ServerSettings = Schema.Struct({
    * a change.
    */
   waitingCardsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * When an agent's turn lands work on the target branch that no evidence covers, the agent is
+   * asked once to record evidence or say why none is needed.
+   */
+  evidencePromptEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   tailnetConnect: TailnetConnectSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(TailnetConnectSettings)({}))),
   ),
@@ -2207,6 +2212,7 @@ export const ServerSettingsPatch = Schema.Struct({
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   waitingCardsEnabled: Schema.optionalKey(Schema.Boolean),
+  evidencePromptEnabled: Schema.optionalKey(Schema.Boolean),
   tailnetConnect: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),

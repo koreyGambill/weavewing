@@ -118,6 +118,7 @@ export function ThreadEvidenceTimelineRow({
           return (
             <MutedLine key={landingId}>
               {landedOn(landing)} · {landing.title}
+              {landing.exempt ? ` · exempt: ${landing.exempt.reason}` : null}
             </MutedLine>
           );
         return shown.map((change) =>

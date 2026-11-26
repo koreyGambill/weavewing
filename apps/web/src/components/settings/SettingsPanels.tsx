@@ -1833,6 +1833,22 @@ export function ThreadsSettingsPanel() {
               />
             }
           />
+          <SettingsRow
+            serverScoped
+            {...searchableSetting("evidence-prompt")}
+            description="When an agent's turn lands work on the target branch that no evidence covers, ask it once to record evidence or say why none is needed."
+            settingKeys={["evidencePromptEnabled"]}
+            control={
+              <ScopedSwitch
+                settingKeys={["evidencePromptEnabled"]}
+                checked={settings.evidencePromptEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ evidencePromptEnabled: Boolean(checked) })
+                }
+                aria-label="Ask agents to record landed work"
+              />
+            }
+          />
         </SettingsSection>
       ) : null}
 

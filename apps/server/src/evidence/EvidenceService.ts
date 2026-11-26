@@ -4,6 +4,7 @@ import {
   EvidenceChangeKey,
   EvidenceChangeQa,
   EvidenceError,
+  EvidenceExempt,
   EvidenceLanding,
   EvidenceLandingSummary,
   EvidenceQaRaiseReason,
@@ -72,6 +73,13 @@ export interface MarkDiscussedInput {
   readonly changes: ReadonlyArray<{ readonly landingId: string; readonly changeId: string }>;
 }
 
+export interface LandingTarget {
+  readonly projectId: ProjectId;
+  readonly cwd: string;
+  readonly branch: string;
+  readonly remote: string | null;
+}
+
 export const AGENT_QA_NEEDS_USER_MESSAGE = "Only the user's message in this turn can settle this.";
 
 export class EvidenceService extends Context.Service<
@@ -110,6 +118,25 @@ export class EvidenceService extends Context.Service<
     readonly waitingQaThreads: () => Effect.Effect<ReadonlyArray<ThreadId>, EvidenceError>;
     /** The thread showing each QA change that moved, as it moves. */
     readonly qaThreadChanges: Stream.Stream<ThreadId>;
+    /**
+     * The branch landings target in a project: the newest landing's, else the primary remote's
+     * default, else `main`. Null when the project is unknown or the branch name is unsafe.
+     */
+    readonly landingTarget: (
+      projectId: ProjectId,
+    ) => Effect.Effect<LandingTarget | null, EvidenceError>;
+    /**
+     * First-parent commits the target branch, or its remote-tracking branch, gained while any of
+     * `windows` was open, newest first, that no landing or exemption covers. A moved ref is read
+     * from its reflog, so a ref created or moved outside the windows contributes nothing.
+     */
+    readonly uncoveredLanded: (input: {
+      readonly target: LandingTarget;
+      readonly windows: ReadonlyArray<{ readonly fromMs: number; readonly toMs: number }>;
+    }) => Effect.Effect<
+      ReadonlyArray<{ readonly sha: string; readonly subject: string }>,
+      EvidenceError
+    >;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
     readonly coverage: (
       input: EvidenceCoverageInput,
@@ -175,6 +202,7 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
     target: Schema.fromJsonString(EvidenceLandingSummary.fields.target),
     verifications: Schema.fromJsonString(EvidenceLandingSummary.fields.verifications),
     qa: Schema.fromJsonString(EvidenceLandingSummary.fields.qa),
+    exempt: Schema.optional(Schema.fromJsonString(EvidenceExempt)),
   }),
 );
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
@@ -345,7 +373,7 @@ const make = Effect.gen(function* () {
    * link only when it is a review-role child of the same lead; any other is dropped with a warning.
    */
   const storedReview = (
-    change: RecordInput["changes"][number],
+    change: NonNullable<RecordInput["changes"]>[number],
     childRoles: ReadonlyMap<string, ReadonlySet<string>>,
     warnings: string[],
   ): EvidenceChange["review"] => {
@@ -392,7 +420,8 @@ const make = Effect.gen(function* () {
     );
 
   const record = Effect.fn("EvidenceService.record")(function* (input: RecordInput) {
-    const ids = input.changes.map((change) => change.id);
+    const inputChanges = input.changes ?? [];
+    const ids = inputChanges.map((change) => change.id);
     const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
     if (duplicate !== undefined) return yield* invalid(`Duplicate change id: ${duplicate}`);
     let landedAt: string | undefined;
@@ -405,7 +434,7 @@ const make = Effect.gen(function* () {
     const warnings: string[] = [];
     const childRoles = yield* readChildRoles(input.threadId);
     const changes: EvidenceChange[] = [];
-    for (const change of input.changes) {
+    for (const change of inputChanges) {
       const captures = [];
       for (const capture of change.captures)
         captures.push({ ...capture, path: yield* checkCapture(capture.path, root, warnings) });
@@ -417,6 +446,7 @@ const make = Effect.gen(function* () {
       target: input.target,
       verifications: input.verifications,
       changes,
+      ...(input.exempt === undefined ? {} : { exempt: input.exempt }),
     }).pipe(Effect.mapError((cause) => invalid(cause.message)));
     const bytes = new TextEncoder().encode(recordJson).byteLength;
     if (bytes > EVIDENCE_RECORD_MAX_BYTES)
@@ -469,7 +499,9 @@ const make = Effect.gen(function* () {
               WHERE landing_id = ${input.id} AND change_id = ${id}`;
           }
           // Removed changes go after numbering, so their QA numbers are not handed out again here.
-          yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
+          yield* ids.length === 0
+            ? sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id}`
+            : sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
           for (const change of changes)
             for (const fix of change.fixes ?? []) {
               const [closed] = yield* sql<{ readonly change_id: string }>`UPDATE evidence_qa
@@ -526,6 +558,7 @@ const make = Effect.gen(function* () {
       readonly verifications: string;
       readonly change_count: number;
       readonly qa: string;
+      readonly exempt: string | null;
     }>`WITH page AS (
           SELECT landing_id, thread_id, project_id, landed_at, record_json FROM evidence_landings l
           WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
@@ -541,6 +574,7 @@ const make = Effect.gen(function* () {
                 'reason', json_extract(v.value, '$.reason')) END)
             FROM json_each(p.record_json, '$.verifications') v) AS verifications,
           json_array_length(p.record_json, '$.changes') AS change_count,
+          json_extract(p.record_json, '$.exempt') AS exempt,
           (SELECT json_object('pending', count(*) FILTER (WHERE state = 'pending'),
               'quiet', count(*) FILTER (WHERE state = 'quiet'),
               'confirmed', count(*) FILTER (WHERE state = 'confirmed'),
@@ -559,6 +593,7 @@ const make = Effect.gen(function* () {
         verifications: row.verifications,
         changeCount: row.change_count,
         qa: row.qa,
+        ...(row.exempt === null ? {} : { exempt: row.exempt }),
       }),
     );
     const last = items.at(-1);
@@ -978,6 +1013,135 @@ const make = Effect.gen(function* () {
     return result;
   });
 
+  const landingTarget = Effect.fn("EvidenceService.landingTarget")(function* (
+    projectId: ProjectId,
+  ) {
+    const [row] = yield* sql<{
+      readonly workspace_root: string;
+      readonly branch: string | null;
+    }>`SELECT p.workspace_root, (SELECT json_extract(l.record_json, '$.target.branch')
+          FROM evidence_landings l WHERE l.project_id = p.project_id
+          ORDER BY l.landed_at DESC, l.landing_id DESC LIMIT 1) AS branch
+        FROM projection_projects p WHERE p.project_id = ${projectId} AND p.deleted_at IS NULL`;
+    if (row === undefined) return null;
+    const cwd = row.workspace_root;
+    const remote = yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.orElseSucceed(() => null));
+    const recorded =
+      row.branch !== null && remote !== null && row.branch.startsWith(`${remote}/`)
+        ? row.branch.slice(remote.length + 1)
+        : row.branch;
+    const branch =
+      recorded ??
+      (remote === null
+        ? null
+        : yield* git
+            .resolveDefaultBranchName(cwd, remote)
+            .pipe(Effect.orElseSucceed(() => null))) ??
+      "main";
+    return branch.startsWith("-") || !/^[\w./-]+$/u.test(branch)
+      ? null
+      : { projectId, cwd, branch, remote };
+  }, Effect.mapError(storage));
+
+  // Reflog lines are `sha<US>ref@{unix seconds}`, newest first.
+  const reflogMoves = (log: string, fromS: number, toS: number) => {
+    const entries = log.split("\n").flatMap((line) => {
+      const [sha, selector = ""] = line.split("\x1f");
+      const at = /@\{(\d+)\}$/u.exec(selector)?.[1];
+      return sha && at ? [{ sha, at: Number(at) }] : [];
+    });
+    const inside = entries.findIndex((entry) => entry.at <= toS);
+    if (inside === -1 || entries[inside]!.at < fromS) return null;
+    const before = entries.find((entry, index) => index > inside && entry.at < fromS);
+    // A ref created inside the window has no earlier value to compare against.
+    return before === undefined || before.sha === entries[inside]!.sha
+      ? null
+      : { from: before.sha, to: entries[inside]!.sha };
+  };
+
+  const uncoveredLanded = Effect.fn("EvidenceService.uncoveredLanded")(function* (input: {
+    readonly target: LandingTarget;
+    readonly windows: ReadonlyArray<{ readonly fromMs: number; readonly toMs: number }>;
+  }) {
+    const { cwd, branch, remote, projectId } = input.target;
+    const refs = [
+      `refs/heads/${branch}`,
+      ...(remote === null ? [] : [`refs/remotes/${remote}/${branch}`]),
+    ];
+    const ranges = new Map<string, { from: string; to: string }>();
+    for (const ref of refs) {
+      const log = yield* runGit(cwd, [
+        "reflog",
+        "show",
+        "-n",
+        "500",
+        "--date=unix",
+        "--format=%H%x1f%gd",
+        ref,
+        "--",
+      ]);
+      if (log === null) continue;
+      for (const { fromMs, toMs } of input.windows) {
+        const move = reflogMoves(log, Math.floor(fromMs / 1000), Math.ceil(toMs / 1000));
+        if (move !== null) ranges.set(`${move.from}..${move.to}`, move);
+      }
+    }
+    if (ranges.size === 0) return [];
+    const recordedRows = yield* sql<{
+      readonly sha: string;
+      readonly commits: string;
+    }>`SELECT json_extract(l.record_json, '$.target.sha') AS sha,
+          (SELECT json_group_array(c.value) FROM json_each(l.record_json, '$.changes') ch, json_each(ch.value, '$.commits') c) AS commits
+        FROM evidence_landings l WHERE l.project_id = ${projectId}`;
+    const asked = recordedRows
+      .flatMap((row) => [
+        { sha: row.sha, target: true },
+        ...(JSON.parse(row.commits) as string[]).map((sha) => ({ sha, target: false })),
+      ])
+      .filter(({ sha }) => /^[0-9a-f]{4,64}$/i.test(sha));
+    // Git resolves abbreviations; ambiguous or unknown ones print "missing" and cover nothing.
+    const checked =
+      asked.length === 0
+        ? ""
+        : yield* runGit(
+            cwd,
+            ["cat-file", "--batch-check"],
+            asked.map(({ sha }) => `${sha}^{commit}\n`).join(""),
+          );
+    if (checked === null) return [];
+    const recorded = new Set<string>();
+    const targets = new Set<string>();
+    checked.split("\n").forEach((line, index) => {
+      const [sha = "", type] = line.split(" ");
+      if (type !== "commit") return;
+      recorded.add(sha);
+      if (asked[index]?.target) targets.add(sha);
+    });
+    const uncovered = new Map<string, { readonly sha: string; readonly subject: string }>();
+    for (const { from, to } of ranges.values()) {
+      const log = yield* runGit(cwd, [
+        "log",
+        "--first-parent",
+        "--format=%H%x1f%P%x1f%s",
+        to,
+        `^${from}`,
+        "--",
+      ]);
+      const revs = yield* runGit(cwd, ["rev-list", "--parents", to, `^${from}`, "--"]);
+      if (log === null || revs === null || !log.trim()) continue;
+      const chain = log
+        .trim()
+        .split("\n")
+        .map((line) => line.split("\x1f")[0] ?? "");
+      // A landing names the branch tip it left, so its target covers the batch it landed.
+      const tip = chain.findIndex((sha) => targets.has(sha));
+      const batch = new Set(tip === -1 ? [] : chain.slice(tip));
+      for (const commit of uncoveredMerges(to, log.trim(), revs, recorded))
+        if (!batch.has(commit.sha)) uncovered.set(commit.sha, commit);
+    }
+    return [...uncovered.values()];
+  }, Effect.mapError(storage));
+
   const coverage = Effect.fn("EvidenceService.coverage")(function* (input: EvidenceCoverageInput) {
     const generation = coverageGeneration;
     const rows =
@@ -1006,6 +1170,8 @@ const make = Effect.gen(function* () {
     waitingQa,
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),
+    landingTarget,
+    uncoveredLanded,
     coverage,
     subscribe: () =>
       Stream.unwrap(

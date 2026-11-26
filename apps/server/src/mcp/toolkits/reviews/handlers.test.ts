@@ -103,7 +103,7 @@ const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
   record: (input) =>
     Effect.succeed({
       landingId: input.id,
-      changes: input.changes.map((change) => ({
+      changes: (input.changes ?? []).map((change) => ({
         id: change.id,
         qa: "pending" as const,
         raised: [],
