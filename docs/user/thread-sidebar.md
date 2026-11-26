@@ -521,6 +521,14 @@ conversation through that reply and moves later turns into **Earlier
 conversation**. The thread keeps its files and draft. Finish queued work first,
 then choose a reply with a native turn boundary in the active conversation.
 
+**Rewind to here and keep a summary**, beside it, first asks the agent to
+summarize the later turns: what it learned, the files it changed, the commands it
+ran, its decisions and what remains. The thread works while the agent writes, then
+rewinds as above. The summary shows beside the reply and goes to the agent with
+your next message. If the agent does not finish its summary, nothing is rewound.
+**Bring back** on **Earlier conversation** adds the archive as a reference the agent
+can read; the summary still goes with your next message.
+
 ## Snooze until later
 
 To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.
