@@ -956,8 +956,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   useQuestionReferenceReveal(routeThreadKey, rows.length, (target) =>
     revealRow(
       rows.findIndex((row) => row.kind === "message" && row.message.id === target.messageId),
-      () =>
-        scrollQuestionReferenceIntoRow(listRef.current, target, TIMELINE_MINIMAP_TARGET_OFFSET),
+      () => scrollQuestionReferenceIntoRow(listRef.current, target, TIMELINE_MINIMAP_TARGET_OFFSET),
     ),
   );
   const restoreReady = restoringThreadPosition && rows.length > 0;

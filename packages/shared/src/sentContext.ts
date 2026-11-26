@@ -37,9 +37,7 @@ export interface SentContextBlock {
   readonly record: KnownComposerContextRecord;
 }
 
-function shownSections(
-  fields: ReadonlyArray<ComposerContextPayloadField>,
-): SentContextSection[] {
+function shownSections(fields: ReadonlyArray<ComposerContextPayloadField>): SentContextSection[] {
   return fields.flatMap((field) =>
     field.children
       ? shownSections(field.children)

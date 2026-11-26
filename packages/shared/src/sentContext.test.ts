@@ -349,7 +349,10 @@ describe("sentContextBlocks", () => {
       formatComposerContextReference({ kind: "terminal", contextId: id("gone"), label: "Gone" }),
       formatComposerContextReference(RECORDS.terminal),
     ].join(" ");
-    const blocks = sentContextBlocks({ text, records: [RECORDS.answer, RECORDS.terminal, unknown] });
+    const blocks = sentContextBlocks({
+      text,
+      records: [RECORDS.answer, RECORDS.terminal, unknown],
+    });
     expect(blocks.map((block) => block.contextId)).toEqual(["terminal_t1", "answer_q1"]);
   });
 });
