@@ -44,9 +44,9 @@ vi.mock(import("~/state/server"), async (original) => ({
 import type { EnvironmentPresentation } from "~/state/environments";
 import { AddRouteDialog } from "./AddRouteDialog";
 
-const moonborn = {
-  environmentId: "moonborn",
-  label: "Moonborn",
+const macMini = {
+  environmentId: "mac-mini",
+  label: "Mac mini",
   relayManaged: false,
 } as unknown as EnvironmentPresentation;
 
@@ -54,7 +54,7 @@ function Owner() {
   const [routeTarget, setRouteTarget] = useState<EnvironmentPresentation | null>(null);
   return (
     <AppAtomRegistryProvider>
-      <button type="button" onClick={() => setRouteTarget(moonborn)}>
+      <button type="button" onClick={() => setRouteTarget(macMini)}>
         Open route dialog
       </button>
       <AddRouteDialog

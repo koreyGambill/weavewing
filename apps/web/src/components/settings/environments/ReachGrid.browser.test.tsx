@@ -15,7 +15,7 @@ import { ReachGrid } from "./ReachGrid";
 import type { SquareChangeState } from "./useSquareChange";
 
 const WSL = EnvironmentId.make("grid-wsl");
-const MOON = EnvironmentId.make("grid-moon");
+const MAC = EnvironmentId.make("grid-mac");
 
 const server = (
   overrides: Partial<ReachServerInput> & Pick<ReachServerInput, "environmentId" | "label">,
@@ -62,7 +62,7 @@ function setup() {
   const model = buildReachModel({
     servers: [
       server({ environmentId: WSL, label: "WSL", sessions: [phone] }),
-      server({ environmentId: MOON, label: "Moonborn", canManage: false, sessions: null }),
+      server({ environmentId: MAC, label: "Mac mini", canManage: false, sessions: null }),
     ],
   });
   return { model, change, request };
@@ -73,29 +73,29 @@ describe("ReachGrid", () => {
     const { model, change, request } = setup();
     await using _screen = await render(<ReachGrid model={model} change={change} />);
 
-    await userEvent.click(page.getByRole("button", { name: "From Moonborn to WSL: No access" }));
+    await userEvent.click(page.getByRole("button", { name: "From Mac mini to WSL: No access" }));
 
-    await expect.element(page.getByText("From WSL to Moonborn: No access")).toBeVisible();
+    await expect.element(page.getByText("From WSL to Mac mini: No access")).toBeVisible();
     expect(request).not.toHaveBeenCalled();
     await expect
       .element(page.getByRole("button", { name: "Full access", exact: true }))
       .toBeDisabled();
     await expect
-      .element(page.getByText("Changing the level needs this app to manage Moonborn too"))
+      .element(page.getByText("Changing the level needs this app to manage Mac mini too"))
       .toBeVisible();
   });
 
   it("claims no level for a line whose relink was left uncertain", async () => {
     const { model, change } = setup();
     const square = [...model.squares.values()].find(
-      (candidate) => candidate.from.label === "Moonborn" && candidate.to.label === "WSL",
+      (candidate) => candidate.from.label === "Mac mini" && candidate.to.label === "WSL",
     )!;
     const uncertain = { ...change, uncertain: new Set([squareKey(square.from.id, square.to.id)]) };
     await using screen = await render(<ReachGrid model={model} change={uncertain} />);
 
-    await userEvent.click(page.getByRole("button", { name: "From Moonborn to WSL: Uncertain" }));
+    await userEvent.click(page.getByRole("button", { name: "From Mac mini to WSL: Uncertain" }));
 
-    await expect.element(page.getByText("From Moonborn to WSL: Uncertain")).toBeVisible();
+    await expect.element(page.getByText("From Mac mini to WSL: Uncertain")).toBeVisible();
     expect(screen.container.ownerDocument.querySelectorAll("[aria-pressed='true']")).toHaveLength(
       0,
     );
@@ -126,10 +126,10 @@ describe("ReachGrid", () => {
 
     await expect.element(page.getByRole("img", { name: "Set on that machine" })).toBeVisible();
     await userEvent.click(
-      page.getByRole("button", { name: "From This app to Moonborn: Full access" }),
+      page.getByRole("button", { name: "From This app to Mac mini: Full access" }),
     );
     await expect
-      .element(page.getByText("Moonborn decides this. This app does not have full access to it."))
+      .element(page.getByText("Mac mini decides this. This app does not have full access to it."))
       .toBeVisible();
     await expect.element(page.getByRole("button", { name: "View only" })).not.toBeInTheDocument();
   });
@@ -145,7 +145,7 @@ describe("ReachGrid", () => {
       ].filter((element) => element.tabIndex >= 0);
 
     expect(focusable()).toHaveLength(1);
-    const first = page.getByRole("button", { name: "From Moonborn to WSL: No access" });
+    const first = page.getByRole("button", { name: "From Mac mini to WSL: No access" });
     await userEvent.click(first);
     await userEvent.keyboard("{Escape}");
     await expect.element(first).toHaveFocus();

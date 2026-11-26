@@ -430,7 +430,7 @@ function PairDeviceFields({
         <Input
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. Korey iPhone"
+          placeholder="e.g. Work phone"
           disabled={busy}
           nativeInput
         />

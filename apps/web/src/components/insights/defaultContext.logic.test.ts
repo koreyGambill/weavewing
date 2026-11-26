@@ -111,10 +111,10 @@ describe("fileTree", () => {
 
 describe("paths", () => {
   it("collapses the home folder only on a whole path segment", () => {
-    const home = homeOf(["/srv/x", "/home/korey/code/AGENTS.md"]);
-    expect(home).toBe("/home/korey");
-    expect(shortenPath("/home/korey/.claude/CLAUDE.md", home)).toBe("~/.claude/CLAUDE.md");
-    expect(shortenPath("/home/koreyx/CLAUDE.md", home)).toBe("/home/koreyx/CLAUDE.md");
+    const home = homeOf(["/srv/x", "/home/dev/code/AGENTS.md"]);
+    expect(home).toBe("/home/dev");
+    expect(shortenPath("/home/dev/.claude/CLAUDE.md", home)).toBe("~/.claude/CLAUDE.md");
+    expect(shortenPath("/home/devx/CLAUDE.md", home)).toBe("/home/devx/CLAUDE.md");
     expect(shortenPath("/etc/claude-code/CLAUDE.md", null)).toBe("/etc/claude-code/CLAUDE.md");
     expect(splitPath("~/.config/wing/AGENT_BOOTSTRAP.md")).toEqual({
       directory: "~/.config/wing/",

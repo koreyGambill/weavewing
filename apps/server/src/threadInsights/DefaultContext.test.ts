@@ -156,7 +156,7 @@ it.effect(
 it("finds @ imports outside code and ignores fenced or inline ones", () => {
   expect(
     importReferences(
-      "See @./a.md and @~/b.md.\nmail korey@example.com\n`@skip.md`\n```\n@fenced.md\n```\n@docs/c.md @/abs.md @...",
+      "See @./a.md and @~/b.md.\nmail dev@example.com\n`@skip.md`\n```\n@fenced.md\n```\n@docs/c.md @/abs.md @...",
     ),
   ).toEqual(["./a.md", "~/b.md", "docs/c.md", "/abs.md"]);
 });

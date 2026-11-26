@@ -29,7 +29,7 @@ import {
 
 const WSL = EnvironmentId.make("env-wsl");
 const WINDOWS = EnvironmentId.make("env-windows");
-const MOON = EnvironmentId.make("env-moon");
+const MAC = EnvironmentId.make("env-mac");
 const BUILD = EnvironmentId.make("env-build");
 const VPS = EnvironmentId.make("env-vps");
 
@@ -67,7 +67,7 @@ function session(
     sessionId: AuthSessionId.make(`session-${sessionCounter}`),
     scopes: [...AuthStandardClientScopes],
     method: "bearer-access-token",
-    client: { deviceType: "mobile", label: "Korey iPhone", ipAddress: "100.101.1.2" },
+    client: { deviceType: "mobile", label: "Work phone", ipAddress: "100.101.1.2" },
     issuedAt: DateTime.makeUnsafe(0),
     expiresAt: DateTime.makeUnsafe(10_000),
     lastConnectedAt: null,
@@ -124,8 +124,8 @@ describe("buildReachModel", () => {
           sessions: [linkSession(WSL, "WSL")],
         }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           sessions: [
             linkSession(WINDOWS, "Windows", [
               AuthOrchestrationReadScope,
@@ -141,27 +141,27 @@ describe("buildReachModel", () => {
       level: "auto",
       broken: null,
     });
-    expect(state(model, serverPartyId(WINDOWS), MOON).state).toEqual({
+    expect(state(model, serverPartyId(WINDOWS), MAC).state).toEqual({
       kind: "level",
       level: "can-change",
       broken: null,
     });
-    expect(state(model, serverPartyId(WINDOWS), MOON).arrivedVia).toBeNull();
+    expect(state(model, serverPartyId(WINDOWS), MAC).arrivedVia).toBeNull();
   });
 
   it("marks a square unknown when this app can read neither side, and says which", () => {
     const model = buildReachModel({
       servers: [
         server({ environmentId: WSL, label: "WSL", links: null }),
-        server({ environmentId: MOON, label: "Moonborn", sessions: null, canManage: false }),
+        server({ environmentId: MAC, label: "Mac mini", sessions: null, canManage: false }),
       ],
     });
 
-    expect(state(model, serverPartyId(WSL), MOON).state).toEqual({
+    expect(state(model, serverPartyId(WSL), MAC).state).toEqual({
       kind: "unknown",
-      reason: "This app cannot read the links on WSL or who uses Moonborn.",
+      reason: "This app cannot read the links on WSL or who uses Mac mini.",
     });
-    expect(state(model, serverPartyId(WSL), MOON).changes.lockedReason).toBe("Set on Moonborn");
+    expect(state(model, serverPartyId(WSL), MAC).changes.lockedReason).toBe("Set on Mac mini");
   });
 
   it("shows no path to a server nothing else can reach, except between servers sharing this computer's loopback", () => {
@@ -212,8 +212,8 @@ describe("buildReachModel", () => {
           sessions: [chrome("192.168.1.5"), chrome("192.168.1.6"), session({ subject: "browser" })],
         }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           sessions: [session({ subject: "browser", scopes: [AuthOrchestrationReadScope] })],
         }),
         server({ environmentId: VPS, label: "vps", sessions: null }),
@@ -224,8 +224,8 @@ describe("buildReachModel", () => {
     expect(devices.map((row) => row.label)).toEqual([
       "Chrome on Linux · 192.168.1.5",
       "Chrome on Linux · 192.168.1.6",
-      "Korey iPhone · Moonborn",
-      "Korey iPhone · WSL",
+      "Work phone · Mac mini",
+      "Work phone · WSL",
     ]);
     for (const device of devices) {
       const removable = model.columns.flatMap((column) => {
@@ -235,12 +235,12 @@ describe("buildReachModel", () => {
       expect(removable).toHaveLength(1);
       expect(removable[0]).toHaveLength(1);
     }
-    const phoneOnMoon = devices.find((row) => row.label === "Korey iPhone · Moonborn")!;
-    expect(state(model, phoneOnMoon.id, MOON).state).toMatchObject({ level: "read-only" });
-    expect(state(model, phoneOnMoon.id, MOON).arrivedVia).toBe("tailscale");
-    expect(state(model, phoneOnMoon.id, WSL).state.kind).toBe("none");
-    expect(state(model, phoneOnMoon.id, VPS).state.kind).toBe("unknown");
-    expect(state(model, phoneOnMoon.id, MOON).changes).toMatchObject({ canRelink: false });
+    const phoneOnMac = devices.find((row) => row.label === "Work phone · Mac mini")!;
+    expect(state(model, phoneOnMac.id, MAC).state).toMatchObject({ level: "read-only" });
+    expect(state(model, phoneOnMac.id, MAC).arrivedVia).toBe("tailscale");
+    expect(state(model, phoneOnMac.id, WSL).state.kind).toBe("none");
+    expect(state(model, phoneOnMac.id, VPS).state.kind).toBe("unknown");
+    expect(state(model, phoneOnMac.id, MAC).changes).toMatchObject({ canRelink: false });
   });
 
   it("keeps this app and link sessions out of the devices", () => {
@@ -255,14 +255,14 @@ describe("buildReachModel", () => {
               current: true,
               client: { deviceType: "desktop", label: "This PC" },
             }),
-            linkSession(MOON, "Moonborn"),
+            linkSession(MAC, "Mac mini"),
           ],
         }),
-        server({ environmentId: MOON, label: "Moonborn" }),
+        server({ environmentId: MAC, label: "Mac mini" }),
       ],
     });
 
-    expect(model.rows.map((row) => row.label)).toEqual(["WSL", "Moonborn", "This app"]);
+    expect(model.rows.map((row) => row.label)).toEqual(["WSL", "Mac mini", "This app"]);
     expect(state(model, APP_PARTY_ID, WSL).state).toMatchObject({ level: "full-access" });
     expect(deviceParties(model)).toEqual([]);
     expect(
@@ -291,11 +291,11 @@ describe("buildReachModel", () => {
           environmentId: WSL,
           label: "WSL",
           onThisComputer: true,
-          links: [link(MOON, "Moonborn")],
+          links: [link(MAC, "Mac mini")],
         }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           links: [link(WSL, "WSL")],
           canManage: false,
         }),
@@ -303,19 +303,19 @@ describe("buildReachModel", () => {
       ],
     });
 
-    const wslToMoon = state(model, serverPartyId(WSL), MOON).changes;
-    expect(wslToMoon).toMatchObject({
-      lockedReason: "Set on Moonborn",
+    const wslToMac = state(model, serverPartyId(WSL), MAC).changes;
+    expect(wslToMac).toMatchObject({
+      lockedReason: "Set on Mac mini",
       canRelink: false,
       canRemove: true,
       ownOutbound: true,
     });
     expect([...model.manageable]).toEqual([serverPartyId(WSL), serverPartyId(VPS)]);
-    const moonToWsl = state(model, serverPartyId(MOON), WSL).changes;
-    expect(moonToWsl).toMatchObject({
+    const macToWsl = state(model, serverPartyId(MAC), WSL).changes;
+    expect(macToWsl).toMatchObject({
       lockedReason: null,
       canRelink: false,
-      relinkBlockedReason: "Changing the level needs this app to manage Moonborn too",
+      relinkBlockedReason: "Changing the level needs this app to manage Mac mini too",
       ownOutbound: false,
     });
     expect(state(model, serverPartyId(WSL), VPS).changes.relinkBlockedReason).toBe(
@@ -330,16 +330,16 @@ describe("buildReachModel", () => {
         server({
           environmentId: WSL,
           label: "WSL",
-          links: [full(WINDOWS, "Windows"), full(MOON, "Moonborn")],
+          links: [full(WINDOWS, "Windows"), full(MAC, "Mac mini")],
         }),
         server({
           environmentId: WINDOWS,
           label: "Windows",
-          links: [full(WSL, "WSL"), full(MOON, "Moonborn")],
+          links: [full(WSL, "WSL"), full(MAC, "Mac mini")],
         }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           links: [full(WSL, "WSL"), link(WINDOWS, "Windows", { status: "expired" })],
         }),
       ],
@@ -354,7 +354,7 @@ describe("buildReachModel", () => {
             .join("+"),
         )
         .toSorted(),
-    ).toEqual(["Moonborn+WSL", "WSL+Windows"]);
+    ).toEqual(["Mac mini+WSL", "WSL+Windows"]);
   });
 });
 
@@ -368,7 +368,7 @@ describe("links to a server this app is not connected to", () => {
           links,
           sessions: vpsLinksIn ? [linkSession(VPS, "vps")] : [],
         }),
-        server({ environmentId: MOON, label: "Moonborn" }),
+        server({ environmentId: MAC, label: "Mac mini" }),
       ],
     });
 
@@ -376,7 +376,7 @@ describe("links to a server this app is not connected to", () => {
     const model = withLink([link(VPS, "vps", { access: "approval-required" })]);
     const vps = serverPartyId(VPS);
 
-    expect(model.columns.map((column) => column.label)).toEqual(["WSL", "Moonborn", "vps"]);
+    expect(model.columns.map((column) => column.label)).toEqual(["WSL", "Mac mini", "vps"]);
     expect(model.rows.map((row) => row.label)).not.toContain("vps");
     expect(model.unconnected).toEqual(new Set([vps]));
     expect(model.manageable.has(vps)).toBe(false);
@@ -384,7 +384,7 @@ describe("links to a server this app is not connected to", () => {
       state: { kind: "level", level: "approval-required", broken: null },
       changes: { lockedReason: "vps is not connected to this app", canRemove: true },
     });
-    for (const from of [serverPartyId(MOON), APP_PARTY_ID]) {
+    for (const from of [serverPartyId(MAC), APP_PARTY_ID]) {
       expect(state(model, from, VPS).state).toEqual({
         kind: "unknown",
         reason: "vps is not connected to this app, so it cannot read who uses it.",
@@ -405,7 +405,7 @@ describe("links to a server this app is not connected to", () => {
       kind: "blocked",
       reason: "Renewing needs a new code from vps, which this app is not connected to",
     });
-    expect(withLink([]).columns.map((column) => column.label)).toEqual(["WSL", "Moonborn"]);
+    expect(withLink([]).columns.map((column) => column.label)).toEqual(["WSL", "Mac mini"]);
   });
 
   it("never counts the link target as trusted, even when it links back in with full access", () => {
@@ -444,13 +444,13 @@ describe("arrival tags", () => {
           label: "WSL",
           links: [
             link(WINDOWS, "Windows", { urls: ["http://localhost:6925"] }),
-            link(MOON, "Moonborn", { urls: ["http://100.67.211.34:14990"] }),
+            link(MAC, "Mac mini", { urls: ["http://100.67.211.34:14990"] }),
           ],
         }),
         server({ environmentId: WINDOWS, label: "Windows" }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           sessions: [
             session({
               subject: "browser",
@@ -470,12 +470,12 @@ describe("arrival tags", () => {
       arrivedVia: "same-computer",
       arrivedFrom: "http://localhost:6925",
     });
-    expect(state(model, serverPartyId(WSL), MOON)).toMatchObject({
+    expect(state(model, serverPartyId(WSL), MAC)).toMatchObject({
       arrivedVia: "tailscale",
       arrivedFrom: "http://100.67.211.34:14990",
     });
-    expect(state(model, device("Phone"), MOON).arrivedVia).toBe("tailscale");
-    expect(state(model, device("Laptop"), MOON).arrivedVia).toBe("local-network");
+    expect(state(model, device("Phone"), MAC).arrivedVia).toBe("tailscale");
+    expect(state(model, device("Laptop"), MAC).arrivedVia).toBe("local-network");
   });
 
   // A Windows server behind Tailscale Serve stores a phone, a Mac and a WSL link all at 127.0.0.1,
@@ -498,9 +498,9 @@ describe("arrival tags", () => {
           route: "local",
           links: null,
           sessions: [
-            device("Korey Iphone", "127.0.0.1", "mobile"),
+            device("Pixel 8", "127.0.0.1", "mobile"),
             device("Chrome on Windows", "127.0.0.1", "desktop"),
-            device("Moonborn", "100.101.1.2", "desktop"),
+            device("Mac mini", "100.101.1.2", "desktop"),
             device("Laptop", "192.168.68.20", "desktop"),
             linkSession(WSL, "WSL"),
           ],
@@ -524,11 +524,11 @@ describe("arrival tags", () => {
     const row = (label: string) => model.rows.find((candidate) => candidate.label === label)!.id;
     const tag = (from: string, to: EnvironmentId) => state(model, from, to).arrivedVia;
 
-    expect(tag(row("Korey Iphone"), WINDOWS)).toBeNull();
+    expect(tag(row("Pixel 8"), WINDOWS)).toBeNull();
     expect(tag(row("Chrome on Windows"), WINDOWS)).toBeNull();
     expect(tag(row("Tailnet: iphone171"), WSL)).toBeNull();
     expect(describeDevice(tailnetPaired, 0)).toMatch(/^admitted automatically over Tailscale · /);
-    expect(tag(row("Moonborn"), WINDOWS)).toBe("tailscale");
+    expect(tag(row("Mac mini"), WINDOWS)).toBe("tailscale");
     expect(tag(row("Laptop"), WINDOWS)).toBe("local-network");
     expect(tag(serverPartyId(WSL), WINDOWS)).toBe("same-computer");
     expect(tag(serverPartyId(WINDOWS), VPS)).toBeNull();
@@ -540,25 +540,25 @@ describe("an unreachable server", () => {
   it("keeps its last known lines but offers no changes and says it is not answering", () => {
     const model = buildReachModel({
       servers: [
-        server({ environmentId: WSL, label: "WSL", links: [link(MOON, "Moonborn")] }),
+        server({ environmentId: WSL, label: "WSL", links: [link(MAC, "Mac mini")] }),
         server({
-          environmentId: MOON,
-          label: "Moonborn",
+          environmentId: MAC,
+          label: "Mac mini",
           appScopes: null,
           sessions: [linkSession(WSL, "WSL"), session({ subject: "browser" })],
         }),
       ],
     });
 
-    const intoMoon = state(model, serverPartyId(WSL), MOON);
+    const intoMoon = state(model, serverPartyId(WSL), MAC);
     expect(intoMoon.state).toMatchObject({ level: "full-access" });
     expect(intoMoon.changes).toMatchObject({
-      lockedReason: "Moonborn is not answering",
+      lockedReason: "Mac mini is not answering",
       canRelink: false,
     });
-    const phone = model.rows.find((row) => row.label === "Korey iPhone")!;
-    expect(state(model, phone.id, MOON).changes.canRemove).toBe(false);
-    expect(model.manageable.has(serverPartyId(MOON))).toBe(false);
+    const phone = model.rows.find((row) => row.label === "Work phone")!;
+    expect(state(model, phone.id, MAC).changes.canRemove).toBe(false);
+    expect(model.manageable.has(serverPartyId(MAC))).toBe(false);
   });
 });
 
@@ -579,7 +579,7 @@ describe("describeDevice", () => {
       "a Mac paired by link",
       session({
         subject: "one-time-token",
-        client: { deviceType: "desktop", os: "macOS", browser: "Electron", label: "Moonborn" },
+        client: { deviceType: "desktop", os: "macOS", browser: "Electron", label: "Mac mini" },
       }),
       "paired by link or code · desktop app on macOS · connected now",
     ],
@@ -635,17 +635,17 @@ describe("planSquareChange", () => {
         environmentId: WSL,
         label: "WSL",
         onThisComputer: true,
-        links: [link(MOON, "Moonborn", { access: "approval-required" })],
+        links: [link(MAC, "Mac mini", { access: "approval-required" })],
       }),
       server({
-        environmentId: MOON,
-        label: "Moonborn",
+        environmentId: MAC,
+        label: "Mac mini",
         links: [link(WSL, "WSL", { access: "full-access", status: "expired" })],
       }),
     ],
   });
-  const outbound = state(model, serverPartyId(WSL), MOON);
-  const inbound = state(model, serverPartyId(MOON), WSL);
+  const outbound = state(model, serverPartyId(WSL), MAC);
+  const inbound = state(model, serverPartyId(MAC), WSL);
 
   it("previews a raise before it happens", () => {
     expect(planSquareChange(outbound, "full-access")).toEqual({
@@ -653,7 +653,7 @@ describe("planSquareChange", () => {
       action: "relink",
       target: "full-access",
       sentence:
-        "WSL gets Full access on Moonborn. Moonborn issues a new code and WSL links again with it.",
+        "WSL gets Full access on Mac mini. Mac mini issues a new code and WSL links again with it.",
     });
   });
 
@@ -661,13 +661,13 @@ describe("planSquareChange", () => {
     expect(planSquareChange(outbound, "read-only")).toMatchObject({
       kind: "confirm",
       sentence:
-        "WSL drops to View only on Moonborn. Getting it back needs approval on Moonborn, or SSH.",
+        "WSL drops to View only on Mac mini. Getting it back needs approval on Mac mini, or SSH.",
     });
     expect(planSquareChange(outbound, "none")).toMatchObject({
       kind: "confirm",
       action: "remove",
       sentence:
-        "WSL gives up its access to Moonborn. Getting it back needs approval on Moonborn, or SSH.",
+        "WSL gives up its access to Mac mini. Getting it back needs approval on Mac mini, or SSH.",
     });
   });
 

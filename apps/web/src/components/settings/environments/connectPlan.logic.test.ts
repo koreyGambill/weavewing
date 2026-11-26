@@ -13,7 +13,7 @@ import { deviceScopes, joinsTrusted, planConnect } from "./connectPlan.logic";
 import { buildReachModel, type ReachServerInput, serverPartyId } from "./reachModel.logic";
 
 const WSL = EnvironmentId.make("plan-wsl");
-const MOON = EnvironmentId.make("plan-moon");
+const MAC = EnvironmentId.make("plan-mac");
 const RIG = EnvironmentId.make("plan-rig");
 const BOX = EnvironmentId.make("plan-box");
 
@@ -48,7 +48,7 @@ const fullLink = (to: EnvironmentId, label: string): PeerLinkSummary => ({
 const model = buildReachModel({
   servers: [
     server({ environmentId: WSL, label: "WSL", links: [] }),
-    server({ environmentId: MOON, label: "Moonborn", canManage: false }),
+    server({ environmentId: MAC, label: "Mac mini", canManage: false }),
     server({ environmentId: BOX, label: "build-box", route: "ssh", reachableFromOthers: false }),
     server({ environmentId: RIG, label: "gpu-rig", links: [fullLink(WSL, "WSL")] }),
   ],
@@ -59,7 +59,7 @@ const party = (id: EnvironmentId) =>
 describe("planConnect", () => {
   it("makes one line per direction, skips what already holds, and says why a line cannot be made", () => {
     const lines = planConnect(model, party(RIG), {
-      uses: [party(WSL), party(MOON), party(BOX)],
+      uses: [party(WSL), party(MAC), party(BOX)],
       usesLevel: "full-access",
       usedBy: [party(WSL)],
       usedByLevel: "full-access",
@@ -68,7 +68,7 @@ describe("planConnect", () => {
     expect(
       lines.map((line) => [line.square.from.label, line.square.to.label, line.blocked]),
     ).toEqual([
-      ["gpu-rig", "Moonborn", "Set on Moonborn"],
+      ["gpu-rig", "Mac mini", "Set on Mac mini"],
       ["gpu-rig", "build-box", "No path: build-box has no address gpu-rig can reach"],
       ["WSL", "gpu-rig", null],
     ]);

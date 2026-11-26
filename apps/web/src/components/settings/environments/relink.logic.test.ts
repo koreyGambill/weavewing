@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { runRelink, settleUncertain } from "./relink.logic";
 
-const base = { from: "WSL", to: "Moonborn", current: "Full access", hasAddress: true };
+const base = { from: "WSL", to: "Mac mini", current: "Full access", hasAddress: true };
 
 describe("runRelink", () => {
   it("says nothing changed and the old level still holds when the code cannot be minted", async () => {
@@ -17,7 +17,7 @@ describe("runRelink", () => {
     expect(outcome).toEqual({
       kind: "unchanged",
       message:
-        "Could not get a code from Moonborn: Not allowed. Nothing changed; WSL still has Full access there.",
+        "Could not get a code from Mac mini: Not allowed. Nothing changed; WSL still has Full access there.",
     });
   });
 
@@ -31,7 +31,7 @@ describe("runRelink", () => {
     expect(outcome).toEqual({
       kind: "uncertain",
       message:
-        "Moonborn issued a code, but WSL could not save the link: Disk full. Moonborn may already have ended the old link, so WSL's access there is uncertain.",
+        "Mac mini issued a code, but WSL could not save the link: Disk full. Mac mini may already have ended the old link, so WSL's access there is uncertain.",
     });
     expect(outcome.kind === "uncertain" && outcome.message).not.toContain("still applies");
   });
@@ -70,15 +70,15 @@ describe("runRelink", () => {
     const states: Array<ReadonlyMap<string, "full-access">> = [];
     let uncertain: ReadonlyMap<string, "full-access"> = new Map();
     for (const outcome of outcomes) {
-      uncertain = settleUncertain(uncertain, "WSL>Moonborn", outcome.kind, "full-access");
+      uncertain = settleUncertain(uncertain, "WSL>Mac mini", outcome.kind, "full-access");
       states.push(uncertain);
     }
 
-    expect(states.map((state) => state.has("WSL>Moonborn"))).toEqual([true, true, false]);
+    expect(states.map((state) => state.has("WSL>Mac mini"))).toEqual([true, true, false]);
     expect(outcomes[1]).toEqual({
       kind: "unchanged",
       message:
-        "Could not get a code from Moonborn: Not allowed. Nothing changed, so WSL's access there is still uncertain.",
+        "Could not get a code from Mac mini: Not allowed. Nothing changed, so WSL's access there is still uncertain.",
     });
   });
 });
