@@ -162,17 +162,26 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
   );
 }
 
-const threadTitlesAtomFamily = Atom.family((keys: string) =>
-  Atom.make((get) => {
+const threadTitlesAtomFamily = Atom.family((keys: string) => {
+  let previous: ReadonlyMap<string, string> = new Map();
+  return Atom.make((get) => {
     const titles = new Map<string, string>();
     for (const key of keys ? keys.split("\n") : []) {
       const ref = parseScopedThreadKey(key);
       const title = ref ? get(environmentThreadShells.quietThreadShellAtom(ref))?.title : null;
       if (title) titles.set(key, title);
     }
+    // Keeps one map while the titles are unchanged, so readers do not re-render.
+    if (
+      titles.size === previous.size &&
+      [...titles].every(([key, title]) => previous.get(key) === title)
+    ) {
+      return previous;
+    }
+    previous = titles;
     return titles;
-  }),
-);
+  });
+});
 
 /** Titles of the listed threads by thread key, from shells the client already holds. */
 export function useThreadTitles(refs: ReadonlyArray<ScopedThreadRef>): ReadonlyMap<string, string> {
