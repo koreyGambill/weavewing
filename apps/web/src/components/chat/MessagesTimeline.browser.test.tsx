@@ -1877,11 +1877,24 @@ describe("MessagesTimeline sent references", () => {
     expect(match?.range.getBoundingClientRect().height).toBeGreaterThan(0);
   });
 
-  it("scrolls to and marks an answer whose message is outside the rendered window", async () => {
+  it("scrolls to and marks an answer deep in a message outside the rendered window", async () => {
     setup();
     const threadKey = `environment-local:thread-reveal-${Math.random().toString(36).slice(2)}`;
     const filler = Array.from({ length: 80 }, (_, index) =>
       message(`Filler message ${index}\n\n${"More text. ".repeat(40)}`, {}, `filler-${index}`),
+    );
+    // Eight long answers put the last one well below the top of its message.
+    const answers = Array.from({ length: 8 }, (_, index) => ({
+      ...answer,
+      contextId: ComposerContextId.make(`answer_q${index + 1}`),
+      label: `Q${index + 1}`,
+      questionId: `Q${index + 1}`,
+      note: `Answer ${index + 1}. ${"This note explains the choice in detail. ".repeat(14)}`,
+    }));
+    const longAnswers = message(
+      `Answers ${answers.map(formatComposerContextReference).join(" ")}`,
+      { context: { version: 1, records: answers } },
+      "answered",
     );
     const props = { ...baseProps(), routeThreadKey: threadKey };
     // Without motion the list jumps straight to the row instead of animating there.
@@ -1894,14 +1907,14 @@ describe("MessagesTimeline sent references", () => {
         // The first and last rows always stay mounted, so the answer sits between fillers.
         <MessagesTimeline
           {...props}
-          timelineEntries={[...filler.slice(0, 20), sentMessage("answered"), ...filler.slice(20)]}
+          timelineEntries={[...filler.slice(0, 20), longAnswers, ...filler.slice(20)]}
         />,
       );
-      const target = questionReferenceElementId("answered", "Q1");
+      const target = questionReferenceElementId("answered", "Q8");
       const viewport = props.listRef.current!.getScrollableNode()!;
       await vi.waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(0));
       await vi.waitFor(() => expect(document.getElementById(target)).toBeNull());
-      revealQuestionReference(parseScopedThreadKey(threadKey)!, "Q1", "answered");
+      revealQuestionReference(parseScopedThreadKey(threadKey)!, "Q8", "answered");
       await vi.waitFor(() => {
         const block = document.getElementById(target);
         expect(block?.hasAttribute("data-marked")).toBe(true);

@@ -624,7 +624,7 @@ function UserTimelineRow({
             if (preview) onImageExpand(preview);
           }}
         />
-        <span className="ms-0.5 inline-flex align-middle">
+        <span className="-my-1 ms-0.5 inline-flex align-middle">
           <SentContextExpandToggle contextId={reference.contextId} />
         </span>
       </span>

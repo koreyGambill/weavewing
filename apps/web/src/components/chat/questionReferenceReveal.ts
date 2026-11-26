@@ -1,5 +1,6 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { LegendListRef } from "@legendapp/list/react";
 import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
 
 import { toastManager } from "../ui/toast";
@@ -20,8 +21,11 @@ let marked: string | null = null;
 let markTimer: ReturnType<typeof setTimeout> | undefined;
 const markListeners = new Set<() => void>();
 
-function mark(elementId: string | null) {
-  marked = elementId;
+// One thread's ids can repeat in another environment or an inherited view, so the mark is scoped.
+const markKey = (threadKey: string, elementId: string) => `${threadKey}\u0000${elementId}`;
+
+function mark(key: string | null) {
+  marked = key;
   for (const listener of markListeners) listener();
 }
 
@@ -30,17 +34,45 @@ function subscribeMark(listener: () => void) {
   return () => markListeners.delete(listener);
 }
 
-/**
- * True while `revealQuestionReference` marks this block. The block scrolls itself into view
- * when it mounts marked, because its row may have just been scrolled in from outside the list.
- */
-export function useQuestionReferenceMark(messageId: string, questionId: string): boolean {
-  const elementId = questionReferenceElementId(messageId, questionId);
+/** True while `revealQuestionReference` marks this block in the thread `threadRef`. */
+export function useQuestionReferenceMark(
+  threadRef: ScopedThreadRef | null,
+  messageId: string,
+  questionId: string,
+): boolean {
+  const key =
+    threadRef === null
+      ? null
+      : markKey(scopedThreadKey(threadRef), questionReferenceElementId(messageId, questionId));
   return useSyncExternalStore(
     subscribeMark,
-    () => marked === elementId,
+    () => key !== null && marked === key,
     () => false,
   );
+}
+
+/**
+ * After the timeline scrolled a message row into view, brings its answer block into view too
+ * when the row is taller than the viewport left room for. Does nothing for a block already shown.
+ */
+export function scrollQuestionReferenceIntoRow(
+  list: LegendListRef | null,
+  target: QuestionReferenceTarget,
+  topOffset: number,
+) {
+  const scroller = list?.getScrollableNode();
+  const block = scroller?.querySelector(
+    `[id="${CSS.escape(questionReferenceElementId(target.messageId, target.questionId))}"]`,
+  );
+  const scroll = list?.getState?.().scroll;
+  if (!list || !scroller || !block || typeof scroll !== "number") return;
+  const view = scroller.getBoundingClientRect();
+  const rect = block.getBoundingClientRect();
+  if (rect.top >= view.top && rect.bottom <= view.bottom) return;
+  void list.scrollToOffset({
+    offset: scroll + rect.top - view.top - topOffset,
+    animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  });
 }
 
 /**
@@ -58,7 +90,7 @@ export function revealQuestionReference(
   const threadKey = scopedThreadKey(threadRef);
   const target = { questionId, messageId };
   clearTimeout(markTimer);
-  mark(questionReferenceElementId(messageId, questionId));
+  mark(markKey(threadKey, questionReferenceElementId(messageId, questionId)));
   markTimer = setTimeout(() => mark(null), MARK_DURATION_MS);
   const current = listeners.get(threadKey);
   if (current === undefined || current.size === 0) {

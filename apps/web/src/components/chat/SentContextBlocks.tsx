@@ -32,7 +32,7 @@ interface SentContextExpansion {
   readonly blocks: readonly SentContextBlock[];
   readonly expanded: ReadonlySet<string>;
   readonly panelIdPrefix: string;
-  readonly setExpanded: (contextId: string, open: boolean) => void;
+  readonly setExpanded: (contextIds: ReadonlyArray<string>, open: boolean) => void;
 }
 
 const SentContextExpansionCtx = createContext<SentContextExpansion | null>(null);
@@ -68,11 +68,13 @@ export function SentContextExpansionProvider(props: {
     blocks: props.blocks,
     expanded: open,
     panelIdPrefix,
-    setExpanded: (contextId, next) =>
+    setExpanded: (contextIds, next) =>
       setState((current) => {
         const ids = new Set(current.messageId === props.messageId ? current.open : []);
-        if (next) ids.add(contextId);
-        else ids.delete(contextId);
+        for (const contextId of contextIds) {
+          if (next) ids.add(contextId);
+          else ids.delete(contextId);
+        }
         return { messageId: props.messageId, open: ids };
       }),
   };
@@ -96,13 +98,15 @@ export function SentContextExpandToggle(props: { contextId: string }) {
       <TooltipTrigger
         render={
           <Button
-            size="icon-micro"
+            size="icon-xs"
             variant="ghost-muted"
             aria-label={action}
             aria-expanded={open}
             aria-controls={open ? panelId(expansion, block.contextId) : undefined}
             data-scroll-anchor-ignore
-            onClick={() => expansion.setExpanded(block.contextId, !open)}
+            onClick={() => {
+              expansion.setExpanded([block.contextId], !open);
+            }}
           />
         }
       >
@@ -185,7 +189,7 @@ function AnswerBlock({ block, messageId }: { block: SentContextBlock; messageId:
   const record = block.record.kind === "artifact-answer" ? block.record : null;
   const mode = threadQuestionReferenceMode(block.record);
   const questionId = record && mode !== null ? record.questionId : null;
-  const marked = useQuestionReferenceMark(messageId, questionId ?? "");
+  const marked = useQuestionReferenceMark(ctx.threadRef, messageId, questionId ?? "");
   if (!record) return null;
   const threadRef = ctx.threadRef;
   const canShowQuestion =
@@ -241,7 +245,7 @@ function ReferencePanel(props: {
 }) {
   const { block, expansion, findActive } = props;
   const open = expansion.expanded.has(block.contextId);
-  const revealRef = findRevealRef(() => expansion.setExpanded(block.contextId, true));
+  const revealRef = findRevealRef(() => expansion.setExpanded([block.contextId], true));
   // Collapsed panels mount only while find is open, as hidden text find can reveal.
   if (!open && !findActive) return null;
   return (
@@ -292,7 +296,10 @@ export function SentContextBlocks() {
             aria-expanded={allOpen}
             data-scroll-anchor-ignore
             onClick={() => {
-              for (const block of expandable) expansion.setExpanded(block.contextId, !allOpen);
+              expansion.setExpanded(
+                expandable.map((block) => block.contextId),
+                !allOpen,
+              );
             }}
           >
             {allOpen ? "Collapse all" : "Expand all"}

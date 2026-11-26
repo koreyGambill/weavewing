@@ -119,7 +119,10 @@ import { BookmarkRail } from "./BookmarkRail";
 import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTimelineRow";
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
-import { useQuestionReferenceReveal } from "./questionReferenceReveal";
+import {
+  scrollQuestionReferenceIntoRow,
+  useQuestionReferenceReveal,
+} from "./questionReferenceReveal";
 import { orderBookmarks } from "../reviews/bookmarks.logic";
 import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
 import {
@@ -931,14 +934,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
-  const revealRow = (index: number) => {
+  const revealRow = (index: number, afterScroll?: () => void) => {
     if (index < 0) return false;
     navigateTimeline();
-    void listRef.current?.scrollToIndex({
-      index,
-      animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-      viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
-    });
+    void listRef.current
+      ?.scrollToIndex({
+        index,
+        animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
+      })
+      .then(afterScroll);
     return true;
   };
   useQuestionReveal(routeThreadKey, rows.length, (questionId) =>
@@ -948,8 +953,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ),
     ),
   );
-  useQuestionReferenceReveal(routeThreadKey, rows.length, ({ messageId }) =>
-    revealRow(rows.findIndex((row) => row.kind === "message" && row.message.id === messageId)),
+  useQuestionReferenceReveal(routeThreadKey, rows.length, (target) =>
+    revealRow(
+      rows.findIndex((row) => row.kind === "message" && row.message.id === target.messageId),
+      () =>
+        scrollQuestionReferenceIntoRow(listRef.current, target, TIMELINE_MINIMAP_TARGET_OFFSET),
+    ),
   );
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
