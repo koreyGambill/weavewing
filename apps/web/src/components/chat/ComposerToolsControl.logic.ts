@@ -30,16 +30,6 @@ export function claudeSettingsForInstance(
   }
 }
 
-const POPOVER_DESCRIPTIONS: Record<ClaudeRemovableBuiltinTool, string> = {
-  Artifact: "Publish claude.ai artifact pages",
-  ArtifactData: "A published artifact's shared database",
-  ArtifactComments: "Comments on published artifacts",
-  Task: "Claude's own subagents",
-  Workflow: "Scripted multi-agent runs",
-  ScheduleWakeup: "Let Claude wake itself later",
-  ReportFindings: "Structured review findings",
-};
-
 export type ToolRowKey = ClaudeRemovableBuiltinTool;
 
 export interface ToolRow {
@@ -60,7 +50,7 @@ export function toolRows(
     .map((tool) => ({
       key: tool.value,
       label: tool.label,
-      description: POPOVER_DESCRIPTIONS[tool.value],
+      description: tool.description,
       estimatedTokens: tool.estimatedTokens,
     }))
     .toSorted((left, right) => right.estimatedTokens - left.estimatedTokens);

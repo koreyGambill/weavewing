@@ -51,6 +51,8 @@ export interface ProviderSettingsFieldModel {
   readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
   /** What a checklist's schema decodes when nothing is saved, shown until the user saves a list. */
   readonly defaultSelection?: ReadonlyArray<string> | undefined;
+  /** Which options a checklist's stored list holds: the ticked ones, or the unticked ones. */
+  readonly checklistStores?: "checked" | "unchecked" | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -174,7 +176,10 @@ export function deriveProviderSettingsFields(
             ? { presets: formAnnotation.presets }
             : {}),
           ...(formAnnotation.control === "checklist"
-            ? { defaultSelection: readFieldStringsDefault(fieldSchema) }
+            ? {
+                defaultSelection: readFieldStringsDefault(fieldSchema),
+                checklistStores: formAnnotation.checklistStores ?? "checked",
+              }
             : {}),
         } satisfies ProviderSettingsFieldModel,
       ];
@@ -321,7 +326,7 @@ function readProviderConfigString(config: unknown, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/** The checklist's effective selection: the saved list, or the schema default when none is saved. */
+/** The checklist's stored list: the saved list, or the schema default when none is saved. */
 export function readChecklistSelection(
   config: unknown,
   field: ProviderSettingsFieldModel,
@@ -333,6 +338,32 @@ export function readChecklistSelection(
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : (field.defaultSelection ?? []);
+}
+
+/** Whether an option shows ticked: in the stored list, or out of it when the list holds unticked ones. */
+export function checklistOptionChecked(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+  option: string,
+): boolean {
+  const stored = readChecklistSelection(config, field).includes(option);
+  return field.checklistStores === "unchecked" ? !stored : stored;
+}
+
+/** Ticks or unticks one option, adding it to or removing it from the stored list to match. */
+export function nextProviderConfigWithChecklistOption(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+  option: string,
+  checked: boolean,
+): Record<string, unknown> | undefined {
+  const stored = readChecklistSelection(config, field);
+  const inStored = field.checklistStores === "unchecked" ? !checked : checked;
+  return nextProviderConfigWithChecklist(
+    config,
+    field,
+    inStored ? [...stored, option] : stored.filter((item) => item !== option),
+  );
 }
 
 /** Keeps the field's option order, so a saved list does not depend on click order. */
@@ -404,34 +435,28 @@ function ProviderSettingsChecklist({
   readonly disabled: boolean;
   readonly onChange: ProviderSettingsFormProps["onChange"];
 }) {
-  const selected = readChecklistSelection(value, field);
   return (
     <ul className="mt-3 grid gap-2 pb-2" aria-label={field.label}>
       {(field.options ?? []).map((option) => {
         const optionId = `${inputId}-${option.value}`;
-        const checked = selected.includes(option.value);
+        const describedBy = [
+          option.description ? `${optionId}-description` : null,
+          option.estimatedTokens === undefined ? null : `${optionId}-tokens`,
+        ].filter((id) => id !== null);
         return (
           <li key={option.value} className="flex min-w-0 items-start gap-2">
             <Checkbox
               id={optionId}
               className="mt-0.5"
-              checked={checked}
+              checked={checklistOptionChecked(value, field, option.value)}
               disabled={disabled}
               aria-labelledby={`${optionId}-label`}
-              aria-describedby={option.description ? `${optionId}-description` : undefined}
+              aria-describedby={describedBy.length > 0 ? describedBy.join(" ") : undefined}
               onCheckedChange={(next) =>
-                onChange(
-                  nextProviderConfigWithChecklist(
-                    value,
-                    field,
-                    next
-                      ? [...selected, option.value]
-                      : selected.filter((item) => item !== option.value),
-                  ),
-                )
+                onChange(nextProviderConfigWithChecklistOption(value, field, option.value, next))
               }
             />
-            <label htmlFor={optionId} className="min-w-0 text-xs">
+            <label htmlFor={optionId} className="min-w-0 flex-1 text-xs">
               <span id={`${optionId}-label`} className="font-medium text-foreground">
                 {option.label}
               </span>
@@ -441,6 +466,14 @@ function ProviderSettingsChecklist({
                 </span>
               ) : null}
             </label>
+            {option.estimatedTokens === undefined ? null : (
+              <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+                <span aria-hidden="true">~{option.estimatedTokens.toLocaleString("en-US")}</span>
+                <span id={`${optionId}-tokens`} className="sr-only">
+                  About {option.estimatedTokens.toLocaleString("en-US")} tokens, an estimate
+                </span>
+              </span>
+            )}
           </li>
         );
       })}
@@ -459,7 +492,6 @@ function ProviderSettingsChecklistActions({
   readonly disabled: boolean;
   readonly onChange: ProviderSettingsFormProps["onChange"];
 }) {
-  const selected = readChecklistSelection(value, field);
   // An action that is already applied stays focusable: disabling the button the keyboard just
   // used would drop focus out of the checklist.
   return (
@@ -482,18 +514,6 @@ function ProviderSettingsChecklistActions({
           </Button>
         );
       })}
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        disabled={disabled}
-        aria-disabled={selected.length === 0 || undefined}
-        onClick={() => {
-          if (selected.length > 0) onChange(nextProviderConfigWithChecklist(value, field, []));
-        }}
-      >
-        Clear
-      </Button>
     </div>
   );
 }

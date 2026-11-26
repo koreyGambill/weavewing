@@ -738,10 +738,12 @@ export interface ProviderSettingsFormOption {
   readonly label: string;
   /** Shown under the option in a checklist. */
   readonly description?: string | undefined;
+  /** An estimate of the context the option adds, shown beside it in a checklist. */
+  readonly estimatedTokens?: number | undefined;
 }
 
 /**
- * A checklist button that replaces the selection with `values`, or removes the saved value so the
+ * A checklist button that replaces the stored list with `values`, or removes the saved value so the
  * field follows its schema default.
  */
 export type ProviderSettingsFormPreset =
@@ -756,6 +758,8 @@ export interface ProviderSettingsFormAnnotation {
 
   readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
   readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
+  /** Which options a checklist's stored list holds; `unchecked` ticks every option not in it. */
+  readonly checklistStores?: "checked" | "unchecked" | undefined;
 }
 
 export function secretSettingsFields(schema: {
@@ -999,23 +1003,26 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     omittedBuiltinTools: OmittedBuiltinTools.pipe(
       Schema.withDecodingDefault(Effect.succeed(CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS)),
       Schema.annotateKey({
-        title: "Built-in tools to leave out",
+        title: "Built-in tools",
         description:
-          "Saves context tokens. Recommended, the default, removes all seven, artifact tools included; tick fewer or choose Keep artifact tools to let Claude publish claude.ai artifact pages. Applies when a thread's Claude process next starts.",
+          "Claude has the ticked tools. Unticked tools are left out of Claude's context to save tokens; the figures are estimates. Recommended, the default, leaves out all seven. Applies when a thread's Claude process next starts.",
         providerSettingsForm: {
           control: "checklist",
           options: CLAUDE_REMOVABLE_BUILTIN_TOOLS,
-          // Clear saves an empty list, which keeps every tool instead of restoring the default.
+          // The stored list is the tools left out, so ticking a box removes it from the list.
+          checklistStores: "unchecked",
+          // All tools saves an empty list, which keeps every tool instead of restoring the default.
           clearWhenEmpty: "persist",
           presets: [
             // Removing the saved list keeps the install on future changes to the default.
             { label: "Recommended", resetToDefault: true },
             {
-              label: "Keep artifact tools",
+              label: "Artifact tools only",
               values: CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS.filter(
                 (tool) => !CLAUDE_ARTIFACT_BUILTIN_TOOLS.includes(tool),
               ),
             },
+            { label: "All tools", values: [] },
           ],
         },
       }),

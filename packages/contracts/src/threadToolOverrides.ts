@@ -3,53 +3,52 @@ import * as Schema from "effect/Schema";
 
 /**
  * Claude Code built-in tools a user may leave out of the sessions T3 starts. ToolSearch and Skill
- * are never offered: removing either loads more context than it saves. `estimatedTokens` is a
- * measured estimate of the context each tool adds, not an exact figure.
+ * are never offered: removing either loads more context than it saves. `description` says what the
+ * tool lets Claude do. `estimatedTokens` is a measured estimate of the context each tool adds, not
+ * an exact figure.
  */
 export const CLAUDE_REMOVABLE_BUILTIN_TOOLS = [
   {
     value: "Artifact",
     estimatedTokens: 12_900,
     label: "Artifact",
-    description: "Claude cannot publish claude.ai artifact pages; T3's artifact_write still works.",
+    description: "Publish claude.ai artifact pages",
   },
   {
     value: "ArtifactData",
     estimatedTokens: 500,
     label: "ArtifactData",
-    description: "Claude cannot read or write a published artifact's shared database.",
+    description: "Read and write a published artifact's shared database",
   },
   {
     value: "ArtifactComments",
     estimatedTokens: 70,
     label: "ArtifactComments",
-    description: "Claude cannot read or answer comments on published artifacts.",
+    description: "Read and answer comments on published artifacts",
   },
   {
     value: "Task",
     estimatedTokens: 3_300,
     label: "Task (Agent)",
-    description:
-      "No native subagents; skills that fan out through them must use delegate_task instead.",
+    description: "Run Claude's own subagents",
   },
   {
     value: "Workflow",
     estimatedTokens: 2_100,
     label: "Workflow",
-    description:
-      "Claude cannot run multi-agent workflow scripts; skills that use them must delegate instead.",
+    description: "Run scripted multi-agent workflows",
   },
   {
     value: "ScheduleWakeup",
     estimatedTokens: 1_700,
     label: "ScheduleWakeup",
-    description: "/loop without an interval cannot pace itself; /loop with an interval still runs.",
+    description: "Let Claude wake itself later",
   },
   {
     value: "ReportFindings",
     estimatedTokens: 900,
     label: "ReportFindings",
-    description: "/code-review reports its findings as text instead of a typed list.",
+    description: "Report review findings as a typed list",
   },
 ] as const satisfies ReadonlyArray<{
   readonly value: string;

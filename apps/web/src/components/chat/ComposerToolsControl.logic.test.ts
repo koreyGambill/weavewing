@@ -1,4 +1,8 @@
-import { ProviderInstanceId, type ThreadToolOverrides } from "@t3tools/contracts";
+import {
+  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
+  ProviderInstanceId,
+  type ThreadToolOverrides,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -91,6 +95,14 @@ describe("toolRows", () => {
       ["ArtifactData", 500],
       ["ArtifactComments", 70],
     ]);
+  });
+
+  it("describes each tool with the settings checklist's wording", () => {
+    const settings = new Map(CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => [tool.value, tool]));
+    for (const row of toolRows(connectorsOff)) {
+      expect(row.description).toBe(settings.get(row.key)?.description);
+    }
+    expect(toolRows(connectorsOff)[0]?.description).toBe("Publish claude.ai artifact pages");
   });
 });
 
