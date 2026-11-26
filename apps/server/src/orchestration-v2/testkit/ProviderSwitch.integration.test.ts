@@ -6537,5 +6537,28 @@ describe("orchestration v2 provider switching", () => {
           );
         }),
     );
+
+    it.live("refuses a reply with no later conversation before asking for a summary", () =>
+      withRewindSummaryHarness("rewind-summary-refused", {}, ({ capturedTurns, workspaceFile }) =>
+        Effect.gen(function* () {
+          const threads = yield* ThreadManagementService.ThreadManagementService;
+          const { before, laterReply } = yield* setUpThread(workspaceFile);
+
+          const error = yield* threads
+            .rewindWithSummary({
+              threadId: root,
+              runId: before.runs[1]!.id,
+              replyMessageId: laterReply.messageId,
+              createdBy: "user",
+              creationSource: "web",
+            })
+            .pipe(Effect.flip);
+
+          assert.equal(error.reason, "refused");
+          assert.equal(error.message, "There is no later conversation to move.");
+          assert.lengthOf(yield* Ref.get(capturedTurns), 2);
+        }),
+      ),
+    );
   });
 });
