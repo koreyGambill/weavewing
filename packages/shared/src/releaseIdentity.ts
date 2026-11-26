@@ -1,6 +1,16 @@
 export const RELEASE_REPOSITORY = "koreyGambill/weavewing";
 export const RELEASE_TAG_PREFIX = "weavewing-v";
+/**
+ * The desktop app id on Windows and Linux. Windows derives the NSIS install and uninstall
+ * registry GUID and the AppUserModelID of shortcuts and windows from it, so a new value installs
+ * a second copy beside existing installs instead of upgrading them.
+ */
 export const DESKTOP_APP_ID = "dev.weavewing.desktop";
+/**
+ * The macOS bundle identifier. Developer ID signing, provisioning profiles and Squirrel.Mac
+ * update matching bind to it, so it must not change once a signed build ships.
+ */
+export const MACOS_BUNDLE_ID = "dev.wingstack.weavewing.desktop";
 
 /** The GitHub tag for a Weavewing release version. */
 export function releaseTag(version: string): string {

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>dev.weavewing.desktop</id>
+  <id>dev.wingstack.weavewing.desktop</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Weavewing</name>
   <summary>Desktop GUI for coding agents</summary>
-  <developer id="dev.weavewing">
+  <developer id="dev.wingstack">
     <name>Weavewing</name>
   </developer>
   <description>

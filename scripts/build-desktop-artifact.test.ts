@@ -31,6 +31,7 @@ import {
   readWorkspaceConfig,
   createBuildConfig,
   DESKTOP_FILE_EXCLUSIONS,
+  DESKTOP_PACKAGE_METADATA,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
   UnsupportedDesktopBuildArchitectureError,
@@ -602,7 +603,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           signed ? { entitlementsPath: "/stage/app/entitlements.mac.plist" } : undefined,
         );
         const mac = config.mac as Record<string, unknown>;
-        assert.equal(config.appId, "dev.weavewing.desktop");
+        assert.equal(config.appId, "dev.wingstack.weavewing.desktop");
         assert.notProperty(mac, "provisioningProfile");
         assert.equal(mac.entitlements, signed ? "/stage/app/entitlements.mac.plist" : undefined);
         assert.equal(typeof mac.sign, signed ? "string" : "undefined");
@@ -641,6 +642,30 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
+  it.effect("installs AppStream metadata whose file name matches its component id", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const linux = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.1.0",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const fpm = (linux.deb as { fpm: string[] }).fpm;
+      const metainfo = fpm.find((entry) => entry.includes("/usr/share/metainfo/"));
+      assert.isDefined(metainfo);
+      const [source = "", destination = ""] = metainfo.split("=");
+      const id = (yield* fs.readFileString(source)).match(/<id>([^<]+)<\/id>/u)?.[1];
+
+      assert.equal(id, "dev.wingstack.weavewing.desktop");
+      assert.equal(path.basename(destination), `${id}.metainfo.xml`);
+    }),
+  );
+
   it.effect("names the Electron window class in the Linux desktop entry", () =>
     Effect.gen(function* () {
       const linux = yield* createBuildConfig(
@@ -678,6 +703,69 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
     ),
   );
+
+  it.effect("keeps the Windows app id that existing installs upgrade from", () =>
+    Effect.gen(function* () {
+      for (const version of ["0.1.0", "0.1.1-nightly.20261019.1"]) {
+        const config = yield* createBuildConfig(
+          "win",
+          "nsis",
+          version,
+          false,
+          false,
+          undefined,
+          undefined,
+        );
+        assert.equal(config.appId, "dev.weavewing.desktop");
+      }
+    }),
+  );
+
+  it.effect("shares one macOS bundle id between Stable and Nightly", () =>
+    Effect.gen(function* () {
+      for (const version of ["0.1.0", "0.1.1-nightly.20261019.1"]) {
+        const config = yield* createBuildConfig(
+          "mac",
+          "dmg",
+          version,
+          false,
+          false,
+          undefined,
+          undefined,
+        );
+        assert.equal(config.appId, "dev.wingstack.weavewing.desktop");
+      }
+    }),
+  );
+
+  it.effect("names Weavewing in every macOS permission prompt", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.1.0",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const extendInfo = (config.mac as { extendInfo: Record<string, unknown> }).extendInfo;
+      const prompts = Object.entries(extendInfo).filter(([key]) =>
+        key.endsWith("UsageDescription"),
+      );
+      assert.isNotEmpty(prompts);
+      for (const [key, prompt] of prompts) {
+        assert.include(prompt, "Weavewing", key);
+        assert.notInclude(prompt, "T3 Code", key);
+      }
+    }),
+  );
+
+  it("publishes Weavewing as the packaged app's author and homepage", () => {
+    assert.equal(DESKTOP_PACKAGE_METADATA.author, "Weavewing");
+    assert.equal(DESKTOP_PACKAGE_METADATA.homepage, "https://github.com/koreyGambill/weavewing");
+    assert.match(DESKTOP_PACKAGE_METADATA.description, /^Weavewing /u);
+  });
 
   it.effect("declares Calendar access for hosted commands in macOS builds", () =>
     Effect.gen(function* () {
@@ -1651,7 +1739,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "dev.weavewing.desktop",
+      appId: "dev.wingstack.weavewing.desktop",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1675,7 +1763,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.dev.weavewing.desktop</string>");
+    assert.include(entitlements, "<string>ABC1234567.dev.wingstack.weavewing.desktop</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1686,7 +1774,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("preserves the Touch ID keychain group and requires the profile to authorize it", () => {
-    const configuration = { appId: "dev.weavewing.desktop", teamId: "ABC1234567" };
+    const configuration = { appId: "dev.wingstack.weavewing.desktop", teamId: "ABC1234567" };
     const profile = (entitlements: string, outside = "") =>
       `0\x82\x1f\x9a\x06\t*\x86H<?xml version="1.0"?><plist version="1.0"><dict>${outside}<key>Entitlements</key><dict>${entitlements}</dict></dict></plist>\x00\x01`;
     const teamWildcardGroups = `<key>keychain-access-groups</key>
@@ -1728,7 +1816,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         configuration,
       ),
       {
-        touchIdKeychainAccessGroup: "ABC1234567.com.t3tools.t3code.webauthn",
+        touchIdKeychainAccessGroup: "ABC1234567.dev.wingstack.weavewing.desktop.webauthn",
         browserPasskeys: true,
       },
     );
@@ -1744,7 +1832,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
     assert.match(
       entitlements,
-      /<key>keychain-access-groups<\/key>\s*<array>\s*<string>ABC1234567\.com\.t3tools\.t3code\.webauthn<\/string>\s*<\/array>/u,
+      /<key>keychain-access-groups<\/key>\s*<array>\s*<string>ABC1234567\.dev\.wingstack\.weavewing\.desktop\.webauthn<\/string>\s*<\/array>/u,
     );
     assert.match(
       entitlements,

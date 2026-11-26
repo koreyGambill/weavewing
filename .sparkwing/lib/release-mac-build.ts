@@ -67,7 +67,7 @@ try {
   const proof = { version: read("CFBundleShortVersionString"), bundleId, updater, signed, nodeVersion, mounted: true, codesign: "not checked" };
   const saveProof = () => FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify(proof, null, 2));
   saveProof();
-  if (proof.version !== version || !["dev.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
+  if (proof.version !== version || !["dev.wingstack.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
   try {
     run("codesign", ["--verify", "--deep", "--strict", app]);
     proof.codesign = "passed";
