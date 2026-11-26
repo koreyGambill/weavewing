@@ -8,7 +8,7 @@ import type {
   WaitingItemSummary,
 } from "@t3tools/contracts";
 import { ChevronDownIcon, ChevronUpIcon, UserRoundIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useComposerArtifactAnswers } from "../../composerDraftStore";
 import { useWorkspaceMutationRefresh } from "../../hooks/useWorkspaceMutationRefresh";
@@ -42,12 +42,12 @@ export function useWaitingOnYouStrip(input: {
   readonly waiting: ReadonlyArray<WaitingItemSummary> | undefined;
   readonly waitingCounts: WaitingCounts | undefined;
   readonly refreshKey: string;
-  readonly focusComposer: () => void;
 }): ComposerBannerStackItem | null {
   const { threadRef, enabled } = input;
   const { workspace, refresh } = useThreadQuestionsWorkspace(threadRef, enabled);
   const threadKey = threadRef === null ? "" : scopedThreadKey(threadRef);
   const [openForThread, setOpenForThread] = useState<string | null>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const [adding, setAdding] = useState(false);
   const saveDraft = useSaveQuestionDraft(threadRef);
   const inComposer = useQuestionsInComposer(threadRef);
@@ -83,9 +83,10 @@ export function useWaitingOnYouStrip(input: {
   const summary = waitingStripSummary(input.waiting, input.waitingCounts);
   if (summary === null) return null;
   const open = openForThread === threadKey;
+  // Closing the list hands focus back to the strip, so the same key reopens it.
   const close = () => {
     setOpenForThread(null);
-    input.focusComposer();
+    toggle.current?.focus();
   };
   const toAdd =
     workspace?.questions.filter(
@@ -115,6 +116,7 @@ export function useWaitingOnYouStrip(input: {
     icon: <UserRoundIcon />,
     title: (
       <button
+        ref={toggle}
         type="button"
         aria-expanded={open}
         aria-label={`${open ? "Hide" : "Show"} what is waiting on you: ${spoken}`}

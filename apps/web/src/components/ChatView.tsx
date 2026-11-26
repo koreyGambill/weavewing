@@ -1422,7 +1422,6 @@ export default function ChatView(props: ChatViewProps) {
     waiting: activeThreadShell?.waiting,
     waitingCounts: activeThreadShell?.waitingCounts,
     refreshKey: `${waitingRefreshKey(activeThreadShell?.waiting)}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
-    focusComposer: () => composerRef.current?.focusAtEnd(),
   });
   const systemComposerBannerItems = useSystemComposerBanners({
     activeEnvironment,

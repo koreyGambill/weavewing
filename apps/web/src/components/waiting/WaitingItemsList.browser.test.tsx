@@ -78,6 +78,8 @@ it("answers each kind in one click and leaves a problem to the agent", async () 
   await expect.element(screen.getByRole("button", { name: "Looks good: QA2" })).toBeDisabled();
 
   await userEvent.click(screen.getByRole("button", { name: "Looks good: QA1" }));
+  // The settled row is about to leave, so focus moves on to the next row's title.
+  await expect.element(screen.getByRole("button", { name: /^QA2: Close button/ })).toHaveFocus();
   await userEvent.click(screen.getByRole("button", { name: "Done: T1" }));
   expect(sent).toEqual([
     { landingId: "landing-1", changeId: "toast", state: "confirmed" },

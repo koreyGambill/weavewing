@@ -45,6 +45,20 @@ export const WAITING_KIND_ICON: Record<WaitingItemKind, LucideIcon> = {
   task: ListChecksIcon,
 };
 
+/**
+ * Moves focus from a row the user just settled to the next row's title, or the previous one's,
+ * or the list itself, so the keyboard stays in the list when the row leaves it.
+ */
+function keepFocusInList(from: HTMLElement | null) {
+  const row = from?.closest<HTMLElement>("[data-waiting-row]");
+  const list = row?.closest<HTMLElement>('[role="group"]');
+  if (!row || !list) return;
+  const rows = [...list.querySelectorAll<HTMLElement>("[data-waiting-row]")];
+  const index = rows.indexOf(row);
+  const neighbour = rows[index + 1] ?? rows[index - 1];
+  (neighbour?.querySelector<HTMLElement>("button") ?? list).focus({ preventScroll: true });
+}
+
 // Module-level, so React calls it once as the list opens and never refocuses it on a render.
 // Opening the list hands it the keyboard, so Tab walks its rows and Escape closes it.
 const focusOnOpen = (element: HTMLDivElement | null) => element?.focus({ preventScroll: true });
@@ -120,7 +134,10 @@ function WaitingItemRow({
     else useThreadContextSidebarStore.getState().show("todos", { thread: threadRef });
   };
   return (
-    <li className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent">
+    <li
+      data-waiting-row
+      className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent"
+    >
       <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       <button
         type="button"
@@ -225,7 +242,7 @@ function QaRowControls({
   const [busy, setBusy] = useState(false);
   const parts = qaKeyParts(item.key);
   const fixing = item.state === "problem";
-  const confirm = async () => {
+  const confirm = async (from: HTMLElement) => {
     if (parts === null) return;
     setBusy(true);
     const result = await setQa({
@@ -233,7 +250,9 @@ function QaRowControls({
       input: { ...parts, state: "confirmed" },
     });
     setBusy(false);
-    if (result._tag === "Success") removeQaDiscuss(threadRef, item.key);
+    if (result._tag !== "Success") return;
+    removeQaDiscuss(threadRef, item.key);
+    keepFocusInList(from);
   };
   return (
     <>
@@ -260,7 +279,7 @@ function QaRowControls({
         variant={canAct && !busy && !fixing ? "default" : "contrast-outline"}
         disabled={!canAct || busy || fixing || parts === null}
         aria-label={`Looks good: ${item.ref}`}
-        onClick={() => void confirm()}
+        onClick={(event) => void confirm(event.currentTarget)}
       >
         Looks good
       </HelpButton>
@@ -280,10 +299,10 @@ function TaskRowControls({
   const canAct = useAtomValue(threadListUpdate.permissionAtom(threadRef.environmentId));
   const update = useAtomCommand(threadListUpdate, { label: "Task" });
   const [busy, setBusy] = useState(false);
-  const done = async () => {
+  const done = async (from: HTMLElement) => {
     if (workspace === null) return;
     setBusy(true);
-    await update({
+    const result = await update({
       environmentId: threadRef.environmentId,
       input: {
         threadId: threadRef.threadId,
@@ -292,6 +311,7 @@ function TaskRowControls({
       },
     });
     setBusy(false);
+    if (result._tag === "Success") keepFocusInList(from);
   };
   const usable = canAct && !busy && workspace !== null;
   return (
@@ -312,7 +332,7 @@ function TaskRowControls({
         variant={usable ? "default" : "contrast-outline"}
         disabled={!usable}
         aria-label={`Done: ${item.ref}`}
-        onClick={() => void done()}
+        onClick={(event) => void done(event.currentTarget)}
       >
         Done
       </HelpButton>
