@@ -1062,9 +1062,11 @@ const resumedSession = (
     testCase.setup.questions !== undefined,
   );
   const sections = claudeAppendSections(current, current);
+  // Cases name a section by its heading; T3 identifies its first occurrence as `t3:0:<heading>`.
+  const heading = (name: string) => name.replace(/^t3:0:/, "");
   const started = sections.flatMap((section) => {
-    if (resumed.startedWithout?.includes(section.name)) return [];
-    const text = resumed.startedWith?.[section.name];
+    if (resumed.startedWithout?.includes(heading(section.name))) return [];
+    const text = resumed.startedWith?.[heading(section.name)];
     return text === undefined
       ? [section]
       : [{ ...section, text: `${/^\s*/.exec(section.text)?.[0] ?? ""}${text}` }];
