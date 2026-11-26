@@ -91,6 +91,64 @@ describe("rightPanelStore", () => {
     expect(groups()).toHaveLength(2);
   });
 
+  it("opens a side panel view beside the chat, naming another thread only when it shows one", async () => {
+    const store = useRightPanelStore.getState();
+    const groups = () =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA));
+    store.openView(refA, "todos", refA, "tile-2");
+    store.openView(refA, "links", refB, "tile-2");
+    store.openView(refA, "status", refB, "tile-2");
+    const [main, beside] = groups();
+    expect(main?.tabs).toEqual([CONVERSATION_TAB_ID]);
+    expect(beside?.tabs).toEqual(["view:todos", "view:links:env-1:thread-B", "view:status"]);
+    expect(beside?.activeTabId).toBe("view:status");
+    store.openView(refA, "todos", null, "tile-2");
+    expect(groups()[1]?.activeTabId).toBe("view:todos");
+    expect(groups()).toHaveLength(2);
+    const surfaces = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces;
+    expect(surfaces()).toEqual([
+      { id: "view:todos", kind: "view", viewId: "todos" },
+      { id: "view:links:env-1:thread-B", kind: "view", viewId: "links", threadRef: refB },
+      { id: "view:status", kind: "view", viewId: "status" },
+    ]);
+    await reloadRightPanelStore();
+    expect(surfaces().map((surface) => surface.id)).toEqual([
+      "view:todos",
+      "view:links:env-1:thread-B",
+      "view:status",
+    ]);
+  });
+
+  it("drops stored view tabs whose view, thread or id is not valid, keeping the rest", () => {
+    const viewTab = (surface: Record<string, unknown>) =>
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "notes",
+            surfaces: [{ id: "notes", kind: "notes" }, surface],
+          },
+        },
+      }).byThreadKey["env-1:thread-A"]!.surfaces.map((entry) => entry.id);
+    expect(viewTab({ id: "view:todos", kind: "view", viewId: "todos" })).toEqual([
+      "notes",
+      "view:todos",
+    ]);
+    expect(
+      viewTab({ id: "view:links:env-1:thread-B", kind: "view", viewId: "links", threadRef: refB }),
+    ).toEqual(["notes", "view:links:env-1:thread-B"]);
+    for (const invalid of [
+      { id: "view:retired", kind: "view", viewId: "retired" },
+      { id: "view:todos", kind: "view" },
+      { id: "view:todos:x", kind: "view", viewId: "todos" },
+      { id: "view:links:env-1:thread-B", kind: "view", viewId: "links", threadRef: "thread-B" },
+      { id: "view:status:env-1:thread-B", kind: "view", viewId: "status", threadRef: refB },
+    ]) {
+      expect(viewTab(invalid)).toEqual(["notes"]);
+    }
+  });
+
   it("opens related threads beside the main chat and keeps them in the current browser session", async () => {
     const store = useRightPanelStore.getState();
     const agentRef = scopeThreadRef("env-2" as EnvironmentId, refB.threadId);

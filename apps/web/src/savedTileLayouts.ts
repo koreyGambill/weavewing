@@ -17,6 +17,7 @@ import {
   type ThreadTileLayout,
   type TileNode,
 } from "./threadTileLayout";
+import { isRetiredViewArea } from "./views/viewTiles.logic";
 
 export const TILE_LAYOUT_AREA_LABELS = {
   device: "Device",
@@ -29,7 +30,7 @@ export const TILE_LAYOUT_AREA_LABELS = {
   notes: "Notes",
   diff: "Diff",
   "pull-requests": "Pull requests",
-} as const satisfies Record<TileLayoutArea, string>;
+} as const satisfies Record<Exclude<TileLayoutArea, `view:${string}`>, string>;
 
 const tabArea = (tabId: string): TileLayoutArea | null =>
   tabId === CONVERSATION_TAB_ID ? "chat" : surfaceTileArea(tabId);
@@ -96,6 +97,7 @@ export function buildTileLayoutFromSaved(
         second: build(node.second),
       };
     const tabs = node.areas.flatMap((area) => {
+      if (isRetiredViewArea(area)) return [];
       const index = unused.findIndex((tabId) => tabArea(tabId) === area);
       if (index >= 0) return unused.splice(index, 1);
       if (area === "chat") return [];

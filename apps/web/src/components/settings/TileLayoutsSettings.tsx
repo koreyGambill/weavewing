@@ -2,11 +2,8 @@ import { type SavedTileLayout } from "@t3tools/contracts";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import {
-  savedTileGroupCount,
-  TILE_LAYOUT_AREA_LABELS,
-  tileLayoutDeletePatch,
-} from "../../savedTileLayouts";
+import { savedTileGroupCount, tileLayoutDeletePatch } from "../../savedTileLayouts";
+import { tileLayoutAreaLabel } from "../chat/ViewTile";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -35,7 +32,7 @@ function areaSummary(layout: SavedTileLayout) {
   const areas: string[] = [];
   const walk = (node: SavedTileLayout["root"]) => {
     if (node.kind === "group") {
-      areas.push(...node.areas.map((area) => TILE_LAYOUT_AREA_LABELS[area]));
+      areas.push(...node.areas.flatMap((area) => tileLayoutAreaLabel(area) ?? []));
       return;
     }
     walk(node.first);

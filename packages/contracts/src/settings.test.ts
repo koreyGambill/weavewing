@@ -517,6 +517,11 @@ describe("ServerSettings tile layouts", () => {
     expect(() =>
       decodeServerSettingsPatch(layout({ kind: "group", areas: ["unknown"] })),
     ).toThrow();
+    expect(() => decodeServerSettingsPatch(layout({ kind: "group", areas: ["view:"] }))).toThrow();
+    expect(
+      decodeServerSettingsPatch(layout({ kind: "group", areas: ["chat", "view:retired-view"] }))
+        .tileLayouts?.[0]?.root,
+    ).toEqual({ kind: "group", areas: ["chat", "view:retired-view"] });
     const deep = Array.from({ length: 16 }).reduce<unknown>(
       (node) => ({ kind: "split", axis: "vertical", ratio: 0.5, first: group, second: node }),
       group,

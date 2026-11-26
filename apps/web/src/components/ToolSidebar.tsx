@@ -11,6 +11,7 @@ import {
   Minimize2,
   PanelRight,
   PinIcon,
+  Columns2,
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -47,6 +48,8 @@ import {
   type ViewSlots,
   type ViewTarget,
 } from "../views/viewRegistry";
+import { useViewDragStore } from "../views/viewDragStore";
+import { promoteViewToTile, ViewDragGrip } from "./chat/ViewTile";
 import { DropdownTerminalButton } from "./DropdownTerminal";
 import { useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
@@ -352,6 +355,13 @@ function SideArea({
   const dispatch = useToolSidebarStore((state) => state.dispatch);
   const definition = viewDefinition(view);
   const threadRef = useSideAreaThreadRef();
+  // Tiles belong to the thread on screen, so a view moves into that thread's tiles.
+  const tileOwner = useRouterState({
+    select: (state) => resolveThreadRouteRef(state.matches.at(-1)?.params ?? {}),
+  });
+  const viewThread = definition.scope === "thread" ? threadRef : null;
+  const canPromote = tileOwner !== null && (definition.scope === "global" || threadRef !== null);
+  const viewDragging = useViewDragStore((state) => state.drag !== null);
   const lockedState = useLockedThreadState(locked);
   const unlock = () => dispatch({ type: "lock", thread: null });
   const openViewPage = useOpenViewPage();
@@ -454,11 +464,14 @@ function SideArea({
       ref={setPanel}
       aria-label="Side panel"
       data-side-area={maximized ? "maximized" : pinned ? "pinned" : "open"}
+      data-view-dragging={viewDragging || undefined}
       {...workspaceAreaProps("tools", 5)}
       onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
         "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col border-l bg-background shadow-xl",
         maximized && "left-0 shadow-none",
+        // The tiles under the panel take a view dragged from its grip.
+        viewDragging && "pointer-events-none opacity-60",
       )}
       style={maximized ? undefined : { width }}
     >
@@ -477,6 +490,9 @@ function SideArea({
         />
       ) : null}
       <header className="flex h-10 shrink-0 items-center gap-1 border-b pr-2 pl-1.5">
+        {wide && !maximized && canPromote && tileOwner ? (
+          <ViewDragGrip viewId={view} thread={viewThread} />
+        ) : null}
         <ViewPicker definition={definition} target={target} />
         <div ref={setActions} className="ms-auto flex min-w-0 items-center" />
         <div
@@ -511,6 +527,28 @@ function SideArea({
               {locked ? <LockIcon /> : <LockOpenIcon />}
             </HeaderToggle>
           ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Open as tile"
+                  disabled={!canPromote}
+                  onClick={() => {
+                    if (tileOwner) promoteViewToTile(tileOwner, view, viewThread);
+                  }}
+                />
+              }
+            >
+              <Columns2 />
+            </TooltipTrigger>
+            <TooltipPopup>
+              {canPromote
+                ? `Open ${definition.title} as a tile beside the chat`
+                : "Open a thread to place this view in its tiles"}
+            </TooltipPopup>
+          </Tooltip>
           {definition.page ? (
             <Tooltip>
               <TooltipTrigger
@@ -609,7 +647,7 @@ function HeaderToggle(props: {
   );
 }
 
-function useLockedThreadState(threadRef: ScopedThreadRef | null): LockedThreadState | null {
+export function useLockedThreadState(threadRef: ScopedThreadRef | null): LockedThreadState | null {
   const shell = useThreadShell(threadRef);
   // Archived and deleted threads leave the shell list, so only then read the thread itself.
   const readDetail = threadRef !== null && shell === null;
@@ -631,7 +669,13 @@ function useLockedThreadState(threadRef: ScopedThreadRef | null): LockedThreadSt
   });
 }
 
-function LockedThreadBar({ state, onUnlock }: { state: LockedThreadState; onUnlock: () => void }) {
+export function LockedThreadBar({
+  state,
+  onUnlock,
+}: {
+  state: LockedThreadState;
+  onUnlock: () => void;
+}) {
   const label =
     state.kind === "deleted"
       ? "The locked thread was deleted"
@@ -745,6 +789,7 @@ function ViewPicker({
             variant="ghost"
             size="sm"
             className="min-w-0"
+            data-view-picker
             aria-label={`View: ${definition.title}. Choose a view`}
           />
         }

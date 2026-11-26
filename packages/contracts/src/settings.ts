@@ -147,17 +147,28 @@ export const DEFAULT_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
   { kind: "at", day: "monday", time: "09:00" },
 ];
 
-export const TileLayoutArea = Schema.Literals([
-  "device",
-  "side-chat",
-  "pull-request",
-  "chat",
-  "browser",
-  "terminal",
-  "files",
-  "notes",
-  "diff",
-  "pull-requests",
+/**
+ * A view's area is `view:<id>`. The client owns the view ids and drops a tab whose id it no longer
+ * knows, so a layout saved with a retired view still loads.
+ */
+export const ViewTileLayoutArea = Schema.TemplateLiteral([
+  Schema.Literal("view:"),
+  Schema.NonEmptyString.check(Schema.isMaxLength(64), Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)),
+]);
+export const TileLayoutArea = Schema.Union([
+  Schema.Literals([
+    "device",
+    "side-chat",
+    "pull-request",
+    "chat",
+    "browser",
+    "terminal",
+    "files",
+    "notes",
+    "diff",
+    "pull-requests",
+  ]),
+  ViewTileLayoutArea,
 ]);
 export type TileLayoutArea = typeof TileLayoutArea.Type;
 export type SavedTileNode =

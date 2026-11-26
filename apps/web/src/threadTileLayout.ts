@@ -18,8 +18,12 @@ const SURFACE_AREAS: Record<string, TileLayoutArea> = {
   "pull-requests": "pull-requests",
 };
 /** The saved-layout area a surface id belongs to; surfaces that need a target have none. */
-export const surfaceTileArea = (surfaceId: string): TileLayoutArea | null =>
-  SURFACE_AREAS[surfaceId.split(":")[0]!] ?? null;
+export const surfaceTileArea = (surfaceId: string): TileLayoutArea | null => {
+  const [kind, view, ...thread] = surfaceId.split(":");
+  // A view locked to another thread names it, which a layout for any thread cannot keep.
+  if (kind === "view") return view && thread.length === 0 ? `view:${view}` : null;
+  return SURFACE_AREAS[kind!] ?? null;
+};
 
 /** Puts tabs where a chosen new tab sat, or after the group's other tabs. */
 function placeTabs(group: TileGroup, tabIds: string[]): TileGroup {
@@ -887,7 +891,8 @@ export function parseTileLayout(value: unknown): ThreadTileLayout | undefined {
                   ([tabId, area]) =>
                     isNewTab(tabId) &&
                     typeof area === "string" &&
-                    Object.values(SURFACE_AREAS).includes(area as TileLayoutArea),
+                    (area.startsWith("view:") ||
+                      Object.values(SURFACE_AREAS).includes(area as TileLayoutArea)),
                 ),
               ) as Record<string, TileLayoutArea>,
             }

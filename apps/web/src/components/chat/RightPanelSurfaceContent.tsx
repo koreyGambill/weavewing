@@ -29,6 +29,7 @@ import { PullRequestsUnavailableState } from "../pullRequest/PullRequestsUnavail
 import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel";
 import { GatedThreadQuestionsPanel } from "../questions/ThreadQuestionsPanel";
 import { APP_BASE_NAME } from "~/branding";
+import { ViewTile } from "./ViewTile";
 
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
@@ -235,6 +236,8 @@ export function RightPanelSurfaceContent(props: {
           </RelatedThreadWorkspaceContext>
         </div>
       );
+    case "view":
+      return <ViewTile surface={surface} owner={threadRef} visible={visible} />;
     case "side-chat":
       // Not lazy: revealing a suspended tiptap editor tears down its view and crashes the composer.
       return (

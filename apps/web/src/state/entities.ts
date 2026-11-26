@@ -162,6 +162,25 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
   );
 }
 
+const threadTitlesAtomFamily = Atom.family((keys: string) =>
+  Atom.make((get) => {
+    const titles = new Map<string, string>();
+    for (const key of keys ? keys.split("\n") : []) {
+      const ref = parseScopedThreadKey(key);
+      const title = ref ? get(environmentThreadShells.quietThreadShellAtom(ref))?.title : null;
+      if (title) titles.set(key, title);
+    }
+    return titles;
+  }),
+);
+
+/** Titles of the listed threads by thread key, from shells the client already holds. */
+export function useThreadTitles(refs: ReadonlyArray<ScopedThreadRef>): ReadonlyMap<string, string> {
+  return useAtomValue(
+    threadTitlesAtomFamily([...new Set(refs.map(scopedThreadKey))].toSorted().join("\n")),
+  );
+}
+
 /** The shell without its streaming timestamps; see quietThreadShellAtom. */
 export function useQuietThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadShell | null {
   return useAtomValue(

@@ -36,6 +36,8 @@ export function useSideAreaThreadRef(): ScopedThreadRef | null {
 
 type Slot = HTMLDivElement | null;
 const SideAreaDetails = createContext<(element: Slot) => void>(() => {});
+type TileDetails = { readonly threadRef: ScopedThreadRef; readonly element: HTMLDivElement };
+const TileDetails = createContext<(details: TileDetails | null, element: Slot) => void>(() => {});
 
 /** Gives the conversation's details card to the host whose Details view shows its thread. */
 export function ThreadToolsHost({ children }: { children: ReactNode }) {
@@ -44,17 +46,27 @@ export function ThreadToolsHost({ children }: { children: ReactNode }) {
   const sideOpen = useToolSidebarStore((state) => state.open);
   const sideView = useToolSidebarStore((state) => state.view);
   const [sideDetails, setSideDetails] = useState<Slot>(null);
+  const [tileDetails, setTileDetailsState] = useState<TileDetails | null>(null);
+  const [setTileDetails] = useState(
+    () => (details: TileDetails | null, element: Slot) =>
+      setTileDetailsState((current) =>
+        details ? details : current?.element === element ? null : current,
+      ),
+  );
   const destination = resolveDetailsDestination(
     [
+      tileDetails ? { ...tileDetails, host: "tile" } : null,
       sideOpen && sideView === "details" && sideThreadRef && sideDetails
-        ? { threadRef: sideThreadRef, element: sideDetails }
+        ? { threadRef: sideThreadRef, element: sideDetails, host: "panel" }
         : null,
     ],
     selected,
   );
   return (
     <SideAreaDetails value={setSideDetails}>
-      <ThreadDetailsDestination value={destination}>{children}</ThreadDetailsDestination>
+      <TileDetails value={setTileDetails}>
+        <ThreadDetailsDestination value={destination}>{children}</ThreadDetailsDestination>
+      </TileDetails>
     </SideAreaDetails>
   );
 }
@@ -62,6 +74,14 @@ export function ThreadToolsHost({ children }: { children: ReactNode }) {
 /** The side area's setter for its Details element, which the host gives the card to. */
 export function useSideAreaDetailsSetter() {
   return use(SideAreaDetails);
+}
+
+/**
+ * A view tile's setter for its Details element: `(details, null)` registers it, and
+ * `(null, element)` withdraws it when that element is still the registered one.
+ */
+export function useTileDetailsSetter() {
+  return use(TileDetails);
 }
 
 /** The route's draft when no thread is selected, for views that preview a draft. */

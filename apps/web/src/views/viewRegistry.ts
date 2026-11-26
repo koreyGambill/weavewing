@@ -115,8 +115,14 @@ function threadView<Id extends ThreadViewId>(
     ...(PickerCount ? { PickerCount } : {}),
     scope: "thread",
     minWidthPx: 280,
-    render: ({ target, slots }) =>
-      createElement(ThreadViewBody, { view: id, title, target, slots }),
+    render: ({ target, slots, host }) =>
+      createElement(ThreadViewBody, {
+        view: id,
+        title,
+        target,
+        slots,
+        host: host === "tile" ? "tile" : "panel",
+      }),
   };
 }
 

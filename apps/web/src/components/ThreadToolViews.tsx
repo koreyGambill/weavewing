@@ -15,7 +15,9 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import * as Option from "effect/Option";
-import { useState, type ReactNode } from "react";
+import { use, useState, type ReactNode } from "react";
+import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
+import type { DetailsHostKind } from "./ToolSidebar.logic";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { configuredHostedAppUrl } from "../hostedPairing";
@@ -98,9 +100,11 @@ import { FileRemoteMenuSection } from "./files/FileRemoteActions";
 export function ThreadDetailsSlot({
   threadRef,
   detailsRef,
+  host,
 }: {
   threadRef: ScopedThreadRef;
   detailsRef: (element: HTMLDivElement | null) => void;
+  host: DetailsHostKind;
 }) {
   return (
     <div
@@ -109,8 +113,49 @@ export function ThreadDetailsSlot({
     >
       <div className="px-2.5 text-xs group-has-[[data-context-thread-details]]/details-destination:hidden">
         <ThreadSummary threadRef={threadRef} />
+        <DetailsElsewhere threadRef={threadRef} host={host} />
       </div>
     </div>
+  );
+}
+
+const DETAILS_HOST_NAMES: Record<DetailsHostKind, string> = {
+  tile: "the tile",
+  panel: "the side panel",
+};
+
+/** Points a summary at the host that shows the same thread's full details card. */
+function DetailsElsewhere({
+  threadRef,
+  host,
+}: {
+  threadRef: ScopedThreadRef;
+  host: DetailsHostKind;
+}) {
+  const destination = use(ThreadDetailsDestination);
+  if (
+    !destination ||
+    destination.host === host ||
+    destination.threadRef.environmentId !== threadRef.environmentId ||
+    destination.threadRef.threadId !== threadRef.threadId
+  ) {
+    return null;
+  }
+  const { element } = destination;
+  return (
+    <Button
+      size="xs"
+      variant="link"
+      className="mt-1"
+      onClick={() => {
+        element.scrollIntoView({ block: "nearest" });
+        element
+          .querySelector<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])')
+          ?.focus({ preventScroll: true });
+      }}
+    >
+      Full details are in {DETAILS_HOST_NAMES[destination.host]}
+    </Button>
   );
 }
 

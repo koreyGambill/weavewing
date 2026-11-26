@@ -33,6 +33,8 @@ import { resolveStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
+import type { ViewId } from "./components/ToolSidebar.logic";
+import { restoreViewSurface, viewSurface } from "./views/viewTiles.logic";
 
 const RIGHT_PANEL_KINDS = [
   "diff",
@@ -123,7 +125,9 @@ export type RightPanelSurface =
       relation: "fork" | "subagent";
       title: string;
     }
-  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
+  /** A side panel view; `threadRef` is set only when it shows a thread other than its tile's. */
+  | { id: `view:${string}`; kind: "view"; viewId: ViewId; threadRef?: ScopedThreadRef };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 17;
@@ -186,6 +190,13 @@ interface RightPanelStoreState {
     destination?: LinkTileDestination,
   ) => void;
   openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  /** Opens a view as a tab in `ref`'s tiles, showing `thread`; `destination` places a new tab. */
+  openView: (
+    ref: ScopedThreadRef,
+    viewId: ViewId,
+    thread: ScopedThreadRef | null,
+    destination?: LinkTileDestination,
+  ) => void;
   openRelatedThread: (
     host: ScopedThreadRef,
     target: ScopedThreadRef,
@@ -707,6 +718,10 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       kind === "reviews"
                     )
                       return [];
+                    if (surface.kind === "view") {
+                      const view = restoreViewSurface(surface);
+                      return view ? [view] : [];
+                    }
                     if (surface.kind === "notes")
                       return validAreaId(surface.id, "notes") ? [surface] : [];
                     if (surface.kind === "questions")
@@ -1076,6 +1091,14 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           userAction(state, scopedThreadKey(ref), (current) =>
             upsertSurface(current, { id: `side-chat:${threadId}`, kind: "side-chat", threadId }),
           ),
+        ),
+      openView: (ref, viewId, thread, destination) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const surface = viewSurface(viewId, ref, thread);
+            const next = upsertSurface(current, surface, true, !destination);
+            return placeLinkedSurface(current, next, surface.id, destination);
+          }),
         ),
       openRelatedThread: (host, threadRef, relation, title) =>
         set((state) =>

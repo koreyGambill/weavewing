@@ -15,7 +15,7 @@ export type ViewId = ThreadViewId | GlobalViewId;
 /** The view picker's order: thread views, then the views that span threads. */
 export const VIEW_IDS: ReadonlyArray<ViewId> = [...THREAD_VIEW_IDS, ...GLOBAL_VIEW_IDS];
 
-function isViewId(value: string): value is ViewId {
+export function isViewId(value: string): value is ViewId {
   return VIEW_IDS.some((id) => id === value);
 }
 
@@ -432,17 +432,23 @@ export interface DetailsHost<Element> {
   readonly element: Element;
 }
 
+/** The hosts that can show a full Details card. */
+export type DetailsHostKind = "tile" | "panel";
+
+export interface DetailsDestination<Element> extends DetailsHost<Element> {
+  readonly host: DetailsHostKind;
+}
+
 /**
  * Where the conversation's details card renders. Only the selected thread's conversation has a
- * card, so the first host showing that thread gets it; with none showing it, the first host does.
+ * card, so the first host showing that thread gets it.
  * `hosts` is in priority order; other hosts show the summary.
  */
 export function resolveDetailsDestination<Element>(
-  hosts: ReadonlyArray<DetailsHost<Element> | null>,
+  hosts: ReadonlyArray<DetailsDestination<Element> | null>,
   selected: ScopedThreadRef | null,
-): DetailsHost<Element> | null {
-  const present = hosts.filter((host): host is DetailsHost<Element> => host !== null);
-  return present.find((host) => sameThread(host.threadRef, selected)) ?? present[0] ?? null;
+): DetailsDestination<Element> | null {
+  return hosts.find((host) => host && sameThread(host.threadRef, selected)) ?? null;
 }
 
 export type LockedThreadState =

@@ -125,6 +125,55 @@ describe("saved tile layouts", () => {
     expect(withNotes.pendingAreas).toBeUndefined();
   });
 
+  it("saves and restores views, dropping views locked to another thread and views that no longer exist", () => {
+    const layout: ThreadTileLayout = {
+      focusedGroupId: "a",
+      maximizedGroupId: null,
+      root: {
+        kind: "split",
+        id: "s1",
+        axis: "horizontal",
+        ratio: 0.5,
+        first: { kind: "group", id: "a", tabs: [CONVERSATION_TAB_ID], activeTabId: "conversation" },
+        second: {
+          kind: "group",
+          id: "b",
+          tabs: ["view:todos", "view:links:env:other", "view:status"],
+          activeTabId: "view:todos",
+        },
+      },
+    };
+    const saved = toSavedTileNode(layout);
+    expect(saved).toEqual({
+      dropped: true,
+      root: {
+        kind: "split",
+        axis: "horizontal",
+        ratio: 0.5,
+        first: { kind: "group", areas: ["chat"] },
+        second: { kind: "group", areas: ["view:todos", "view:status"] },
+      },
+    });
+    const withRetired: SavedTileNode = {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.5,
+      first: { kind: "group", areas: ["chat", "view:retired"] },
+      second: { kind: "group", areas: ["view:todos", "view:retired", "view:status"] },
+    };
+    const built = buildTileLayoutFromSaved(withRetired, [], sequentialIds());
+    const [chat, views] = getTileGroups(built);
+    expect(chat?.tabs).toEqual([CONVERSATION_TAB_ID]);
+    expect(Object.values(built.pendingAreas ?? {})).toEqual(["view:todos", "view:status"]);
+    expect(parseTileLayout(JSON.parse(JSON.stringify(built)))?.pendingAreas).toEqual(
+      built.pendingAreas,
+    );
+    const filled = syncTileLayout(built, [], ["view:todos", "view:status"], "view:status", true);
+    expect(getTileGroups(filled)[1]?.tabs).toEqual(["view:todos", "view:status"]);
+    expect(views?.tabs).toHaveLength(2);
+    expect(filled.pendingAreas).toBeUndefined();
+  });
+
   it("forgets a placeholder the user closed or replaced", () => {
     const built = buildTileLayoutFromSaved(chatNotesTerminal, [], sequentialIds());
     const [, notes] = getTileGroups(built);

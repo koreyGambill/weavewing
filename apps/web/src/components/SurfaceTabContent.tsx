@@ -1,5 +1,5 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   threadRuntimeIsActive,
   type EnvironmentThreadShell,
@@ -51,6 +51,8 @@ import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequest/pullRequestIcons";
 import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
+import { viewDefinition } from "~/views/viewRegistry";
+import { viewTabTitle } from "~/views/viewTiles.logic";
 
 export interface TileSurfaceActions {
   keybindings: ResolvedKeybindingsConfig;
@@ -115,6 +117,8 @@ export function surfaceTitle(
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
   sideChatTitles?: ReadonlyMap<string, string>,
+  /** Titles of the threads view tabs are locked to, by thread key. */
+  threadTitles?: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -143,6 +147,13 @@ export function surfaceTitle(
       return "Notes";
     case "questions":
       return "Questions";
+    case "view":
+      return viewTabTitle(
+        viewDefinition(surface.viewId).title,
+        surface.threadRef
+          ? (threadTitles?.get(scopedThreadKey(surface.threadRef)) ?? "another thread")
+          : null,
+      );
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -222,6 +233,10 @@ export function SurfaceIcon({
       return <NotebookPen className="size-3 shrink-0" />;
     case "questions":
       return <MessageCircleQuestionIcon className="size-3 shrink-0" />;
+    case "view": {
+      const Icon = viewDefinition(surface.viewId).icon;
+      return <Icon className="size-3 shrink-0" />;
+    }
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />

@@ -31,6 +31,7 @@ import {
   Plus,
   SquareDashed,
   GripVertical,
+  PanelRight,
   X,
 } from "lucide-react";
 import type {
@@ -74,7 +75,7 @@ import { shortcutLabelForCommand } from "../../keybindings";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import { useTheme } from "../../hooks/useTheme";
-import { useThreadRelationshipShells } from "../../state/entities";
+import { useThreadRelationshipShells, useThreadTitles } from "../../state/entities";
 import { observeResize } from "../../lib/observeResize";
 import { SurfaceIcon, surfaceTitle, type TileSurfaceActions } from "../SurfaceTabContent";
 import type { TerminalMoveMenu } from "../terminal/useTerminalMoveMenus";
@@ -128,6 +129,9 @@ import {
 } from "../../savedTileLayouts";
 import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
 import { SaveTileLayoutDialog, TileLayoutsMenu } from "./TileLayoutsMenu";
+import { moveViewToSidePanel, placeDroppedView, tileLayoutAreaLabel } from "./ViewTile";
+import { useViewDragStore } from "../../views/viewDragStore";
+import { isViewArea, viewIdFromArea, viewSurface } from "../../views/viewTiles.logic";
 import { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const TAB_DRAG_TYPE = "application/x-weavewing-tab";
@@ -303,7 +307,14 @@ export function ThreadTileWorkspace(props: {
     if (defaultLayout)
       useRightPanelStore.getState().applySavedTileLayout(props.threadRef, defaultLayout.root, true);
   }, [defaultLayout, props.threadRef]);
-  const [dragging, setDragging] = useState<TileDrag | null>(null);
+  const [localDrag, setDragging] = useState<TileDrag | null>(null);
+  // A view dragged from the side panel drops like a tab; terminal-only workspaces take none.
+  const viewDrag = useViewDragStore((state) => (props.terminalsOnly ? null : state.drag));
+  const dragging: TileDrag | null =
+    localDrag ??
+    (viewDrag
+      ? { kind: "tab", id: viewSurface(viewDrag.viewId, props.threadRef, viewDrag.thread).id }
+      : null);
   const [dropTarget, setDropTarget] = useState<TileDrop | null>(null);
   const headerDragBlocked = useRef(false);
   const [resizing, setResizing] = useState(false);
@@ -452,11 +463,16 @@ export function ThreadTileWorkspace(props: {
   // Side chats are this thread's children, so its relationship shells name their tabs.
   const relationshipShells = useThreadRelationshipShells(props.threadRef);
   const sideChatTitles = new Map(relationshipShells.map((shell) => [shell.id, shell.title]));
+  const lockedViewTitles = useThreadTitles(
+    props.panels.surfaces.flatMap((surface) =>
+      surface.kind === "view" && surface.threadRef ? [surface.threadRef] : [],
+    ),
+  );
   const title = (id: string) => {
     if (id === CONVERSATION_TAB_ID) return "Main chat";
     if (isNewTab(id))
       return savedLayout.pendingAreas?.[id]
-        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[id]!]
+        ? (tileLayoutAreaLabel(savedLayout.pendingAreas[id]!) ?? "New tab")
         : "New tab";
     const surface = props.panels.surfaces.find((entry) => entry.id === id);
     return surface
@@ -465,6 +481,7 @@ export function ThreadTileWorkspace(props: {
           props.panels.previewSessions,
           props.panels.terminalLabelsById,
           sideChatTitles,
+          lockedViewTitles,
         )
       : "Choose an area";
   };
@@ -649,8 +666,22 @@ export function ThreadTileWorkspace(props: {
     Device: [panel.deviceAvailable, panel.onAddDevice],
     "Side chat": [panel.sideChatAvailable === true, panel.onAddSideChat],
   };
+  // A view area opens that view of this thread; one whose view no longer exists closes its tab.
+  const pendingRun = (tabId: string, area: TileLayoutArea): [boolean, () => void] => {
+    if (!isViewArea(area)) {
+      const [enabled, run] = areaRuns[TILE_LAYOUT_AREA_LABELS[area]];
+      return [enabled, () => run?.()];
+    }
+    const viewId = viewIdFromArea(area);
+    return [
+      true,
+      viewId
+        ? () => useRightPanelStore.getState().openView(props.threadRef, viewId, null)
+        : () => apply({ type: "close-tab", tabId }),
+    ];
+  };
   const openablePending = Object.entries(savedLayout.pendingAreas ?? {}).filter(
-    ([, area]) => areaRuns[TILE_LAYOUT_AREA_LABELS[area]][0],
+    ([tabId, area]) => pendingRun(tabId, area)[0],
   );
   const requestedPending = useRef(new Set<string>());
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens a fresh surface for each saved-layout placeholder once its area becomes available
@@ -658,7 +689,7 @@ export function ThreadTileWorkspace(props: {
     for (const [tabId, area] of openablePending) {
       if (requestedPending.current.has(tabId)) continue;
       requestedPending.current.add(tabId);
-      areaRuns[TILE_LAYOUT_AREA_LABELS[area]][1]?.();
+      pendingRun(tabId, area)[1]();
     }
   });
   const chatGroup = groups.find((group) => group.tabs.includes(CONVERSATION_TAB_ID));
@@ -692,9 +723,9 @@ export function ThreadTileWorkspace(props: {
           }
           if (!enabled) {
             const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-            const area = (Object.keys(TILE_LAYOUT_AREA_LABELS) as TileLayoutArea[]).find(
-              (area) => TILE_LAYOUT_AREA_LABELS[area] === label,
-            );
+            const area = (
+              Object.keys(TILE_LAYOUT_AREA_LABELS) as Array<keyof typeof TILE_LAYOUT_AREA_LABELS>
+            ).find((area) => TILE_LAYOUT_AREA_LABELS[area] === label);
             if (group && area) apply({ type: "pending-area", tabId: group.activeTabId, area });
             return;
           }
@@ -1205,7 +1236,12 @@ export function ThreadTileWorkspace(props: {
             event.preventDefault();
             event.stopPropagation();
             const target = locateDrop(event);
-            if (target) {
+            const tabElement =
+              event.target instanceof Element
+                ? event.target.closest<HTMLElement>("[data-tab-id]")
+                : null;
+            const drop = () => {
+              if (!target) return;
               const { groupId: targetGroupId, zone } = target;
               if (zone !== "center" && zone !== "tabs")
                 apply(
@@ -1224,10 +1260,6 @@ export function ThreadTileWorkspace(props: {
                     secondGroupId: targetGroupId,
                   });
               } else {
-                const tabElement =
-                  event.target instanceof Element
-                    ? event.target.closest<HTMLElement>("[data-tab-id]")
-                    : null;
                 const targetGroup = groups.find((group) => group.id === targetGroupId);
                 const index = tabElement?.dataset.tabId
                   ? targetGroup?.tabs.indexOf(tabElement.dataset.tabId)
@@ -1239,7 +1271,11 @@ export function ThreadTileWorkspace(props: {
                   ...(index !== undefined ? { index } : {}),
                 });
               }
-            }
+            };
+            if (localDrag === null && viewDrag) {
+              if (target) placeDroppedView(props.threadRef, viewDrag, drop);
+              else useViewDragStore.setState({ drag: null });
+            } else drop();
             setDragging(null);
             setDropTarget(null);
           }}
@@ -1762,6 +1798,14 @@ export function ThreadTileWorkspace(props: {
                               </MenuSubPopup>
                             </MenuSub>
                             {moveMenu ? <TerminalMoveMenuItem menu={moveMenu} /> : null}
+                            {activeSurface?.kind === "view" ? (
+                              <MenuItem
+                                onClick={() => moveViewToSidePanel(props.threadRef, activeSurface)}
+                              >
+                                <PanelRight />
+                                Move to side panel
+                              </MenuItem>
+                            ) : null}
                             <MenuSeparator />
                             <MenuItem
                               disabled={lastBlankTab}
@@ -1812,14 +1856,14 @@ export function ThreadTileWorkspace(props: {
                     <div className="my-auto flex shrink-0 flex-col items-center gap-3">
                       <p className="text-sm font-medium">
                         {savedLayout.pendingAreas?.[group.activeTabId]
-                          ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]
+                          ? tileLayoutAreaLabel(savedLayout.pendingAreas[group.activeTabId]!)
                           : "Choose an area"}
                       </p>
                       {savedLayout.pendingAreas?.[group.activeTabId] && (
                         <p className="-mt-2 text-xs text-muted-foreground">
                           {savedLayout.pendingAreas[group.activeTabId] === "diff"
                             ? "No changes to diff yet. This tile will update when changes are available."
-                            : `${TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} will open automatically when this thread is ready.`}
+                            : `${tileLayoutAreaLabel(savedLayout.pendingAreas[group.activeTabId]!)} will open automatically when this thread is ready.`}
                         </p>
                       )}
                       <div

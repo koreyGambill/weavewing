@@ -199,3 +199,12 @@ export function makeRoomForDropdownTerminal() {
   if (!window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches) state.dispatch({ type: "close" });
   else if (state.maximized) state.dispatch({ type: "restore" });
 }
+
+/** Moves focus to the side area's view picker once it has rendered. */
+export function focusSideArea() {
+  requestAnimationFrame(() =>
+    document
+      .querySelector<HTMLElement>("#side-area [data-view-picker]")
+      ?.focus({ preventScroll: true }),
+  );
+}

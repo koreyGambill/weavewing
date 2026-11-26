@@ -11,7 +11,7 @@ import {
   ThreadLinks,
   ThreadRelated,
 } from "../components/ThreadToolViews";
-import type { ThreadViewId } from "../components/ToolSidebar.logic";
+import type { DetailsHostKind, ThreadViewId } from "../components/ToolSidebar.logic";
 import { Empty, EmptyDescription } from "../components/ui/empty";
 import { useEvidenceEnvironment } from "../state/evidence";
 import { ViewSection, ViewSectionGroup } from "./ViewSection";
@@ -26,17 +26,19 @@ export function ThreadViewBody({
   title,
   target,
   slots,
+  host,
 }: {
   view: ThreadViewId;
   title: string;
   target: ViewTarget;
   slots: ViewSlots;
+  host: DetailsHostKind;
 }) {
   const { threadRef, draft } = target;
   return (
     <section aria-label={title} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
       {threadRef ? (
-        <ThreadViewContent view={view} threadRef={threadRef} slots={slots} />
+        <ThreadViewContent view={view} threadRef={threadRef} slots={slots} host={host} />
       ) : view === "details" && draft ? (
         <ViewSection id="details:inspect" title="Context and usage">
           {() => <ThreadInspect threadRef={draft.threadRef} draftId={draft.draftId} />}
@@ -58,10 +60,12 @@ function ThreadViewContent({
   view,
   threadRef,
   slots,
+  host,
 }: {
   view: ThreadViewId;
   threadRef: ScopedThreadRef;
   slots: ViewSlots;
+  host: DetailsHostKind;
 }) {
   switch (view) {
     case "checklist":
@@ -118,7 +122,7 @@ function ThreadViewContent({
       return (
         <ViewSectionGroup order={["details:thread", "details:environments", "details:inspect"]}>
           <ViewSection id="details:thread" title="Thread">
-            {() => <ThreadDetailsSlot threadRef={threadRef} detailsRef={slots.setDetails} />}
+            {() => <ThreadDetailsSlot threadRef={threadRef} detailsRef={slots.setDetails} host={host} />}
           </ViewSection>
           <ViewSection id="details:environments" title="Environments">
             {() => (

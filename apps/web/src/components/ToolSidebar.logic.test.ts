@@ -238,13 +238,13 @@ describe("side area", () => {
   });
 
   it("gives the details card to the first host showing the selected thread", () => {
-    const first = { threadRef: threadA, element: "first" };
-    const second = { threadRef: threadB, element: "second" };
+    const first = { threadRef: threadA, element: "first", host: "tile" } as const;
+    const second = { threadRef: threadB, element: "second", host: "panel" } as const;
     expect(resolveDetailsDestination([first, second], threadB)).toBe(second);
     expect(resolveDetailsDestination([first, second], threadA)).toBe(first);
-    const secondOnA = { threadRef: threadA, element: "second" };
+    const secondOnA = { ...second, threadRef: threadA };
     expect(resolveDetailsDestination([first, secondOnA], threadA)).toBe(first);
-    expect(resolveDetailsDestination([null, second], threadA)).toBe(second);
+    expect(resolveDetailsDestination([null, second], threadA)).toBeNull();
     expect(resolveDetailsDestination([null, null], threadA)).toBeNull();
   });
 
