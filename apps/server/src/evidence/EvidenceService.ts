@@ -23,6 +23,8 @@ import {
   type EvidenceSetQaInput,
   type EvidenceThreadInput,
   type EvidenceThreadResult,
+  threadQuestionTitle,
+  type WaitingItemSummary,
   EVIDENCE_THREAD_LANDING_LIMIT,
   type MessageId,
   ProjectId,
@@ -91,6 +93,14 @@ export class EvidenceService extends Context.Service<
     readonly markDiscussed: (input: MarkDiscussedInput) => Effect.Effect<void, EvidenceError>;
     readonly counts: () => Effect.Effect<EvidenceCounts, EvidenceError>;
     readonly subscribe: () => Stream.Stream<number>;
+    /** The thread's QA changes still waiting on someone: pending, discussed or a problem. */
+    readonly waitingQa: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, EvidenceError>;
+    /** Every thread showing a QA change that still waits on someone. */
+    readonly waitingQaThreads: () => Effect.Effect<ReadonlyArray<ThreadId>, EvidenceError>;
+    /** The thread showing each QA change that moved, as it moves. */
+    readonly qaThreadChanges: Stream.Stream<ThreadId>;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
     readonly coverage: (
       input: EvidenceCoverageInput,
@@ -237,6 +247,20 @@ const make = Effect.gen(function* () {
   const changes = yield* PubSub.sliding<number>(1);
   let revision = 0;
   const publish = Effect.suspend(() => PubSub.publish(changes, ++revision));
+  const qaThreads = yield* PubSub.unbounded<ThreadId>();
+  const publishQaThreads = (threadIds: Iterable<string>) =>
+    Effect.forEach(new Set(threadIds), (threadId) =>
+      PubSub.publish(qaThreads, ThreadId.make(threadId)),
+    );
+  const qaThreadsOf = (landingIds: ReadonlyArray<string>) =>
+    landingIds.length === 0
+      ? Effect.succeed<ReadonlyArray<string>>([])
+      : sql<{
+          readonly thread_id: string;
+        }>`SELECT DISTINCT coalesce(qa_thread_id, thread_id) AS thread_id
+          FROM evidence_landings WHERE landing_id IN ${sql.in(landingIds)}`.pipe(
+          Effect.map((rows) => rows.map((row) => row.thread_id)),
+        );
   const git = yield* GitVcsDriver.GitVcsDriver;
   // Cleared by record(); entries otherwise live for the TTL, then until the branch tip moves.
   const coverageCache = new Map<
@@ -454,6 +478,8 @@ const make = Effect.gen(function* () {
     coverageCache.clear();
     const rows = new Map(qa.map((row) => [row.change_id, row]));
     yield* publish;
+    const fixed = changes.flatMap((change) => (change.fixes ?? []).map((fix) => fix.landingId));
+    yield* publishQaThreads([qaThreadId, ...(yield* qaThreadsOf(fixed))]);
     return {
       landingId: input.id,
       changes: ids.map((id) => {
@@ -679,6 +705,7 @@ const make = Effect.gen(function* () {
     if (row === undefined) return yield* notFound;
     const result = yield* decodeQa(qaOf(row));
     yield* publish;
+    yield* publishQaThreads(yield* qaThreadsOf([input.landingId]));
     return result;
   });
 
@@ -743,8 +770,55 @@ const make = Effect.gen(function* () {
             RETURNING change_id`;
       marked ||= rows.length > 0;
     }
-    if (marked) yield* publish;
+    if (marked) {
+      yield* publish;
+      yield* publishQaThreads([input.threadId]);
+    }
   }, Effect.mapError(passStorage));
+
+  const waitingQa = Effect.fn("EvidenceService.waitingQa")(function* (threadId: ThreadId) {
+    const rows = yield* sql<{
+      readonly landing_id: string;
+      readonly change_id: string;
+      readonly state: EvidenceQaState;
+      readonly ref: number | null;
+      readonly discussed_message_id: string | null;
+      readonly record_json: string;
+    }>`SELECT q.landing_id, q.change_id, q.state, q.ref, q.discussed_message_id, l.record_json
+        FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+        WHERE coalesce(l.qa_thread_id, l.thread_id) = ${threadId}
+          AND q.state IN ('pending', 'problem')
+        ORDER BY q.ref, l.landed_at, q.landing_id, q.change_id`;
+    const records = new Map<string, EvidenceRecord>();
+    const items: WaitingItemSummary[] = [];
+    for (const row of rows) {
+      const record = records.get(row.landing_id) ?? (yield* decodeRecord(row.record_json));
+      records.set(row.landing_id, record);
+      const change = record.changes.find((entry) => entry.id === row.change_id);
+      items.push({
+        kind: "qa",
+        ref: `QA${row.ref ?? ""}`,
+        key: `${row.landing_id}/${row.change_id}`,
+        title: threadQuestionTitle(change?.summary || change?.ask || row.change_id),
+        state:
+          row.state === "problem"
+            ? "problem"
+            : row.discussed_message_id === null
+              ? "open"
+              : "discussing",
+      });
+    }
+    return items;
+  }, Effect.mapError(passStorage));
+
+  const waitingQaThreads = Effect.fn("EvidenceService.waitingQaThreads")(function* () {
+    const rows = yield* sql<{
+      readonly thread_id: string;
+    }>`SELECT DISTINCT coalesce(l.qa_thread_id, l.thread_id) AS thread_id
+        FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+        WHERE q.state IN ('pending', 'problem')`;
+    return rows.map((row) => ThreadId.make(row.thread_id));
+  }, Effect.mapError(storage));
 
   const counts = Effect.fn("EvidenceService.counts")(function* () {
     const rows = yield* sql<{
@@ -874,6 +948,9 @@ const make = Effect.gen(function* () {
     agentSetQa,
     markDiscussed,
     counts,
+    waitingQa,
+    waitingQaThreads,
+    qaThreadChanges: Stream.fromPubSub(qaThreads),
     coverage,
     subscribe: () =>
       Stream.unwrap(

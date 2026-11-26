@@ -187,15 +187,17 @@ describe("isAutoSettlementCandidate", () => {
   });
 
   it.each([
-    { openQuestionCount: 2, agentQuestionsEnabled: true, expected: false },
-    { openQuestionCount: 2, agentQuestionsEnabled: false, expected: true },
-    { openQuestionCount: 0, agentQuestionsEnabled: true, expected: true },
+    { waitingCounts: { question: 2, qa: 0, task: 0 }, waitingCardsEnabled: true, expected: false },
+    { waitingCounts: { question: 0, qa: 1, task: 0 }, waitingCardsEnabled: true, expected: false },
+    { waitingCounts: { question: 0, qa: 0, task: 1 }, waitingCardsEnabled: true, expected: false },
+    { waitingCounts: { question: 2, qa: 1, task: 1 }, waitingCardsEnabled: false, expected: true },
+    { waitingCounts: { question: 0, qa: 0, task: 0 }, waitingCardsEnabled: true, expected: true },
   ])(
-    "holds a thread with open questions only while agent questions are on: %j",
-    ({ openQuestionCount, agentQuestionsEnabled, expected }) => {
+    "holds a thread with items waiting on the user only while waiting cards are on: %j",
+    ({ waitingCounts, waitingCardsEnabled, expected }) => {
       expect(
-        ThreadSettlementService.isAutoSettlementCandidate(shell({ openQuestionCount }), NOW_MS, {
-          agentQuestionsEnabled,
+        ThreadSettlementService.isAutoSettlementCandidate(shell({ waitingCounts }), NOW_MS, {
+          waitingCardsEnabled,
         }),
       ).toBe(expected);
     },

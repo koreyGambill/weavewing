@@ -18,11 +18,10 @@ import { serverEnvironment } from "./server";
 import { useEnvironmentScope } from "./session";
 import { threadWorkspaceGet } from "./threadWorkspace";
 
-/** Environments whose agents may ask questions; one atom for every sidebar row to share. */
-export const agentQuestionsEnvironmentIdsAtom = Atom.make((get) => {
+/** Environments that show waiting-on-you cards; one atom for every sidebar row to share. */
+export const waitingCardsEnvironmentIdsAtom = Atom.make((get) => {
   const next = get(environmentSummaries.environmentIdsAtom).filter(
-    (environmentId) =>
-      get(serverEnvironment.settingsValueAtom(environmentId))?.agentQuestionsEnabled,
+    (environmentId) => get(serverEnvironment.settingsValueAtom(environmentId))?.waitingCardsEnabled,
   );
   const previous = get.self<ReadonlyArray<EnvironmentId>>();
   return previous._tag === "Some" &&

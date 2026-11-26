@@ -35,6 +35,7 @@ import {
   type EnvironmentId,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
+  waitingTotal,
 } from "@t3tools/contracts";
 
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -107,7 +108,7 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
-import { ThreadQuestionCountChip } from "../questions/ThreadQuestionCountChip";
+import { ThreadWaitingCountChip } from "../waiting/ThreadWaitingCountChip";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
@@ -635,7 +636,7 @@ type SidebarThreadRowProps = {
   environmentMachine: EnvironmentMachineKind;
   scratchMachineLabel: string | null;
   /** The thread's environment has agent questions on. */
-  questionsEnabled: boolean;
+  waitingCardsEnabled: boolean;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
@@ -807,8 +808,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     thread.settledOverride !== "settled";
-  const openQuestionCount = props.questionsEnabled ? (thread.openQuestionCount ?? 0) : 0;
-  const needsDecision = sidebarRowNeedsDecision({ status, isWoke, openQuestionCount });
+  const waitingCounts = props.waitingCardsEnabled ? thread.waitingCounts : undefined;
+  const needsDecision = sidebarRowNeedsDecision({
+    status,
+    isWoke,
+    openQuestionCount: waitingCounts?.question ?? 0,
+  });
   const shouldRecede =
     !needsDecision &&
     shouldRecedeSidebarThread({
@@ -818,9 +823,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       isActive: props.isActive,
       isSelected,
     });
-  const questionChip =
-    openQuestionCount > 0 ? (
-      <ThreadQuestionCountChip threadRef={threadRef} count={openQuestionCount} />
+  const waitingChip =
+    waitingCounts !== undefined && waitingTotal(waitingCounts) > 0 ? (
+      <ThreadWaitingCountChip counts={waitingCounts} waiting={thread.waiting} />
     ) : null;
   const topStatus =
     status === "preparing" || status === "working"
@@ -1549,7 +1554,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
                 </span>
               )}
-              {showsDropVerb ? null : questionChip}
+              {showsDropVerb ? null : waitingChip}
               {props.sweepAction !== null ? dragDestination : null}
               {/* Last on the line, so the locality marker never moves as the status changes. */}
               {multiline ? null : computerLocalityIcon}
@@ -1756,7 +1761,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
                 </span>
               )}
-              {showsDropVerb ? null : questionChip}
+              {showsDropVerb ? null : waitingChip}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="@container/title-line mt-1 flex min-w-0 items-center gap-1.5">

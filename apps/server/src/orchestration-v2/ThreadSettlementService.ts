@@ -12,6 +12,7 @@ import {
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
+  waitingTotal,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -162,16 +163,16 @@ function pullRequestSettles(
 export function isAutoSettlementCandidate(
   thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">,
   nowMs: number,
-  options: { readonly agentQuestionsEnabled?: boolean } = {},
+  options: { readonly waitingCardsEnabled?: boolean } = {},
 ): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
   // A guest is waiting on the owner; settling would hide the Request.
   if ((thread.pendingGuestMessageCount ?? 0) > 0) return false;
-  // Open questions wait on the user, but only while the Labs setting shows them; deferred ones
-  // do not count. A manual settle still goes through.
-  if (options.agentQuestionsEnabled === true && (thread.openQuestionCount ?? 0) > 0) return false;
+  // Questions, QA changes and tasks wait on the user while the setting shows them; deferred and
+  // discussed ones do not count. A manual settle still goes through.
+  if (options.waitingCardsEnabled === true && waitingTotal(thread.waitingCounts) > 0) return false;
   if (thread.activityRunStatus != null) return false;
   if (threadBackgroundWorkHoldsCompletion(thread)) return false;
   // Settling ends a watch, which would silently drop a reviewer's later comments.
@@ -368,7 +369,7 @@ export const make = Effect.gen(function* () {
       (thread) =>
         (automaticSettlementEnabled || thread.lineage.relationshipToParent === "subagent") &&
         isAutoSettlementCandidate(thread, nowMs, {
-          agentQuestionsEnabled: settings.agentQuestionsEnabled,
+          waitingCardsEnabled: settings.waitingCardsEnabled,
         }),
     );
 
@@ -384,7 +385,7 @@ export const make = Effect.gen(function* () {
             commandId: CommandId.make(`server:auto-settle:${thread.id}:${uuid}`),
             threadId: thread.id,
             snapshotAt: thread.updatedAt,
-            holdForOpenQuestions: settings.agentQuestionsEnabled,
+            holdForWaiting: settings.waitingCardsEnabled,
           });
           return null;
         }
@@ -410,7 +411,7 @@ export const make = Effect.gen(function* () {
           threadId: thread.id,
           snapshotAt: thread.updatedAt,
           settledAt,
-          holdForOpenQuestions: settings.agentQuestionsEnabled,
+          holdForWaiting: settings.waitingCardsEnabled,
         });
         return null;
       },

@@ -18,7 +18,7 @@ import {
 
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
-import { agentQuestionsEnvironmentIdsAtom } from "~/state/threadQuestions";
+import { waitingCardsEnvironmentIdsAtom } from "~/state/threadQuestions";
 import { revealQuestionInChat } from "../questions/questionReveal";
 import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -186,7 +186,7 @@ function ClampedQuestion({ text }: { text: string }) {
 
 function AnswerBlock({ block, messageId }: { block: SentContextBlock; messageId: string }) {
   const ctx = use(TimelineRowCtx);
-  const enabledIds = useAtomValue(agentQuestionsEnvironmentIdsAtom);
+  const enabledIds = useAtomValue(waitingCardsEnvironmentIdsAtom);
   const record = block.record.kind === "artifact-answer" ? block.record : null;
   const mode = threadQuestionReferenceMode(block.record);
   const questionId = record && mode !== null ? record.questionId : null;

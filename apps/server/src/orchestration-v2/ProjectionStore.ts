@@ -19,6 +19,7 @@ import type {
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
+import { isWaitingItemState } from "@t3tools/contracts";
 import {
   latestRootProviderFailure,
   latestUnheldRun,
@@ -245,7 +246,8 @@ export type ProjectionSettlementCandidate = Pick<
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
   | "pendingGuestMessageCount"
-  | "openQuestionCount"
+  | "waiting"
+  | "waitingCounts"
 > &
   Pick<OrchestrationV2AppThread, "lastSnoozeWakeAt"> & {
     readonly latestUserAuthoredMessageAt: DateTime.Utc | null;
@@ -1790,15 +1792,14 @@ function buildVisibleTurnItems(input: {
   );
 }
 
-// Absent until the thread's first question, like the mirror it counts. A sent answer no longer
-// waits on the user, though its turn may not have started.
-const openQuestionCount = (thread: Pick<OrchestrationV2AppThread, "questions">) =>
-  thread.questions === undefined
+// Absent until the thread's first waiting item, like the mirror it reads. Closed items stay on
+// the thread for the agent's turn context; the list shows only what still waits.
+const waitingShellFields = (thread: Pick<OrchestrationV2AppThread, "waiting" | "waitingCounts">) =>
+  thread.waiting === undefined || thread.waitingCounts === undefined
     ? {}
     : {
-        openQuestionCount: thread.questions.filter(
-          (question) => question.state === "open" && question.sent !== true,
-        ).length,
+        waiting: thread.waiting.filter((item) => isWaitingItemState(item.state)),
+        waitingCounts: thread.waitingCounts,
       };
 
 function pendingRuntimeRequestSummary(
@@ -2020,7 +2021,7 @@ export function threadShellFromProjection(
     ),
     pendingRuntimeRequest,
     pendingGuestMessageCount: pendingGuestMessageCount(projection.thread.guestShare),
-    ...openQuestionCount(projection.thread),
+    ...waitingShellFields(projection.thread),
     // Thread detail owns message bodies. Keeping them out of shell rows makes
     // initial hydration and streaming updates independent of transcript size.
     latestVisibleMessage: null,
@@ -2364,7 +2365,7 @@ function shellFromState(input: {
     usageLimitResetAt: input.state.usageLimitResetAt,
     pendingRuntimeRequest: input.state.pendingRuntimeRequest,
     pendingGuestMessageCount: pendingGuestMessageCount(input.state.thread.guestShare),
-    ...openQuestionCount(input.state.thread),
+    ...waitingShellFields(input.state.thread),
     latestVisibleMessage: null,
     latestUserMessageAt: input.state.latestUserMessageAt,
     latestUserAuthoredMessageAt: input.state.latestUserAuthoredMessageAt,
@@ -5533,7 +5534,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `;
             const previousUserMessage =
               messageIds.length > 0 &&
-              (thread.questions ?? []).some((question) => question.userChangedAt !== undefined)
+              (thread.waiting ?? []).some((item) => item.userChangedAt !== undefined)
                 ? yield* sql<{ at: string | null }>`
                     SELECT MAX(created_at) AS at FROM orchestration_v2_projection_messages
                     WHERE thread_id = ${threadId} AND role = 'user'
@@ -9116,7 +9117,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   activityRunStartedAt: null,
                   pendingRuntimeRequest: null,
                   pendingGuestMessageCount: pendingGuestMessageCount(thread.guestShare),
-                  ...openQuestionCount(thread),
+                  ...waitingShellFields(thread),
                   pendingBackgroundTasks: derivePendingBackgroundWork({
                     latestRun:
                       latestRunId === null || status === "idle"

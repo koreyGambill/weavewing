@@ -12,7 +12,7 @@ import {
   type EnvironmentId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { agentQuestionsEnvironmentIdsAtom } from "~/state/threadQuestions";
+import { waitingCardsEnvironmentIdsAtom } from "~/state/threadQuestions";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { use, type ReactNode } from "react";
 import { FileDiff } from "@pierre/diffs/react";
@@ -659,7 +659,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 /** A thread question's answer reads as its id, short title and the answer, not just a label. */
 function ArtifactAnswerChipLabel({ record }: { record: ArtifactAnswerContextRecord }) {
   const threadRef = use(TimelineRowCtx)?.threadRef ?? null;
-  const enabledIds: ReadonlyArray<EnvironmentId> = useAtomValue(agentQuestionsEnvironmentIdsAtom);
+  const enabledIds: ReadonlyArray<EnvironmentId> = useAtomValue(waitingCardsEnvironmentIdsAtom);
   const questionsEnabled = threadRef !== null && enabledIds.includes(threadRef.environmentId);
   const answer = record.choice || record.note.trim();
   if (!questionsEnabled || record.artifactId !== THREAD_QUESTIONS_ARTIFACT_ID || !answer)

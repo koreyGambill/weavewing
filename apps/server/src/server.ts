@@ -170,6 +170,7 @@ import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
 import * as StatusSources from "./statusSources/StatusSources.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import * as EvidenceService from "./evidence/EvidenceService.ts";
+import * as WaitingItems from "./waitingItems/WaitingItems.ts";
 import * as MessageFollowUpService from "./followUps/MessageFollowUpService.ts";
 import * as StatusSourceProbe from "./statusSources/StatusSourceProbe.ts";
 import * as StatusSourcesHttp from "./statusSources/http.ts";
@@ -1402,7 +1403,11 @@ const layerMakeServer = Layer.unwrap(
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),
-    }).pipe(Layer.provideMerge(layerRuntimeDependencies), Layer.provide(layerLauncher));
+    }).pipe(
+      Layer.provideMerge(WaitingItems.layer),
+      Layer.provideMerge(layerRuntimeDependencies),
+      Layer.provide(layerLauncher),
+    );
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes.pipe(Layer.provide(layerLauncher)), {
       disableLogger: !config.logWebSocketEvents,

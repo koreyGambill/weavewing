@@ -38,7 +38,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
-import { agentQuestionsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
 import { useAtomValue } from "@effect/atom-react";
 import { useUiStateStore } from "../uiStateStore";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -751,14 +751,14 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     pr,
     linkedPullRequest?.sourceControlProvider ?? resolveDisplayedThreadPrProvider(displayedPrInput),
   );
-  const questionsEnabled = useAtomValue(agentQuestionsEnvironmentIdsAtom).includes(
+  const waitingCardsEnabled = useAtomValue(waitingCardsEnvironmentIdsAtom).includes(
     thread.environmentId,
   );
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
       lastVisitedAt,
-      openQuestionCount: questionsEnabled ? thread.openQuestionCount : 0,
+      openQuestionCount: waitingCardsEnabled ? (thread.waitingCounts?.question ?? 0) : 0,
     },
   });
 

@@ -28,8 +28,10 @@ its status or your notes.
 
 ## Agent questions
 
-Turn on **Agent questions** in **Settings → Labs** to let agents ask for the
-decisions they need without stopping their work. Each question appears in the
+Agents ask for the decisions they need as questions without stopping their
+work, while **Waiting-on-you cards** is on in **Settings → Threads**. It is on
+by default and also covers QA cards and your tasks; see
+[Waiting on you](#waiting-on-you). Each question appears in the
 chat where the agent asked it, with its options and a note field. Choosing an
 option or typing a note saves a draft; choosing the chosen option again clears
 it. Nothing reaches the agent by itself: **Answer** puts the answer in your
@@ -65,18 +67,16 @@ line; click it to see the whole card again, with your choice and note, read-only
 A replaced question links to its replacement with **Replaced by Qn**, and the
 newer question links back with **Replaces Qn**.
 
-Clicking the line above the composer lists the waiting questions; picking one
-scrolls the chat to it, and **Answer all drafted** queues every draft.
-**Open panel** shows every question beside the chat in one scrolling column,
+Questions also show in the **Waiting on you** strip above the composer, where
+**Answer all drafted** queues every draft. **Open panel** shows every question beside the chat in one scrolling column,
 where J and K move, 1 to 9 choose an option, and N defers. Its filters show
 waiting, deferred, answered, or dismissed questions, and this device remembers
 your choice. **Refresh questions** adds a request to your message box asking the
 agent to withdraw questions that no longer matter and replace outdated ones;
 it is sent only when you send your message.
 
-A thread with questions waiting shows a count in the thread list, and an idle
-one reads **Needs Decision**. It stays out of automatic settling until you answer
-or close them; you can still settle it yourself.
+An idle thread with questions waiting reads **Needs Decision** in the thread
+list.
 
 - **Not yet** defers a question. It leaves the count and no longer holds the
   thread open. The agent reopens it when its work comes to need that decision.
@@ -88,6 +88,30 @@ or close them; you can still settle it yourself.
 
 Turning the setting off hides all of this, including questions already asked.
 Agents already running follow a change after they restart.
+
+## Waiting on you
+
+Three kinds of item wait on you: an agent's questions, landed changes with
+something only you can check (QA cards, see [Thread sidebar](thread-sidebar.md)),
+and tasks only you can do, which are Todos items you own.
+
+The **Waiting on you** strip above the composer counts each kind that has items
+waiting, and how many you are discussing with the agent. Click it to list them
+by kind. Each row's title shows its card in the chat, or Todos for a task, and
+its button is the one-click answer: **Answer** puts a question's drafted answer
+in your message box, **Looks good** confirms a change, and **Done** finishes a
+task. Looks good and Done start no turn. Escape closes the list. On a narrow
+window each row keeps only its title and button. The strip hides when nothing
+waits on you.
+
+Deferred questions, items you are discussing, and changes the agent is fixing
+leave the count. A thread with items waiting shows one count in the thread
+list; hover it to see them by kind. Such a thread stays out of automatic
+settling until you answer or close them; you can still settle it yourself.
+
+**Waiting-on-you cards** in **Settings → Threads** turns all of this on or off,
+and with it the agents' question tools. A machine where **Agent questions** was
+turned off in Labs keeps it off.
 
 ## Agent work
 

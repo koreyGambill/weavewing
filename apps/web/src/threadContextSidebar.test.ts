@@ -129,6 +129,11 @@ describe("thread tool signals", () => {
     ...(linkStates ? { linkStates } : {}),
   });
 
+  it("counts the agent's open items, leaving the user's own tasks to the waiting strip", () => {
+    const yours = { ...item("open"), id: "item-yours", owner: "you" as const };
+    expect(summarizeThreadTools(workspace([item("open"), yours])).listCount).toBe(1);
+  });
+
   it("counts open items, unanswered latest questions and the first ticket state", () => {
     const question = (id: string) => ({
       id,

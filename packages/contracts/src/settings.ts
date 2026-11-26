@@ -1766,8 +1766,12 @@ export const ServerSettings = Schema.Struct({
    * and tasks on another machine; tasks already running there finish.
    */
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Beta: agents ask non-blocking questions the thread list counts until the user answers. New agent sessions follow a change. */
-  agentQuestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Agents' questions, landed changes to check and tasks only the user can do show as cards and
+   * in the strip above the composer, and agents get the question tools. New agent sessions follow
+   * a change.
+   */
+  waitingCardsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   tailnetConnect: TailnetConnectSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(TailnetConnectSettings)({}))),
   ),
@@ -2202,7 +2206,7 @@ export const ServerSettingsPatch = Schema.Struct({
   hideTaggedThreads: Schema.optionalKey(Schema.Boolean),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
-  agentQuestionsEnabled: Schema.optionalKey(Schema.Boolean),
+  waitingCardsEnabled: Schema.optionalKey(Schema.Boolean),
   tailnetConnect: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),

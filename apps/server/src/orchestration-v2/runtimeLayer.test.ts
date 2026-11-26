@@ -3739,22 +3739,25 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           step,
         );
       }
-      assert.isUndefined(shellOf(yield* orchestrator.getShellSnapshot()).openQuestionCount);
+      assert.isUndefined(shellOf(yield* orchestrator.getShellSnapshot()).waitingCounts);
       for (const [step, states, expected] of [
         ["ask", ["open", "open"], 2],
         ["defer", ["deferred", "open"], 1],
         ["repeat", ["deferred", "open"], 1],
         ["reopen", ["open", "open"], 2],
         ["send", ["open", "open sent"], 1],
+        ["discuss", ["discussing", "open"], 1],
         ["unsend", ["open", "open"], 2],
         ["close", [], 0],
       ] as const) {
         yield* orchestrator.dispatch({
-          type: "thread.questions.sync",
-          commandId: CommandId.make(`runtime-layer-lifecycle-questions-${step}`),
+          type: "thread.waiting.sync",
+          commandId: CommandId.make(`runtime-layer-lifecycle-waiting-${step}`),
           threadId,
-          questions: states.map((state, index) => ({
-            id: `Q${index + 1}`,
+          items: states.map((state, index) => ({
+            kind: "question" as const,
+            ref: `Q${index + 1}`,
+            key: `Q${index + 1}`,
             title: "Which database?",
             ...(state === "open sent"
               ? { state: "open" as const, sent: true as const }
@@ -3762,7 +3765,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           })),
         });
         assert.strictEqual(
-          shellOf(yield* orchestrator.getShellSnapshot()).openQuestionCount,
+          shellOf(yield* orchestrator.getShellSnapshot()).waitingCounts?.question,
           expected,
           step,
         );
@@ -3776,10 +3779,12 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
 
       const reopenQuestion = (step: string, state?: "open") =>
         orchestrator.dispatch({
-          type: "thread.questions.sync",
-          commandId: CommandId.make(`runtime-layer-lifecycle-questions-${step}`),
+          type: "thread.waiting.sync",
+          commandId: CommandId.make(`runtime-layer-lifecycle-waiting-${step}`),
           threadId,
-          questions: state ? [{ id: "Q1", title: "Which database?", state }] : [],
+          items: state
+            ? [{ kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state }]
+            : [],
         });
       yield* reopenQuestion("reopen-before-auto-settle", "open");
       const reopenedProjection = yield* orchestrator.getThreadProjection(threadId);
@@ -3789,17 +3794,26 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           commandId: CommandId.make("runtime-layer-lifecycle-auto-settle-held"),
           threadId,
           snapshotAt: reopenedProjection.thread.updatedAt,
-          holdForOpenQuestions: true,
+          holdForWaiting: true,
         })
         .pipe(Effect.flip);
       assert.instanceOf(heldAutoSettle, Orchestrator.OrchestratorDispatchError);
       // An answer a message carries no longer holds the thread for the user, so the sweep's
       // settle below lands.
       yield* orchestrator.dispatch({
-        type: "thread.questions.sync",
-        commandId: CommandId.make("runtime-layer-lifecycle-questions-sent-before-auto-settle"),
+        type: "thread.waiting.sync",
+        commandId: CommandId.make("runtime-layer-lifecycle-waiting-sent-before-auto-settle"),
         threadId,
-        questions: [{ id: "Q1", title: "Which database?", state: "open", sent: true }],
+        items: [
+          {
+            kind: "question",
+            ref: "Q1",
+            key: "Q1",
+            title: "Which database?",
+            state: "open",
+            sent: true,
+          },
+        ],
       });
       const preAutoProjection = yield* orchestrator.getThreadProjection(threadId);
       const staleAutoSettle = yield* orchestrator
@@ -3818,7 +3832,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         commandId: CommandId.make("runtime-layer-lifecycle-auto-settle"),
         threadId,
         snapshotAt: preAutoProjection.thread.updatedAt,
-        holdForOpenQuestions: true,
+        holdForWaiting: true,
       });
       const autoSettledProjection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(autoSettledProjection.thread.settledOverride, "settled");

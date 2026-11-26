@@ -1373,7 +1373,7 @@ describe("HTML renders in the timeline", () => {
     type: "command_execution",
     input: "vp test run",
   });
-  const turn = (render: OrchestrationV2TurnItem, threadQuestions?: boolean) => {
+  const turn = (render: OrchestrationV2TurnItem, waitingCards?: boolean) => {
     const items: OrchestrationV2TurnItem[] = [
       {
         ...base("prompt", 0),
@@ -1399,7 +1399,7 @@ describe("HTML renders in the timeline", () => {
     return deriveTimelineEntriesFromVisibleTurnItems({
       visibleTurnItems: items.map(visible),
       optimisticMessages: [],
-      ...(threadQuestions === undefined ? {} : { threadQuestions }),
+      ...(waitingCards === undefined ? {} : { waitingCards }),
     });
   };
   const rowsFor = (entries: TimelineEntry[], expanded: boolean) =>
@@ -1482,6 +1482,20 @@ describe("HTML renders in the timeline", () => {
       "message",
     ]);
     expect(turn(ask, false).some((entry) => entry.kind === "thread-questions")).toBe(false);
+  });
+
+  it("shows a landing's QA cards in place of its record call, only while waiting cards are on", () => {
+    const record: OrchestrationV2TurnItem = {
+      ...base("render", 2),
+      type: "dynamic_tool",
+      toolName: "mcp__t3-code__evidence_record",
+      input: {},
+      output: { landingId: "landing-1", changes: [] },
+    };
+    expect(turn(record, true).find((entry) => entry.kind === "thread-evidence")).toMatchObject({
+      landingIds: ["landing-1"],
+    });
+    expect(turn(record, false).some((entry) => entry.kind === "thread-evidence")).toBe(false);
   });
 
   it("hosts a captured MCP app after its tool row, from any provider's tool", () => {

@@ -452,7 +452,7 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
-  readonly questions?: OrchestrationV2ThreadProjection["thread"]["questions"];
+  readonly waiting?: OrchestrationV2ThreadProjection["thread"]["waiting"];
   /** The thread's MCP session holds the `questions` capability. */
   readonly questionTools?: boolean;
   readonly sideChatRefresh?: string;
@@ -587,7 +587,7 @@ function makeLocalCommandHarness(input: {
       worktreePath: input.worktreePath ?? null,
       forkedFrom: null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
-      ...(input.questions === undefined ? {} : { questions: input.questions }),
+      ...(input.waiting === undefined ? {} : { waiting: input.waiting }),
     } as OrchestrationV2ThreadProjection["thread"],
     runs: [
       ...(input.previousNativeSession
@@ -2358,9 +2358,12 @@ effectIt.effect.each([
       text: "My own prompt",
       sideChat: { contextRun: "delivered" },
       questionTools: input.enabled,
-      questions: [
-        { id: "Q1", title: "Which database?", state: "open" },
-        { id: "Q2", title: "Flag name?", state: "deferred" },
+      waiting: [
+        { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "open" },
+        { kind: "question", ref: "Q2", key: "Q2", title: "Flag name?", state: "deferred" },
+        // QA changes and tasks reach the agent on their own lines, not as questions.
+        { kind: "qa", ref: "QA1", key: "l1/c1", title: "Toast count", state: "open" },
+        { kind: "task", ref: "T1", key: "task-1", title: "Rotate the secret", state: "open" },
       ],
       ...("origin" in input ? { origin: input.origin } : {}),
     });
@@ -2377,6 +2380,26 @@ effectIt.effect.each([
   }),
 );
 
+effectIt.effect("marks a question the user is discussing in the open questions line", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      questionTools: true,
+      waiting: [
+        { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "discussing" },
+      ],
+    });
+    yield* harness.start;
+    expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
+      withInlineContext(
+        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database? (discussing; once you have replied, ask it again with replaces while the decision is still open)",
+        "My own prompt",
+      ),
+    );
+  }),
+);
+
 effectIt.effect(
   "tells the agent which questions the user changed since the previous user message",
   () =>
@@ -2386,22 +2409,30 @@ effectIt.effect(
         sideChat: { contextRun: "delivered" },
         questionTools: true,
         previousUserMessageAt: "2026-09-04T11:00:00Z",
-        questions: [
-          { id: "Q1", title: "Which database?", state: "open" },
+        waiting: [
+          { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "open" },
           {
-            id: "Q2",
+            kind: "question",
+            ref: "Q2",
+            key: "Q2",
             title: "Old news?",
-            state: "withdrawn",
+            state: "dismissed",
+            settledBy: "user",
             userChangedAt: "2026-09-04T10:30:00.000Z",
           },
           {
-            id: "Q3",
+            kind: "question",
+            ref: "Q3",
+            key: "Q3",
             title: "Flag name?",
-            state: "withdrawn",
+            state: "dismissed",
+            settledBy: "user",
             userChangedAt: "2026-09-04T11:30:00.000Z",
           },
           {
-            id: "Q4",
+            kind: "question",
+            ref: "Q4",
+            key: "Q4",
             title: "Ship?",
             state: "deferred",
             userChangedAt: "2026-09-04T11:40:00.000Z",

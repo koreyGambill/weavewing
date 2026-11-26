@@ -137,7 +137,9 @@ yours; give one to the agent before adding it, or change who is responsible from
 the item's menu. Items nest up to three levels: indent and outdent from the item's
 menu, or press Tab and Shift+Tab while editing its text. Select an item's text to
 edit it and its note. Filter the list to your items or the agent's, and show done
-and dropped items when you need them. These choices stay on this device.
+and dropped items when you need them. These choices stay on this device. The
+Todos badge counts the agent's open items; your own open items count in the
+thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#waiting-on-you)).
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
@@ -165,7 +167,9 @@ The Evidence tool lists the same landings. Pick **Thread** for this thread's lan
 or **All** for every thread on this server, and filter to the ones that still need QA.
 Open a landing to see its changes and load their captures; click a capture to view it
 full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
-change it at any time. The strip badge counts changes waiting for your QA.
+change it at any time. Changes waiting for your QA count in each thread's
+**Waiting on you** strip, and QA cards show only while **Waiting-on-you cards** is on
+in **Settings → Threads**.
 
 Each change's review shows as **Unverified review** with the verdict the agent
 reported, such as "agent reported approved". Weavewing does not yet check that

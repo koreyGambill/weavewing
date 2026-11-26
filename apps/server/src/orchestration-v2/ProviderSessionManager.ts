@@ -454,10 +454,10 @@ export const layerWithOptions = (
             Effect.orElseSucceed(() => false),
           );
       // Labs flag, read when a credential is issued, so a session's tools and instructions agree.
-      const agentQuestionsEnabled = Option.isNone(serverSettings)
+      const waitingCardsEnabled = Option.isNone(serverSettings)
         ? Effect.succeed(false)
         : serverSettings.value.getSettings.pipe(
-            Effect.map((settings) => settings.agentQuestionsEnabled),
+            Effect.map((settings) => settings.waitingCardsEnabled),
             Effect.orElseSucceed(() => false),
           );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
@@ -589,7 +589,7 @@ export const layerWithOptions = (
                 // A delegated child reports to its parent instead of asking the user, so a
                 // thread whose lineage cannot be read gets no question tools either.
                 const questionTools =
-                  Option.isSome(lineage) && !lineage.value && (yield* agentQuestionsEnabled);
+                  Option.isSome(lineage) && !lineage.value && (yield* waitingCardsEnabled);
                 if (questionTools) capabilities.add("questions");
                 const contextRewind = yield* registry.get(providerInstanceId).pipe(
                   Effect.map((adapter) => adapter.offersContextRewind),

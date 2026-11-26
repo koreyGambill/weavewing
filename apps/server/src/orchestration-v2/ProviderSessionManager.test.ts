@@ -819,7 +819,7 @@ function runBrowserAccessScenario(input: {
   readonly deviceOverride?: boolean;
   readonly enableAgentDeviceAccess?: boolean;
   readonly enableDeviceSupport?: boolean;
-  readonly agentQuestionsEnabled?: boolean;
+  readonly waitingCardsEnabled?: boolean;
   readonly createThread?: boolean;
   readonly projectExists?: boolean;
   readonly delegatedBy?: ThreadId;
@@ -880,9 +880,9 @@ function runBrowserAccessScenario(input: {
             ...(input.enableDeviceSupport === undefined
               ? {}
               : { enableDeviceSupport: input.enableDeviceSupport }),
-            ...(input.agentQuestionsEnabled === undefined
+            ...(input.waitingCardsEnabled === undefined
               ? {}
-              : { agentQuestionsEnabled: input.agentQuestionsEnabled }),
+              : { waitingCardsEnabled: input.waitingCardsEnabled }),
             projectSettingsOverrides: {
               [projectId]: {
                 enableAgentBrowserAccess: input.projectOverride,
@@ -2723,9 +2723,10 @@ it.effect(
         assert.equal(captured?.browserToolsAvailable, false);
         const token = captured?.authorizationHeader.replace(/^Bearer\s+/, "");
         const resolved = yield* registry.resolve(token!);
+        // Waiting-on-you cards are on by default, so a top-level thread gets the question tools.
         assert.deepEqual(
           resolved?.capabilities,
-          new Set(["orchestration", "worktree", "pull-requests", "terminal"]),
+          new Set(["orchestration", "worktree", "pull-requests", "terminal", "questions"]),
         );
 
         yield* manager.close(providerSessionId);
@@ -5853,7 +5854,7 @@ it.effect.each([
     const config = yield* runBrowserAccessScenario({
       enableAgentBrowserAccess: true,
       projectOverride: true,
-      agentQuestionsEnabled: input.enabled,
+      waitingCardsEnabled: input.enabled,
       ...(input.name === "a thread whose lineage cannot be read" ? { createThread: false } : {}),
       ...(input.child
         ? { delegatedBy: ThreadId.make("thread-provider-session-manager-parent") }

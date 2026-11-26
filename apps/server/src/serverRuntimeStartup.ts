@@ -31,6 +31,7 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "./config.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ThreadWorkspace from "./threadWorkspace/ThreadWorkspace.ts";
+import * as WaitingItems from "./waitingItems/WaitingItems.ts";
 import { flushCompileCache } from "./compileCache.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -464,6 +465,7 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
   const random = yield* SecureRandom.SecureRandom;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const threadWorkspace = yield* ThreadWorkspace.ThreadWorkspace;
+  const waitingItems = yield* WaitingItems.WaitingItems;
 
   const agentScope = yield* AgentScope;
   const commandGate = yield* makeCommandGate;
@@ -579,12 +581,11 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
       ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
     });
     yield* Effect.logInfo("V2 orchestration recovery completed", recovery);
-    // A question sync lost to a crash or failed dispatch leaves a wrong count on a thread nobody
-    // may open again, so every workspace with questions is checked once per start.
-    yield* runStartupPhase("thread-questions.reconcile", threadWorkspace.reconcileQuestions).pipe(
-      Effect.catch((cause) => Effect.logWarning("Failed to reconcile thread questions", { cause })),
-      forkParked,
-    );
+    // A sync lost to a crash or failed dispatch leaves a wrong count on a thread nobody may open
+    // again, so every thread with a waiting item is rebuilt once per start. Following first means
+    // a change made during that pass is rebuilt too.
+    yield* forkParked(waitingItems.follow);
+    yield* runStartupPhase("waiting-items.reconcile", waitingItems.reconcile).pipe(forkParked);
     yield* forkParked(threadWorkspace.followQuestionDeliveries);
     // Runs after activation: the status check fetches every enabled project's
     // remote, and awaiting it here held command readiness for that long.

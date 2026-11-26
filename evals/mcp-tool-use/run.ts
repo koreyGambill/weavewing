@@ -360,7 +360,7 @@ export const McpToolUseCase = Schema.Struct({
      */
     contextRewind: Schema.optional(Schema.Boolean),
     /**
-     * The Agent questions beta is on: T3 lists the question tools, adds their text, and puts these
+     * The Waiting-on-you cards setting is on: T3 lists the question tools, adds their text, and puts these
      * open and deferred questions ahead of the user's `prompt`, marking those under discussion.
      */
     questions: Schema.optional(
@@ -614,7 +614,7 @@ const pastedSecret = (name: string, input: Readonly<Record<string, unknown>>) =>
 const hiddenFromSubagents = enabledWhen(McpInvocationContext.hiddenFromSubagents);
 // The Linked environments beta starts off, and T3 lists its tools only while it is on.
 const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff);
-// T3 lists the question tools only to sessions the Agent questions setting grants them.
+// T3 lists the question tools only to sessions the Waiting-on-you cards setting grants them.
 // T3 lists context_rewind to Claude sessions and context_rewind_turn to Codex sessions whose
 // provider setting turns rewind on.
 const visibleT3Tools = (options: {
@@ -751,7 +751,7 @@ export const buildBase = (
     readonly deviceAccess?: boolean;
     /** false: the thread has no agent browser access, so T3's text leaves the browser out. */
     readonly browserAccess?: boolean;
-    /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
+    /** The Waiting-on-you cards setting is on: T3 lists the question tools and adds their text. */
     readonly questionTools?: boolean;
     /** The Claude context rewind setting is on: T3 lists context_rewind. */
     readonly contextRewind?: boolean;
@@ -849,7 +849,7 @@ const buildCodexBase = (
     readonly deviceAccess?: boolean;
     /** false: the thread has no agent browser access, so T3's text leaves the browser out. */
     readonly browserAccess?: boolean;
-    /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
+    /** The Waiting-on-you cards setting is on: T3 lists the question tools and adds their text. */
     readonly questionTools?: boolean;
     /** The Codex context rewind setting is on: T3 lists context_rewind_turn. */
     readonly contextRewindTurn?: boolean;

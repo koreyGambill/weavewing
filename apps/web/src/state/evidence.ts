@@ -25,7 +25,7 @@ export function reloadEvidence() {
   appAtomRegistry.set(reloadAtom, appAtomRegistry.get(reloadAtom) + 1);
 }
 
-/** Returning to the window refetches evidence; the strip, always mounted, owns the listener. */
+/** Returning to the window refetches evidence; the tools strip, always mounted, owns the listener. */
 export function useReloadEvidenceOnReturn(enabled: boolean) {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Window focus happens outside React.
   useEffect(() => {
@@ -59,13 +59,6 @@ export const evidenceGet = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
   tag: WS_METHODS.evidenceGet,
   staleTimeMs: 0,
   idleTtlMs: 0,
-  refreshTrigger,
-});
-const evidenceCounts = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-  label: "evidence:counts",
-  tag: WS_METHODS.evidenceCounts,
-  staleTimeMs: 0,
-  idleTtlMs: 60_000,
   refreshTrigger,
 });
 /** The open thread's landings; dropped once no row reads them, so a thread switch ends the read. */
@@ -122,10 +115,4 @@ export function useThreadEvidence(
         }),
   );
   return { ...query, supported: environmentId !== null, requested: new Set(landingIds) };
-}
-
-export function useEvidenceCounts(environmentId: EnvironmentId | null) {
-  return useEnvironmentQuery(
-    environmentId === null ? null : evidenceCounts({ environmentId, input: {} }),
-  );
 }

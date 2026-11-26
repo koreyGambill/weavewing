@@ -294,6 +294,25 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect.each([
+    { stored: `{}`, expected: true },
+    { stored: `{ "agentQuestionsEnabled": false }`, expected: false },
+    { stored: `{ "agentQuestionsEnabled": true }`, expected: true },
+    { stored: `{ "agentQuestionsEnabled": true, "waitingCardsEnabled": false }`, expected: false },
+  ])(
+    "keeps a saved questions switch as the waiting-cards switch: $stored",
+    ({ stored, expected }) =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        yield* fs.writeFileString(config.settingsPath, stored);
+        const settings = yield* service.getSettings;
+        assert.strictEqual(settings.waitingCardsEnabled, expected);
+        assert.notProperty(settings, "agentQuestionsEnabled");
+      }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("tells clients it reads idle compaction modes before any settings are saved", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

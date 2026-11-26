@@ -1815,6 +1815,27 @@ export function ThreadsSettingsPanel() {
         </SettingsSection>
       ) : null}
 
+      {!isProjectScope ? (
+        <SettingsSection id="waiting-on-you" title="Waiting on you">
+          <SettingsRow
+            serverScoped
+            {...searchableSetting("waiting-cards")}
+            description="Show agents' questions, landed changes to check and your tasks as cards, in a strip above the composer and as a count per thread. Agents get question tools when they next start."
+            settingKeys={["waitingCardsEnabled"]}
+            control={
+              <ScopedSwitch
+                settingKeys={["waitingCardsEnabled"]}
+                checked={settings.waitingCardsEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ waitingCardsEnabled: Boolean(checked) })
+                }
+                aria-label="Waiting-on-you cards"
+              />
+            }
+          />
+        </SettingsSection>
+      ) : null}
+
       <SettingsSection id="usage-limits" title="Usage limits">
         <SettingsRow
           serverScoped

@@ -56,3 +56,23 @@ export function revealQuestionInChat(threadKey: string, questionId: string) {
       description: "Scroll up to load earlier messages, then try again.",
     });
 }
+
+const QA_REVEAL_PREFIX = "qa:";
+
+/** The landing a reveal request asks for, or null for a question's request. */
+export const qaRevealLandingId = (target: string) =>
+  target.startsWith(QA_REVEAL_PREFIX) ? target.slice(QA_REVEAL_PREFIX.length) : null;
+
+/** Scrolls the thread's chat to the landing holding a QA change's card. */
+export function revealQaInChat(
+  threadKey: string,
+  item: { readonly ref: string; readonly key: string },
+) {
+  const landingId = item.key.slice(0, Math.max(0, item.key.indexOf("/")));
+  if (requestQuestionReveal(threadKey, `${QA_REVEAL_PREFIX}${landingId}`) === "missing")
+    toastManager.add({
+      type: "info",
+      title: `${item.ref} is not in the loaded part of the chat`,
+      description: "Scroll up to load earlier messages, or open Evidence to find it.",
+    });
+}

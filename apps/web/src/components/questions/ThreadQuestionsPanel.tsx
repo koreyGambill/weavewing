@@ -68,7 +68,7 @@ const SECTION_LABELS: Record<ThreadQuestionSection, string> = {
 /** The panel while the environment's agent questions setting is on; nothing otherwise. */
 export function GatedThreadQuestionsPanel(props: Parameters<typeof ThreadQuestionsPanel>[0]) {
   const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.threadRef.environmentId));
-  return settings?.agentQuestionsEnabled === true ? <ThreadQuestionsPanel {...props} /> : null;
+  return settings?.waitingCardsEnabled === true ? <ThreadQuestionsPanel {...props} /> : null;
 }
 
 /**

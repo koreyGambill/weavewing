@@ -24,6 +24,7 @@ import {
   RunAttemptId,
   NodeId,
   ThreadId,
+  type WaitingItemSummary,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -88,6 +89,30 @@ import {
 export const SCRATCH_FOLDER_CONTEXT = {
   key: "scratch-folder",
   text: "This folder holds shared repositories; don't edit them here. Use /tmp for throwaway files and an Xwing environment you created for changes.",
+};
+
+// The question lines' shape, from the thread's waiting items.
+const questionContextLine = (
+  item: WaitingItemSummary,
+): ReadonlyArray<Parameters<typeof t3OpenQuestionsContext>[0][number]> => {
+  if (item.kind !== "question") return [];
+  const line = {
+    id: item.ref,
+    title: item.title,
+    ...(item.userChangedAt === undefined ? {} : { userChangedAt: item.userChangedAt }),
+    ...(item.sent === undefined ? {} : { sent: item.sent }),
+  };
+  switch (item.state) {
+    case "open":
+    case "deferred":
+      return [{ ...line, state: item.state }];
+    case "discussing":
+      return [{ ...line, state: "open" as const, discussing: true as const }];
+    case "dismissed":
+      return [{ ...line, state: "withdrawn" as const }];
+    default:
+      return [];
+  }
 };
 
 export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStartError>()(
@@ -1027,7 +1052,7 @@ export const layer: Layer.Layer<
         message.role === "user" &&
         message.createdBy === "user" &&
         (message.origin?.kind ?? "user") === "user";
-      const questionsAsked = projection.thread.questions ?? [];
+      const questionsAsked = (projection.thread.waiting ?? []).flatMap(questionContextLine);
       const openQuestions =
         inputMessages.some(fromUser) &&
         questionsAsked.length > 0 &&

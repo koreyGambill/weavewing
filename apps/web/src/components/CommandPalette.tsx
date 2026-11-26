@@ -194,7 +194,7 @@ import {
   useCommandPaletteMount,
   useCommandPaletteStore,
 } from "../commandPaletteStore";
-import { agentQuestionsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
@@ -572,7 +572,7 @@ function OpenCommandPaletteDialog(props: {
   const canChangeActiveThreadFolder = useAtomValue(
     changeThreadFolder.permissionAtom(activeThread?.environmentId ?? preferredEnvironmentId),
   );
-  const questionsEnvironmentIds = useAtomValue(agentQuestionsEnvironmentIdsAtom);
+  const waitingCardsEnvironmentIds = useAtomValue(waitingCardsEnvironmentIdsAtom);
   const canShareActiveThreadWithGuest = useAtomValue(
     canShareWithGuestAtom(activeThread?.environmentId ?? ("" as EnvironmentId)),
   );
@@ -1878,8 +1878,8 @@ function OpenCommandPaletteDialog(props: {
 
   if (
     activeThread !== null &&
-    activeThread.openQuestionCount !== undefined &&
-    questionsEnvironmentIds.includes(activeThread.environmentId)
+    (activeThread.waiting ?? []).some((item) => item.kind === "question") &&
+    waitingCardsEnvironmentIds.includes(activeThread.environmentId)
   ) {
     actionItems.push({
       kind: "action",

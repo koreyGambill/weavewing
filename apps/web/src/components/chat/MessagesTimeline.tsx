@@ -120,6 +120,7 @@ import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTime
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
 import { ThreadEvidenceTimelineRow } from "../evidence/ThreadEvidenceTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
+import { qaRevealLandingId } from "../questions/questionReveal";
 import {
   scrollQuestionReferenceIntoRow,
   useQuestionReferenceReveal,
@@ -947,13 +948,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
       .then(afterScroll);
     return true;
   };
-  useQuestionReveal(routeThreadKey, rows.length, (questionId) =>
-    revealRow(
-      rows.findIndex(
-        (row) => row.kind === "thread-questions" && row.questionIds.includes(questionId),
+  useQuestionReveal(routeThreadKey, rows.length, (target) => {
+    const landingId = qaRevealLandingId(target);
+    return revealRow(
+      rows.findIndex((row) =>
+        landingId === null
+          ? row.kind === "thread-questions" && row.questionIds.includes(target)
+          : row.kind === "thread-evidence" && row.landingIds.includes(landingId),
       ),
-    ),
-  );
+    );
+  });
   useQuestionReferenceReveal(routeThreadKey, rows.length, (target) =>
     revealRow(
       rows.findIndex((row) => row.kind === "message" && row.message.id === target.messageId),

@@ -74,3 +74,11 @@ export function toggleQaDiscuss(
   );
   if (!present) focusNearestComposer(from);
 }
+
+/** Takes a QA change's Discuss reference out of the composer, if it holds one. */
+export function removeQaDiscuss(threadRef: ScopedThreadRef, key: string) {
+  const store = useComposerDraftStore.getState();
+  const current = store.getComposerDraft(threadRef)?.waitingItems ?? [];
+  const kept = current.filter((entry) => !(entry.itemKind === "qa" && entry.key === key));
+  if (kept.length !== current.length) store.setWaitingItems(threadRef, kept);
+}

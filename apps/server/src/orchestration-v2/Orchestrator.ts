@@ -85,6 +85,9 @@ import {
   managedRuntimeModeCeilingMessage,
   T3_MCP_SERVER_NAME,
   threadToolOverridesNotice,
+  sameWaitingItems,
+  waitingMirror,
+  waitingTotal,
 } from "@t3tools/contracts";
 import { claudeMcpServerRule } from "@t3tools/shared/mcpApp";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -751,7 +754,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.guest-share.close":
     case "thread.guest-message.submit":
     case "thread.guest-message.dismiss":
-    case "thread.questions.sync":
+    case "thread.waiting.sync":
     case "thread.settle":
     case "thread.auto-settle":
     case "thread.unsettle":
@@ -4692,8 +4695,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ]);
   };
 
-  const dispatchQuestionsSync = Effect.fn("orchestrationV2.dispatch.questionsSync")(function* (
-    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.questions.sync" }>,
+  const dispatchWaitingSync = Effect.fn("orchestrationV2.dispatch.waitingSync")(function* (
+    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.waiting.sync" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
     const thread = yield* projectionStore
@@ -4703,21 +4706,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
         ),
       );
-    const mirrored = thread.questions ?? [];
+    const { waiting, waitingCounts } = waitingMirror(command.items);
     if (
       thread.deletedAt !== null ||
-      (mirrored.length === command.questions.length &&
-        mirrored.every((question, index) => {
-          const next = command.questions[index]!;
-          return (
-            question.id === next.id &&
-            question.title === next.title &&
-            question.state === next.state &&
-            question.userChangedAt === next.userChangedAt &&
-            question.sent === next.sent &&
-            question.discussing === next.discussing
-          );
-        }))
+      (thread.waiting === undefined
+        ? waiting.length === 0
+        : sameWaitingItems(thread.waiting, waiting) &&
+          thread.waitingCounts?.question === waitingCounts.question &&
+          thread.waitingCounts.qa === waitingCounts.qa &&
+          thread.waitingCounts.task === waitingCounts.task)
     )
       return;
     yield* emit(
@@ -4725,12 +4722,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command,
     )({
       // Upstream clients reject unknown event types; this one replaces the thread without
-      // counting as activity, which suits a question count.
+      // counting as activity, which suits a waiting count.
       type: "thread.tags-updated",
       threadId: command.threadId,
       providerInstanceId: thread.providerInstanceId,
       occurredAt: yield* DateTime.now,
-      payload: { ...thread, questions: command.questions },
+      payload: { ...thread, waiting: [...waiting], waitingCounts },
     });
   });
 
@@ -17298,11 +17295,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         if (
           thread.settledOverride !== null ||
           DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt) ||
-          // Question changes keep updatedAt, so the sweep's snapshot cannot see a reopen.
-          (command.holdForOpenQuestions === true &&
-            (thread.questions ?? []).some(
-              (question) => question.state === "open" && question.sent !== true,
-            ))
+          // Waiting items keep updatedAt, so the sweep's snapshot cannot see a reopen.
+          (command.holdForWaiting === true && waitingTotal(thread.waitingCounts) > 0)
         ) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
@@ -17436,8 +17430,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.guest-message.dismiss":
         yield* dispatchGuestShare(command, events, effects);
         break;
-      case "thread.questions.sync":
-        yield* dispatchQuestionsSync(command, events);
+      case "thread.waiting.sync":
+        yield* dispatchWaitingSync(command, events);
         break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
@@ -17832,7 +17826,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
           // A repaired mirror may already match.
-          command.type === "thread.questions.sync" ||
+          command.type === "thread.waiting.sync" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
         (_planned) =>
           new OrchestratorDispatchError({

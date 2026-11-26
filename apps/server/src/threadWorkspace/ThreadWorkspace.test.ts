@@ -18,7 +18,7 @@ import {
   type OrchestrationV2ServerCommand,
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
-  type OrchestrationV2ThreadQuestionSummary,
+  type WaitingItemSummary,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
@@ -78,9 +78,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   let staleClosed = false;
   let laneStatus: OrchestrationV2Run["status"] = "running";
   const sends: ThreadManagement.ThreadManagementSendInput[] = [];
-  const syncs: Array<ReadonlyArray<OrchestrationV2ThreadQuestionSummary>> = [];
-  const mirror = { questions: [] as ReadonlyArray<OrchestrationV2ThreadQuestionSummary> };
-  const dispatchFailures = { remaining: 0 };
+  const mirror = { waiting: [] as ReadonlyArray<WaitingItemSummary> };
   const threadState = { archivedAt: null as DateTime.Utc | null };
   // Like the orchestrator's command receipts: a repeated command id delivers nothing new.
   const delivered: ThreadManagement.ThreadManagementSendInput[] = [];
@@ -92,7 +90,6 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   const threadAttempts: OrchestrationV2RunAttempt[] = [];
   const threadProviderTurns: OrchestrationV2ProviderTurn[] = [];
   const domainEvents = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
-  const syncSignals = yield* Queue.unbounded<ReadonlyArray<OrchestrationV2ThreadQuestionSummary>>();
   const run = (): OrchestrationV2Run => ({
     id: RunId.make("run"),
     threadId,
@@ -133,7 +130,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
           thread: {
             ...projection.thread,
             id,
-            questions: mirror.questions,
+            waiting: mirror.waiting,
             archivedAt: threadState.archivedAt,
           },
           runs: id === threadId ? threadRuns : [run()],
@@ -141,24 +138,8 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
           providerTurns: id === threadId ? threadProviderTurns : [],
         })),
       streamDomainEvents: Stream.fromQueue(domainEvents),
-      dispatch: (command: OrchestrationV2ServerCommand) => {
-        if (dispatchFailures.remaining > 0) {
-          dispatchFailures.remaining--;
-          return Effect.fail(
-            new Orchestrator.OrchestratorDispatchError({
-              commandId: command.commandId,
-              commandType: command.type,
-              cause: "unavailable",
-            }),
-          );
-        }
-        if (command.type === "thread.questions.sync") {
-          syncs.push(command.questions);
-          mirror.questions = command.questions;
-          Queue.offerUnsafe(syncSignals, command.questions);
-        }
-        return Effect.succeed({ sequence: 1, storedEvents: [] });
-      },
+      dispatch: (_command: OrchestrationV2ServerCommand) =>
+        Effect.succeed({ sequence: 1, storedEvents: [] }),
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       sendToThread: (input) =>
@@ -191,15 +172,27 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
     }),
   );
   const context = yield* Layer.build(Workspaces.layer.pipe(Layer.provide(dependencies)));
+  const service = Context.get(context, Workspaces.ThreadWorkspace);
+  const changed = yield* Queue.unbounded<ThreadId>();
+  yield* Stream.runForEach(service.changes, (id) => Queue.offer(changed, id)).pipe(
+    Effect.forkScoped,
+  );
+  /** The thread's questions as the waiting-items mirror shows them, kept for the follower's check. */
+  const mirrored = () =>
+    service.waitingItems(threadId).pipe(
+      Effect.map((items) => {
+        mirror.waiting = items;
+        return items.filter((item) => item.kind === "question");
+      }),
+    );
   return {
-    service: Context.get(context, Workspaces.ThreadWorkspace),
+    service,
     sends,
     delivered,
     hooks,
     threadState,
-    syncs,
-    mirror,
-    dispatchFailures,
+    mirrored,
+    changed,
     messages,
     threadRuns,
     /** Records the provider accepting `runId`'s turn: an attempt and its provider turn. */
@@ -209,7 +202,6 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
       threadProviderTurns.push({ runAttemptId: attemptId } as OrchestrationV2ProviderTurn);
     },
     domainEvents,
-    syncSignals,
     fs,
     path,
     config,
@@ -694,15 +686,21 @@ it.effect("moves questions through their states with ids that are never reused",
       ["Q1", "open"],
       ["Q2", "open"],
     ]);
-    expect(h.mirror.questions).toEqual([
-      { id: "Q1", title: "Which database should the cache use for local…", state: "open" },
-      { id: "Q2", title: "Ship behind a flag?", state: "open" },
+    expect(yield* h.mirrored()).toEqual([
+      {
+        kind: "question",
+        ref: "Q1",
+        key: "Q1",
+        title: "Which database should the cache use for local…",
+        state: "open",
+      },
+      { kind: "question", ref: "Q2", key: "Q2", title: "Ship behind a flag?", state: "open" },
     ]);
     yield* update("Q1", "deferred", "user");
-    expect(h.mirror.questions.map((question) => question.state)).toEqual(["deferred", "open"]);
-    expect(h.mirror.questions[0]?.userChangedAt).toBeDefined();
+    expect((yield* h.mirrored()).map((question) => question.state)).toEqual(["deferred", "open"]);
+    expect((yield* h.mirrored())[0]?.userChangedAt).toBeDefined();
     yield* update("Q1", "open", "agent");
-    expect(h.mirror.questions[0]).not.toHaveProperty("userChangedAt");
+    expect((yield* h.mirrored())[0]).not.toHaveProperty("userChangedAt");
     const answered = yield* update("Q2", "answered", "agent", { notes: "Yes, default off" });
     expect(answered.questions[1]).toMatchObject({
       state: "answered",
@@ -712,11 +710,14 @@ it.effect("moves questions through their states with ids that are never reused",
     expect(answered.questions[1]?.closedAt).not.toBeNull();
     yield* update("Q1", "withdrawn", "user");
     // Kept so the agent's next user-message turn hears the user dismissed it.
-    expect(h.mirror.questions).toEqual([
+    expect(yield* h.mirrored()).toEqual([
       {
-        id: "Q1",
+        kind: "question",
+        ref: "Q1",
+        key: "Q1",
         title: expect.any(String),
-        state: "withdrawn",
+        state: "dismissed",
+        settledBy: "user",
         userChangedAt: expect.any(String),
       },
     ]);
@@ -736,7 +737,7 @@ it.effect("moves questions through their states with ids that are never reused",
       ["Q4", "open"],
     ]);
     expect(replaced.questions[2]?.replacedBy).toBe("Q4");
-    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q1", "Q2", "Q4"]);
+    expect((yield* h.mirrored()).map((question) => question.ref)).toEqual(["Q1", "Q2", "Q4"]);
 
     for (const [attempt, code] of [
       [update("Q1", "withdrawn"), "invalid"],
@@ -847,13 +848,19 @@ it.effect("counts an answer a queued message carries as sent until its turn star
     });
     const revision = drafted.questions[0]!.answer!.draftRevision!;
     const sentState = () =>
-      h.mirror.questions.map((question) => [question.id, question.sent === true]);
+      h
+        .mirrored()
+        .pipe(
+          Effect.map((questions) =>
+            questions.map((question) => [question.ref, question.sent === true]),
+          ),
+        );
 
     h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "Postgres")]));
     h.threadRuns.push(threadRun("r1", "m1", "queued"));
     const queued = yield* h.service.get({ threadId });
     expect(queued.questions[0]).toMatchObject({ state: "open", sentInMessageId: "m1" });
-    expect(sentState()).toEqual([
+    expect(yield* sentState()).toEqual([
       ["Q1", true],
       ["Q2", false],
       ["Q3", false],
@@ -869,7 +876,7 @@ it.effect("counts an answer a queued message carries as sent until its turn star
     const cancelled = yield* h.service.get({ threadId });
     expect(cancelled.questions[0]).not.toHaveProperty("sentInMessageId");
     expect(cancelled.questions[0]?.answer?.chosenOptionIds).toEqual(["pg"]);
-    expect(sentState()[0]).toEqual(["Q1", false]);
+    expect((yield* sentState())[0]).toEqual(["Q1", false]);
 
     // Sent again with Q2, then edited in the queue so Q2 no longer rides it.
     h.messages.push(
@@ -880,13 +887,13 @@ it.effect("counts an answer a queued message carries as sent until its turn star
     );
     h.threadRuns.push(threadRun("r2", "m2", "queued"));
     yield* h.service.get({ threadId });
-    expect(sentState().slice(0, 2)).toEqual([
+    expect((yield* sentState()).slice(0, 2)).toEqual([
       ["Q1", true],
       ["Q2", true],
     ]);
     h.messages[1] = userMessage("m2", [answerRecord("Q1", revision, "Postgres")]);
     yield* h.service.get({ threadId });
-    expect(sentState().slice(0, 2)).toEqual([
+    expect((yield* sentState()).slice(0, 2)).toEqual([
       ["Q1", true],
       ["Q2", false],
     ]);
@@ -901,7 +908,7 @@ it.effect("counts an answer a queued message carries as sent until its turn star
       sentInMessageId: "m2",
       answer: { chosenOptionIds: ["pg"], submittedAt: expect.any(String) },
     });
-    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q2", "Q3"]);
+    expect((yield* h.mirrored()).map((question) => question.ref)).toEqual(["Q2", "Q3"]);
     const again = yield* h.service.get({ threadId });
     expect(again.questions[0]).toEqual(received.questions[0]);
     const recorded = yield* h.service.questionUpdate(
@@ -914,7 +921,7 @@ it.effect("counts an answer a queued message carries as sent until its turn star
     const reopened = yield* h.service.questionUpdate({ threadId, id: "Q1", state: "open" }, "user");
     expect(reopened.questions[0]).not.toHaveProperty("sentInMessageId");
     expect((yield* h.service.get({ threadId })).questions[0]?.state).toBe("open");
-    expect(sentState()[0]).toEqual(["Q1", false]);
+    expect((yield* sentState())[0]).toEqual(["Q1", false]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
@@ -930,7 +937,10 @@ it.effect("closes an answer only once a provider has accepted the turn carrying 
       answers: { Q1: { chosenOptionIds: ["pg"], notes: "" } },
     });
     const revision = drafted.questions[0]!.answer!.draftRevision!;
-    const sentState = () => h.mirror.questions.map((question) => question.sent === true);
+    const sentState = () =>
+      h
+        .mirrored()
+        .pipe(Effect.map((questions) => questions.map((question) => question.sent === true)));
     h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "Postgres")]));
     h.threadRuns.push(threadRun("r1", "m1", "queued"));
     // The save is refused even before any read has marked the answer sent.
@@ -950,7 +960,7 @@ it.effect("closes an answer only once a provider has accepted the turn carrying 
       state: "open",
       sentInMessageId: "m1",
     });
-    expect(sentState()).toEqual([true]);
+    expect(yield* sentState()).toEqual([true]);
     // The adapter refuses the start: no provider turn, so the agent never got the answer.
     h.threadRuns[0] = threadRun("r1", "m1", "failed");
     const refused = yield* h.service.get({ threadId });
@@ -959,7 +969,7 @@ it.effect("closes an answer only once a provider has accepted the turn carrying 
       answer: { chosenOptionIds: ["pg"], submittedAt: null },
     });
     expect(refused.questions[0]).not.toHaveProperty("sentInMessageId");
-    expect(sentState()).toEqual([false]);
+    expect(yield* sentState()).toEqual([false]);
     // Sent again, and this time the provider accepts the turn.
     h.messages.push(userMessage("m2", [answerRecord("Q1", revision, "Postgres")]));
     h.threadRuns.push(threadRun("r2", "m2", "running"));
@@ -970,7 +980,7 @@ it.effect("closes an answer only once a provider has accepted the turn carrying 
       answeredBy: "user",
       sentInMessageId: "m2",
     });
-    expect(h.mirror.questions).toEqual([]);
+    expect(yield* h.mirrored()).toEqual([]);
     expect((yield* h.service.get({ threadId })).questions[0]).toEqual(received.questions[0]);
     // Accepted, then failed later: the agent had the answer, so it stays received.
     h.threadRuns[1] = threadRun("r2", "m2", "failed");
@@ -1032,8 +1042,8 @@ it.effect("keeps a question waiting and counted when a message only discusses it
       discussedInMessageId: "m1",
       answer: { notes: "Would it survive two writers?" },
     });
-    expect(h.mirror.questions).toEqual([
-      { id: "Q1", title: "Database?", state: "open", discussing: true },
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Database?", state: "discussing" },
     ]);
     // Running but not yet accepted by a provider: the note stays.
     h.threadRuns[0] = threadRun("r1", "m1", "running");
@@ -1050,8 +1060,8 @@ it.effect("keeps a question waiting and counted when a message only discusses it
       answer: { chosenOptionIds: ["pg"], notes: "", submittedAt: null },
     });
     expect((yield* h.service.get({ threadId })).questions[0]).toEqual(started.questions[0]);
-    expect(h.mirror.questions).toEqual([
-      { id: "Q1", title: "Database?", state: "open", discussing: true },
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Database?", state: "discussing" },
     ]);
     // A new draft ends the discussion, and the old comment never restarts it.
     const redrafted = yield* h.service.questionDraft({
@@ -1062,7 +1072,9 @@ it.effect("keeps a question waiting and counted when a message only discusses it
     expect((yield* h.service.get({ threadId })).questions[0]).not.toHaveProperty(
       "discussedInMessageId",
     );
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Database?", state: "open" },
+    ]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
@@ -1307,8 +1319,8 @@ it.effect("discusses a user's answer the agent reopens until the agent acts on i
       expect(reopened.questions[0]).not.toHaveProperty("sentInMessageId");
       const later = yield* h.service.get({ threadId });
       expect(later.questions[0]).toEqual(reopened.questions[0]);
-      expect(h.mirror.questions).toEqual([
-        { id: "Q1", title: "Database?", state: "open", discussing: true },
+      expect(yield* h.mirrored()).toEqual([
+        { kind: "question", ref: "Q1", key: "Q1", title: "Database?", state: "discussing" },
       ]);
       const ended =
         end === "replaced"
@@ -1329,7 +1341,7 @@ it.effect("discusses a user's answer the agent reopens until the agent acts on i
             );
       expect(ended.questions[0]?.state, end).toBe(end);
       expect(ended.questions[0], end).not.toHaveProperty("discussedInMessageId");
-      expect(h.mirror.questions, end).not.toContainEqual(expect.objectContaining({ id: "Q1" }));
+      expect(yield* h.mirrored(), end).not.toContainEqual(expect.objectContaining({ ref: "Q1" }));
     }
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
@@ -1377,7 +1389,8 @@ it.effect("follows messages and runs so a sent answer leaves the count without a
       answers: { Q1: { chosenOptionIds: [], notes: "cache-v2" } },
     });
     const revision = drafted.questions[0]!.answer!.draftRevision!;
-    yield* Queue.clear(h.syncSignals);
+    yield* h.mirrored();
+    yield* Queue.clear(h.changed);
     yield* Effect.forkScoped(h.service.followQuestionDeliveries);
     const message = userMessage("m1", [answerRecord("Q1", revision, "", "cache-v2")]);
     h.messages.push(message);
@@ -1392,8 +1405,9 @@ it.effect("follows messages and runs so a sent answer leaves the count without a
       threadId,
       payload: message,
     } as unknown as OrchestrationV2DomainEvent);
-    expect(yield* Queue.take(h.syncSignals)).toEqual([
-      { id: "Q1", title: "Flag name?", state: "open", sent: true },
+    yield* Queue.take(h.changed);
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Flag name?", state: "open", sent: true },
     ]);
     h.threadRuns[0] = threadRun("r1", "m1", "cancelled", { startedAt: null });
     yield* Queue.offer(h.domainEvents, {
@@ -1401,8 +1415,9 @@ it.effect("follows messages and runs so a sent answer leaves the count without a
       threadId,
       payload: h.threadRuns[0],
     } as unknown as OrchestrationV2DomainEvent);
-    expect(yield* Queue.take(h.syncSignals)).toEqual([
-      { id: "Q1", title: "Flag name?", state: "open" },
+    yield* Queue.take(h.changed);
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Flag name?", state: "open" },
     ]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
@@ -1416,7 +1431,8 @@ it.effect("follows a provider accepting a turn when nothing else reports it", ()
       answers: { Q1: { chosenOptionIds: [], notes: "cache-v2" } },
     });
     const revision = drafted.questions[0]!.answer!.draftRevision!;
-    yield* Queue.clear(h.syncSignals);
+    yield* h.mirrored();
+    yield* Queue.clear(h.changed);
     yield* Effect.forkScoped(h.service.followQuestionDeliveries);
     const message = userMessage("m1", [answerRecord("Q1", revision, "", "cache-v2")]);
     h.messages.push(message);
@@ -1426,8 +1442,9 @@ it.effect("follows a provider accepting a turn when nothing else reports it", ()
       threadId,
       payload: message,
     } as unknown as OrchestrationV2DomainEvent);
-    expect(yield* Queue.take(h.syncSignals)).toEqual([
-      { id: "Q1", title: "Flag name?", state: "open", sent: true },
+    yield* Queue.take(h.changed);
+    expect(yield* h.mirrored()).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Flag name?", state: "open", sent: true },
     ]);
     h.acceptTurn("r1");
     yield* Queue.offer(h.domainEvents, {
@@ -1435,41 +1452,78 @@ it.effect("follows a provider accepting a turn when nothing else reports it", ()
       threadId,
       payload: {},
     } as unknown as OrchestrationV2DomainEvent);
-    expect(yield* Queue.take(h.syncSignals)).toEqual([]);
+    yield* Queue.take(h.changed);
+    expect(yield* h.mirrored()).toEqual([]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
-it.effect("repairs a mirror a failed sync left stale, on the next read or at startup", () =>
+it.effect("numbers the user's tasks once and lists them with questions as waiting items", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    h.dispatchFailures.remaining = 1;
+    const created = yield* h.service.update({
+      threadId,
+      expectedRevision: 0,
+      changes: [
+        { text: "Rotate the staging webhook secret", owner: "you" },
+        { text: "Write the migration", owner: "agent" },
+        { text: "Approve the vendor account", owner: "you" },
+      ],
+    });
+    expect(created.items.map((item) => item.ref)).toEqual(["T1", undefined, "T2"]);
+    const [rotate, migrate, approve] = created.items;
+    // Edits keep a task's number, a finished task keeps its number, and a new task takes the next.
+    const edited = yield* h.service.update({
+      threadId,
+      expectedRevision: created.revision,
+      changes: [
+        { id: rotate!.id, text: "Rotate the staging webhook secret today" },
+        { id: approve!.id, state: "done" },
+        { id: migrate!.id, owner: "you" },
+      ],
+    });
+    expect(edited.items.map((item) => item.ref)).toEqual(["T1", "T3", "T2"]);
     yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
-    expect(h.mirror.questions).toEqual([]);
-    yield* h.service.get({ threadId });
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "open" }]);
-    yield* h.service.get({ threadId });
-    expect(h.syncs).toHaveLength(1);
-
-    // No read follows the failed sync: the next server start reconciles from the file.
-    // Archived threads are reconciled too, so unarchiving shows the right count.
-    h.threadState.archivedAt = at;
-    h.dispatchFailures.remaining = 1;
-    yield* h.service.questionUpdate({ threadId, id: "Q1", state: "deferred" }, "user");
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "open" }]);
-    const restarted = Context.get(
-      yield* Layer.build(Layer.fresh(Workspaces.layer).pipe(Layer.provide(h.dependencies))),
-      Workspaces.ThreadWorkspace,
-    );
-    yield* h.fs.writeFileString(
-      h.path.join(h.config.stateDir, "thread-workspaces", `${"a".repeat(64)}.json`),
-      "not a workspace",
-    );
-    expect(yield* restarted.reconcileQuestions).toBe(1);
-    expect(h.mirror.questions).toEqual([
-      { id: "Q1", title: "Ship it?", state: "deferred", userChangedAt: expect.any(String) },
+    expect(yield* h.service.waitingItems(threadId)).toEqual([
+      { kind: "question", ref: "Q1", key: "Q1", title: "Ship it?", state: "open" },
+      {
+        kind: "task",
+        ref: "T1",
+        key: rotate!.id,
+        title: "Rotate the staging webhook secret today",
+        state: "open",
+      },
+      { kind: "task", ref: "T3", key: migrate!.id, title: "Write the migration", state: "open" },
     ]);
-    expect(yield* restarted.reconcileQuestions).toBe(1);
-    expect(h.syncs).toHaveLength(2);
+    expect(yield* h.service.waitingThreads).toEqual([threadId]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("numbers tasks saved before task numbers existed when their thread is next read", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const created = yield* h.service.update({
+      threadId,
+      expectedRevision: 0,
+      changes: [{ text: "Rotate the secret", owner: "you" }],
+    });
+    const file = h.path.join(
+      h.config.stateDir,
+      "thread-workspaces",
+      `${NodeCrypto.createHash("sha256").update(threadId).digest("hex")}.json`,
+    );
+    const stored = JSON.parse(yield* h.fs.readFileString(file));
+    delete stored.workspace.items[0].ref;
+    yield* h.fs.writeFileString(file, JSON.stringify(stored));
+    expect(yield* h.service.waitingItems(threadId)).toEqual([
+      {
+        kind: "task",
+        ref: "T1",
+        key: created.items[0]!.id,
+        title: "Rotate the secret",
+        state: "open",
+      },
+    ]);
+    expect(JSON.parse(yield* h.fs.readFileString(file)).workspace.items[0].ref).toBe("T1");
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 

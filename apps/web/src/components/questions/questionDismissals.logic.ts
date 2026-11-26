@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadQuestionSummary } from "@t3tools/contracts";
+import type { WaitingItemSummary } from "@t3tools/contracts";
 
 import type { TimelineEntry } from "../../session-logic";
 
@@ -6,18 +6,18 @@ type DismissalEntry = Extract<TimelineEntry, { readonly kind: "question-dismisse
 
 /** The user's dismissals among a thread's mirrored questions, as timeline entries. */
 export function questionDismissalEntries(
-  questions: ReadonlyArray<OrchestrationV2ThreadQuestionSummary> | undefined,
+  waiting: ReadonlyArray<WaitingItemSummary> | undefined,
 ): ReadonlyArray<DismissalEntry> {
-  return (questions ?? []).flatMap((question) =>
-    question.state === "withdrawn" && question.userChangedAt !== undefined
+  return (waiting ?? []).flatMap((item) =>
+    item.kind === "question" && item.state === "dismissed" && item.userChangedAt !== undefined
       ? [
           {
-            id: `question-dismissed:${question.id}`,
+            id: `question-dismissed:${item.ref}`,
             kind: "question-dismissed" as const,
-            createdAt: question.userChangedAt,
+            createdAt: item.userChangedAt,
             runId: null,
-            questionId: question.id,
-            title: question.title,
+            questionId: item.ref,
+            title: item.title,
           },
         ]
       : [],

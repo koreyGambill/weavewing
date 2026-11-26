@@ -81,7 +81,7 @@ const STATUS: Record<
 };
 
 /** The badge for a QA card, with the agent's or user's note as its meaning when there is one. */
-function QaStatusBadge({ status, note }: { status: QaCardStatus; note: string }) {
+export function QaStatusBadge({ status, note }: { status: QaCardStatus; note: string }) {
   const { label, variant, help } = STATUS[status];
   const noted =
     note && (status === "recorded" || status === "agent-fixing" || status === "dismissed");

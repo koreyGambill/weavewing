@@ -488,6 +488,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "waiting-cards",
+    title: "Waiting-on-you cards",
+    to: "/settings/threads",
+    scope: "environment",
+    searchTerms: [
+      "question answer decision qa check landed change task todo waiting strip count sidebar defer",
+    ],
+  },
+  {
     id: "snooze-limited-threads",
     title: "Snooze until limits reset",
     to: "/settings/threads",
@@ -555,13 +564,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/labs",
     scope: "environment",
     searchTerms: ["beta tab autocomplete predict next message claude codex ghost text"],
-  },
-  {
-    id: "agent-questions-beta",
-    title: "Agent questions",
-    to: "/settings/labs",
-    scope: "environment",
-    searchTerms: ["beta ask decision question answer pending waiting count sidebar defer"],
   },
   {
     id: "simlock-hosts",

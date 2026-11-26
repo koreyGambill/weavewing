@@ -6,8 +6,8 @@ import type { RightPanelSurface } from "../../rightPanelStore";
  */
 export function questionSurfaceIdsToClose(
   surfaces: ReadonlyArray<Pick<RightPanelSurface, "id" | "kind">>,
-  agentQuestionsEnabled: boolean | null,
+  waitingCardsEnabled: boolean | null,
 ): ReadonlyArray<string> {
-  if (agentQuestionsEnabled !== false) return [];
+  if (waitingCardsEnabled !== false) return [];
   return surfaces.flatMap((surface) => (surface.kind === "questions" ? [surface.id] : []));
 }

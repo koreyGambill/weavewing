@@ -384,6 +384,18 @@ const PersistedServerSettings = Schema.Struct({
 });
 // Parse first and decode second, so a managed policy can fill its defaults in between.
 const decodeSettingsFileJsonExit = Schema.decodeUnknownExit(fromLenientJson(Schema.Unknown));
+
+/**
+ * The questions switch became the waiting-cards switch, which also covers QA changes and user
+ * tasks; a file that stored the old one keeps its choice.
+ */
+const foldRetiredSettingKeys = (stored: unknown): unknown => {
+  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return stored;
+  const { agentQuestionsEnabled, ...rest } = stored as Record<string, unknown>;
+  return typeof agentQuestionsEnabled === "boolean" && !("waitingCardsEnabled" in rest)
+    ? { ...rest, waitingCardsEnabled: agentQuestionsEnabled }
+    : rest;
+};
 const decodePersistedServerSettingsExit = Schema.decodeUnknownExit(PersistedServerSettings);
 const LegacyProviderSettingsJson = fromLenientJson(
   Schema.Struct({
@@ -753,7 +765,9 @@ const make = Effect.gen(function* () {
       const parsed = decodeSettingsFileJsonExit(raw);
       const decoded = Exit.isFailure(parsed)
         ? parsed
-        : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
+        : decodePersistedServerSettingsExit(
+            managed.withDefaults(foldRetiredSettingKeys(parsed.value)),
+          );
       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
       if (legacySettings._tag === "Success") {
         legacyProviders = legacySettings.value.providers;

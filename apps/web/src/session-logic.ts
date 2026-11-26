@@ -548,8 +548,11 @@ export interface TimelineEntriesInput {
   readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
   readonly plans?: ReadonlyArray<OrchestrationV2PlanArtifact>;
   readonly runs?: ReadonlyArray<import("@t3tools/contracts").OrchestrationV2Run>;
-  /** Agent questions are on: a `question_ask` call becomes its questions' cards. */
-  readonly threadQuestions?: boolean;
+  /**
+   * Waiting-on-you cards are on: a `question_ask` call becomes its questions' cards and an
+   * `evidence_record` call its QA cards.
+   */
+  readonly waitingCards?: boolean;
 }
 
 export interface TimelineEntriesProjection {
@@ -717,7 +720,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     }
 
     const questionIds =
-      input.threadQuestions === true && item.type === "dynamic_tool" && item.status === "completed"
+      input.waitingCards === true && item.type === "dynamic_tool" && item.status === "completed"
         ? questionIdsFromToolItem(item)
         : [];
     if (questionIds.length > 0) {
@@ -733,7 +736,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     }
 
     const landingId =
-      item.type === "dynamic_tool" && item.status === "completed"
+      input.waitingCards === true && item.type === "dynamic_tool" && item.status === "completed"
         ? evidenceLandingIdFromToolItem(item)
         : undefined;
     if (landingId !== undefined) {
@@ -1011,7 +1014,7 @@ function reuseTimelineEntries(
   const before = previous.input;
   if (
     input.visibleTurnItems.length < before.visibleTurnItems.length ||
-    input.threadQuestions !== before.threadQuestions ||
+    input.waitingCards !== before.waitingCards ||
     !shallow(input.optimisticMessages, before.optimisticMessages) ||
     !shallow(input.anchoredMessages, before.anchoredMessages) ||
     !shallow(input.attachmentUrlById, before.attachmentUrlById) ||

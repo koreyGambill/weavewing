@@ -7,12 +7,34 @@ const entry = (id: string, createdAt: string) =>
   ({ id, kind: "sent-message", createdAt, runId: null, text: id }) as TimelineEntry;
 
 describe("question dismissals in the timeline", () => {
+  const question = (
+    ref: string,
+    title: string,
+    state: "open" | "dismissed",
+    userChangedAt?: string,
+  ) => ({
+    kind: "question" as const,
+    ref,
+    key: ref,
+    title,
+    state,
+    ...(userChangedAt === undefined ? {} : { userChangedAt }),
+  });
   const dismissals = questionDismissalEntries([
-    { id: "Q1", title: "Ship it?", state: "open", userChangedAt: "2026-01-01T00:00:03.000Z" },
-    { id: "Q2", title: "Old?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:00.500Z" },
-    { id: "Q3", title: "Flag?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:02.500Z" },
-    { id: "Q4", title: "Late?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:09.000Z" },
-    { id: "Q5", title: "Agent's own", state: "withdrawn" },
+    question("Q1", "Ship it?", "open", "2026-01-01T00:00:03.000Z"),
+    question("Q2", "Old?", "dismissed", "2026-01-01T00:00:00.500Z"),
+    question("Q3", "Flag?", "dismissed", "2026-01-01T00:00:02.500Z"),
+    question("Q4", "Late?", "dismissed", "2026-01-01T00:00:09.000Z"),
+    question("Q5", "Agent's own", "dismissed"),
+    // A task the user cancelled is not a question's dismissal.
+    {
+      kind: "task",
+      ref: "T1",
+      key: "t1",
+      title: "Rotate",
+      state: "dismissed",
+      userChangedAt: "2026-01-01T00:00:04.000Z",
+    },
   ]);
 
   it("lists only questions the user dismissed", () => {

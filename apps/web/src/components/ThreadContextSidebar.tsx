@@ -5,7 +5,6 @@ import {
   BellIcon,
   InfoIcon,
   MessagesSquareIcon,
-  ClipboardCheckIcon,
   PinIcon,
   PinOffIcon,
   Settings2Icon,
@@ -32,11 +31,7 @@ import {
   type ThreadContextSection,
 } from "../threadContextSidebarStore";
 import { useRouteDraft, useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
-import {
-  useEvidenceCounts,
-  useEvidenceEnvironment,
-  useReloadEvidenceOnReturn,
-} from "../state/evidence";
+import { useEvidenceEnvironment, useReloadEvidenceOnReturn } from "../state/evidence";
 import { useInboxSignal } from "../state/inbox";
 import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { viewDefinition } from "../views/viewRegistry";
@@ -277,48 +272,6 @@ function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: strin
   );
 }
 
-function EvidenceStripButton({
-  threadRef,
-  active,
-  tooltip,
-}: {
-  threadRef: ScopedThreadRef | null;
-  active: boolean;
-  tooltip: string;
-}) {
-  const environmentId = useEvidenceEnvironment(threadRef);
-  useReloadEvidenceOnReturn(environmentId !== null);
-  const counts = useEvidenceCounts(environmentId).data;
-  // A problem is the agent's to fix, so it stays out of what waits on the user.
-  const waiting = counts?.pending ?? 0;
-  const fixing = counts?.problem ?? 0;
-  return (
-    <StripButton
-      id="evidence"
-      title="Evidence"
-      active={active}
-      tooltip={tooltip}
-      badge={
-        waiting ? `${waiting} waiting for QA${fixing ? `, ${fixing} agent fixing` : ""}` : undefined
-      }
-      icon={ClipboardCheckIcon}
-    >
-      {waiting ? (
-        <span
-          aria-hidden
-          data-fixing={fixing > 0}
-          className={cn(
-            "pointer-events-none absolute -right-1 -top-1 min-w-3.5 rounded-full px-1 text-center text-3xs leading-3.5 font-medium ring-2 ring-sidebar",
-            "bg-muted-foreground text-sidebar",
-          )}
-        >
-          {waiting > 99 ? "99+" : waiting}
-        </span>
-      ) : null}
-    </StripButton>
-  );
-}
-
 const STRIP_ITEMS: ReadonlyArray<StripItem> = ["inbox", ...THREAD_TOOL_ORDER];
 
 function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) {
@@ -326,6 +279,7 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
   const hidden = useThreadContextSidebarStore((state) => state.hidden);
   const signals = useThreadToolSignals(threadRef);
   const openFollowUps = useOpenFollowUpCount(threadRef);
+  useReloadEvidenceOnReturn(useEvidenceEnvironment(threadRef) !== null);
   const tooltip = useShortcutTooltip();
   const visibleTools = THREAD_TOOL_ORDER.filter((id) => !hidden.includes(id));
   return (
@@ -347,15 +301,6 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
         <span aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-sidebar-border" />
       ) : null}
       {visibleTools.map((id) => {
-        if (id === "evidence")
-          return (
-            <EvidenceStripButton
-              key={id}
-              threadRef={threadRef}
-              active={view === id}
-              tooltip={tooltip(id, tool(id).title)}
-            />
-          );
         const { title, icon } = tool(id);
         const count =
           id === "todos"

@@ -369,7 +369,8 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
-import { useThreadQuestionsBanner } from "./questions/useThreadQuestionsBanner";
+import { useWaitingOnYouStrip } from "./waiting/useWaitingOnYouStrip";
+import { waitingRefreshKey } from "./waiting/waitingStrip.logic";
 import { questionDismissalEntries } from "./questions/questionDismissals.logic";
 import { questionSurfaceIdsToClose } from "./questions/questionsSurface.logic";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
@@ -1176,7 +1177,7 @@ export default function ChatView(props: ChatViewProps) {
   const environmentSettings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
   const questionSurfacesToClose = questionSurfaceIdsToClose(
     rightPanelState.surfaces,
-    environmentSettings?.agentQuestionsEnabled ?? null,
+    environmentSettings?.waitingCardsEnabled ?? null,
   ).join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes persisted Questions tabs once the server setting that allows them reads off
   useEffect(() => {
@@ -1413,12 +1414,14 @@ export default function ChatView(props: ChatViewProps) {
         return environment ? [environment] : [];
       })
     : EMPTY_AUTO_UPDATE_ENVIRONMENTS;
-  const questionsBanner = useThreadQuestionsBanner({
+  const waitingStrip = useWaitingOnYouStrip({
     threadRef: isServerThread ? activeThreadRef : null,
     environmentId,
-    // Absent until the thread's first question, so other threads never fetch their workspace.
-    enabled: settings.agentQuestionsEnabled && activeThreadShell?.openQuestionCount !== undefined,
-    refreshKey: `${activeThreadShell?.openQuestionCount}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
+    // Absent until the thread's first waiting item, so other threads never fetch their workspace.
+    enabled: settings.waitingCardsEnabled && activeThreadShell?.waitingCounts !== undefined,
+    waiting: activeThreadShell?.waiting,
+    waitingCounts: activeThreadShell?.waitingCounts,
+    refreshKey: `${waitingRefreshKey(activeThreadShell?.waiting)}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
     focusComposer: () => composerRef.current?.focusAtEnd(),
   });
   const systemComposerBannerItems = useSystemComposerBanners({
@@ -1663,12 +1666,12 @@ export default function ChatView(props: ChatViewProps) {
           { ...codexFeedbackMessage(submission, "assistant"), runId: null },
         ],
   );
-  const questionDismissals = settings.agentQuestionsEnabled
-    ? questionDismissalEntries(serverProjection?.thread.questions)
+  const questionDismissals = settings.waitingCardsEnabled
+    ? questionDismissalEntries(serverProjection?.thread.waiting)
     : EMPTY_QUESTION_DISMISSALS;
   const timelineEntriesInput = {
     environmentId,
-    threadQuestions: settings.agentQuestionsEnabled,
+    waitingCards: settings.waitingCardsEnabled,
     optimisticMessages: optimisticUserMessages,
     anchoredMessages: anchoredTimelineMessages,
     attachmentUrlById: timelineAttachmentUrlById,
@@ -2766,7 +2769,7 @@ export default function ChatView(props: ChatViewProps) {
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
-        ...(questionsBanner === null ? [] : [questionsBanner]),
+        ...(waitingStrip === null ? [] : [waitingStrip]),
         ...systemComposerBannerItems,
       ];
     }
@@ -2778,7 +2781,7 @@ export default function ChatView(props: ChatViewProps) {
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
-      ...(questionsBanner === null ? [] : [questionsBanner]),
+      ...(waitingStrip === null ? [] : [waitingStrip]),
       ...systemComposerBannerItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,

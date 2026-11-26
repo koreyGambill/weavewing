@@ -755,7 +755,7 @@ type ThreadStatusInput = Pick<
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
   lineage?: SidebarThreadSummary["lineage"] | undefined;
   blockedOnThreadWait?: boolean | undefined;
-  /** Pass only while agent questions are on, so a hidden feature changes no status. */
+  /** Open questions; pass only while waiting cards are on, so a hidden feature changes no status. */
   openQuestionCount?: number | undefined;
 };
 

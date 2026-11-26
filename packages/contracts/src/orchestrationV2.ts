@@ -46,6 +46,7 @@ import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
+import { WaitingCounts, WaitingItemSummary } from "./waitingItems.ts";
 import { ThreadMcpServer, ThreadToolOverrides } from "./threadToolOverrides.ts";
 import { ThreadTitleRegenerationOutcome } from "./threadTitle.ts";
 import {
@@ -619,23 +620,6 @@ const OrchestrationV2LastTitleRegeneration = Schema.Struct({
   completedAt: Schema.DateTimeUtc,
 });
 
-/**
- * A thread question mirrored from the thread workspace: every open or deferred one, plus a
- * withdrawn one the user dismissed, so the agent's next user-message turn can hear about it.
- */
-export const OrchestrationV2ThreadQuestionSummary = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  title: Schema.String,
-  state: Schema.Literals(["open", "deferred", "withdrawn"]),
-  /** When the user last deferred, withdrew or reopened it. */
-  userChangedAt: Schema.optional(IsoDateTime),
-  /** A user message carries its answer, so it no longer waits on the user. */
-  sent: Schema.optional(Schema.Literal(true)),
-  /** The agent owes a reply to the user's comment or answer before asking again. */
-  discussing: Schema.optional(Schema.Literal(true)),
-});
-export type OrchestrationV2ThreadQuestionSummary = typeof OrchestrationV2ThreadQuestionSummary.Type;
-
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -703,8 +687,12 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
-  /** Open, deferred and user-withdrawn thread questions. Absent until the thread's first question. */
-  questions: Schema.optional(Schema.Array(OrchestrationV2ThreadQuestionSummary)),
+  /**
+   * The thread's waiting questions, QA changes and user tasks, capped, then closed items the user
+   * changed. Absent until the thread's first one.
+   */
+  waiting: Schema.optional(Schema.Array(WaitingItemSummary)),
+  waitingCounts: Schema.optional(WaitingCounts),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -2538,8 +2526,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummary),
   /** Guest messages waiting for the owner to send or dismiss. Absent from older servers. */
   pendingGuestMessageCount: Schema.optional(NonNegativeInt),
-  /** Thread questions waiting on the user; deferred ones excluded. Absent from older servers. */
-  openQuestionCount: Schema.optional(NonNegativeInt),
+  /** Items still waiting on someone, capped; absent until the thread's first one. */
+  waiting: Schema.optional(Schema.Array(WaitingItemSummary)),
+  /** Items waiting on the user per kind, exact past the cap. */
+  waitingCounts: Schema.optional(WaitingCounts),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
   latestUserMessageAt: Schema.NullOr(Schema.DateTimeUtc),
   /** Excludes wakes and agent messages that advance latestUserMessageAt through the user role. */
@@ -3521,8 +3511,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     snapshotAt: Schema.DateTimeUtc,
     settledAt: Schema.optional(Schema.DateTimeUtc),
-    /** Agent questions are on, so a question reopened since the sweep keeps the thread. */
-    holdForOpenQuestions: Schema.optional(Schema.Boolean),
+    /** Waiting cards are on, so an item reopened since the sweep keeps the thread. */
+    holdForWaiting: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.unsettle"),
@@ -4001,12 +3991,12 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 // Excluded from dispatchCommand so only the server can send these.
 const OrchestrationV2InternalCommand = Schema.Union([
-  /** Mirrors the thread workspace's waiting questions onto the thread after each change. */
+  /** Replaces the thread's waiting items with everything its three stores report now. */
   Schema.Struct({
-    type: Schema.Literal("thread.questions.sync"),
+    type: Schema.Literal("thread.waiting.sync"),
     commandId: CommandId,
     threadId: ThreadId,
-    questions: Schema.Array(OrchestrationV2ThreadQuestionSummary),
+    items: Schema.Array(WaitingItemSummary),
   }),
   // Guest share commands the server issues after checking T3 Connect and the guest token.
   Schema.Struct({

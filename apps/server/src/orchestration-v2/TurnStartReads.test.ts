@@ -636,7 +636,8 @@ it.effect("dates the user's previous own message only while a question has a use
       settledAt: null,
       lastVisitedAt: null,
       deletedAt: null,
-      questions: [{ id: "Q1", title: "Ship?", state: "open" }],
+      waiting: [{ kind: "question", ref: "Q1", key: "Q1", title: "Ship?", state: "open" }],
+      waitingCounts: { question: 1, qa: 0, task: 0 },
     };
     const putThread = (value: OrchestrationV2AppThread, key: string) =>
       store.apply({
@@ -708,7 +709,7 @@ it.effect("dates the user's previous own message only while a question has a use
     yield* putThread(
       {
         ...thread,
-        questions: [{ ...thread.questions![0]!, userChangedAt: "2026-09-04T12:25:00Z" }],
+        waiting: [{ ...thread.waiting![0]!, userChangedAt: "2026-09-04T12:25:00Z" }],
       },
       "changed",
     );

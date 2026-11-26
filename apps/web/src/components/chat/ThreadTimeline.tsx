@@ -70,7 +70,9 @@ export function ThreadTimeline({
   // QA cards read the thread's landings only when the timeline has somewhere to put them.
   const hasSubagents = useThreadHasSubagents(threadDetailRef);
   const evidence = useThreadEvidence(
-    timelineMayHoldQa(plainEntries, hasSubagents) ? threadDetailRef : null,
+    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents)
+      ? threadDetailRef
+      : null,
     placedLandingIds(plainEntries),
   );
   const entries =

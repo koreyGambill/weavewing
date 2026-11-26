@@ -1478,3 +1478,51 @@ it.effect(
       }),
     ).pipe(Effect.provide(testLayer)),
 );
+
+it.effect(
+  "lists the changes still waiting in a thread and names the thread each time one moves",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        yield* seedThread({ id: "lead" });
+        yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
+        const moved = yield* Queue.unbounded<ThreadId>();
+        yield* Stream.runForEach(evidence.qaThreadChanges, (threadId) =>
+          Queue.offer(moved, threadId),
+        ).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        const child = ThreadId.make("child");
+        yield* evidence.record(
+          recordInput("by-child", [change("a"), change("b"), change("c")], {
+            threadId: child,
+            landedAt,
+          }),
+        );
+        // An approval with no gaps raises nothing, so it never waits.
+        yield* evidence.record(
+          recordInput("quiet", [change("d", { gaps: [] })], { threadId: lead, landedAt }),
+        );
+        assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead]);
+        yield* evidence.setQa({ landingId: "by-child", changeId: "a", state: "confirmed" });
+        yield* evidence.setQa({
+          landingId: "by-child",
+          changeId: "b",
+          state: "problem",
+          note: "Overlaps",
+        });
+        yield* evidence.markDiscussed({
+          threadId: lead,
+          messageId: MessageId.make("m1"),
+          changes: [{ landingId: "by-child", changeId: "c" }],
+        });
+        assert.deepStrictEqual(yield* Queue.takeAll(moved), [lead, lead, lead]);
+        assert.deepStrictEqual(yield* evidence.waitingQa(lead), [
+          { kind: "qa", ref: "QA2", key: "by-child/b", title: "Changed b", state: "problem" },
+          { kind: "qa", ref: "QA3", key: "by-child/c", title: "Changed c", state: "discussing" },
+        ]);
+        assert.deepStrictEqual(yield* evidence.waitingQa(child), []);
+        assert.deepStrictEqual(yield* evidence.waitingQaThreads(), [lead]);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);

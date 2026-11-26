@@ -66,7 +66,7 @@ export function toggleThreadToolsView(
 }
 
 export interface ThreadToolSignals {
-  /** Open list items. */
+  /** The agent's open list items; the user's own tasks count in the thread's waiting strip. */
   readonly listCount: number;
   /** Artifact questions without a submitted answer on each artifact's latest version. */
   readonly questionCount: number;
@@ -75,7 +75,9 @@ export interface ThreadToolSignals {
 
 export function summarizeThreadTools(workspace: ThreadWorkspace | null): ThreadToolSignals {
   if (!workspace) return { listCount: 0, questionCount: 0, ticketState: null };
-  const listCount = workspace.items.filter((item) => item.state === "open").length;
+  const listCount = workspace.items.filter(
+    (item) => item.state === "open" && item.owner !== "you",
+  ).length;
   const questionCount = workspace.artifacts.reduce((total, artifact) => {
     const version = artifact.versions.at(-1);
     return (

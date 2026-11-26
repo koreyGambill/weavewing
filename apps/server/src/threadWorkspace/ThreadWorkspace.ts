@@ -15,8 +15,7 @@ import {
   THREAD_QUESTIONS_ARTIFACT_ID,
   threadQuestionTitle,
   type ArtifactAnswerContextRecord,
-  type OrchestrationV2AppThread,
-  type OrchestrationV2ThreadQuestionSummary,
+  type WaitingItemSummary,
   type ThreadQuestion,
   type ThreadQuestionAskInput,
   type ThreadQuestionDraftInput,
@@ -60,6 +59,7 @@ import {
   runsWithProviderTurn,
   type QuestionDiscussion,
 } from "./questionDelivery.ts";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 
 export class ThreadWorkspace extends Context.Service<
@@ -102,10 +102,16 @@ export class ThreadWorkspace extends Context.Service<
       input: ThreadQuestionDraftInput,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
     /**
-     * Repairs every thread's question mirror from its workspace file, archived threads included,
-     * so a sync lost to a crash or a failed dispatch heals without a visit. Returns threads checked.
+     * The thread's questions and user tasks as waiting items: every waiting one, plus questions
+     * the user withdrew. Repairs answer delivery first and numbers tasks that have no ref yet.
      */
-    readonly reconcileQuestions: Effect.Effect<number, ThreadWorkspaceError>;
+    readonly waitingItems: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, ThreadWorkspaceError>;
+    /** Threads whose workspace file holds questions or tasks for the user, archived included. */
+    readonly waitingThreads: Effect.Effect<ReadonlyArray<ThreadId>, ThreadWorkspaceError>;
+    /** Each thread whose workspace file was written, as it is written. */
+    readonly changes: Stream.Stream<ThreadId>;
     /**
      * Follows user messages and runs, so a question whose answer a message carries leaves the
      * count when the message is accepted, returns if the message is cancelled or edited, and
@@ -146,26 +152,54 @@ const isWaiting = (
 ): question is ThreadQuestion & { readonly state: "open" | "deferred" } =>
   question.state === "open" || question.state === "deferred";
 // A withdrawn question stays mirrored while the user's dismissal is unreported history, so the
-// agent's next user-message turn can name it; the turn filters by time.
-const mirroredQuestions = (
+// agent's next user-message turn can name it and the timeline can show it.
+const questionWaitingItems = (
   workspace: Pick<Workspace, "questions">,
-): ReadonlyArray<OrchestrationV2ThreadQuestionSummary> =>
-  workspace.questions.flatMap((question) =>
-    isWaiting(question) || (question.state === "withdrawn" && question.userChangedAt)
+): ReadonlyArray<WaitingItemSummary> =>
+  workspace.questions.flatMap((question): ReadonlyArray<WaitingItemSummary> => {
+    const common = {
+      kind: "question" as const,
+      ref: question.id,
+      key: question.id,
+      title: threadQuestionTitle(question.prompt),
+      ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
+    };
+    if (isWaiting(question))
+      return [
+        {
+          ...common,
+          state: question.discussedInMessageId ? "discussing" : question.state,
+          ...(question.sentInMessageId ? { sent: true as const } : {}),
+        },
+      ];
+    return question.state === "withdrawn" && question.userChangedAt
+      ? [{ ...common, state: "dismissed", settledBy: "user" }]
+      : [];
+  });
+const isUserTask = (item: ListItem) => item.owner === "you";
+const taskWaitingItems = (workspace: Pick<Workspace, "items">): ReadonlyArray<WaitingItemSummary> =>
+  workspace.items.flatMap((item) =>
+    isUserTask(item) && item.state === "open"
       ? [
           {
-            id: question.id,
-            title: threadQuestionTitle(question.prompt),
-            state: question.state as "open" | "deferred" | "withdrawn",
-            ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
-            ...(isWaiting(question) && question.sentInMessageId ? { sent: true as const } : {}),
-            ...(isWaiting(question) && question.discussedInMessageId
-              ? { discussing: true as const }
-              : {}),
+            kind: "task" as const,
+            ref: item.ref ?? "T",
+            key: item.id,
+            title: threadQuestionTitle(item.text),
+            state: "open" as const,
           },
         ]
       : [],
   );
+/** Numbers the user's tasks T1, T2, ... in list order after the highest number given out. */
+const withTaskRefs = (items: ReadonlyArray<ListItem>): ReadonlyArray<ListItem> => {
+  if (!items.some((item) => isUserTask(item) && item.ref === undefined)) return items;
+  let next =
+    Math.max(0, ...items.map((item) => Number(/^T(\d+)$/.exec(item.ref ?? "")?.[1] ?? 0))) + 1;
+  return items.map((item) =>
+    isUserTask(item) && item.ref === undefined ? { ...item, ref: `T${next++}` } : item,
+  );
+};
 const storage = (cause: unknown) =>
   new ThreadWorkspaceError({
     code: "storage",
@@ -194,6 +228,7 @@ const make = Effect.gen(function* () {
     FileSystem.FileSystem | Path.Path | ServerConfig.ServerConfig
   >();
   const lock = yield* Semaphore.make(1);
+  const written = yield* PubSub.unbounded<ThreadId>();
   const directory = path.join(config.stateDir, "thread-workspaces");
   const filePath = (id: string) =>
     path.join(directory, `${NodeCrypto.createHash("sha256").update(id).digest("hex")}.json`);
@@ -215,6 +250,7 @@ const make = Effect.gen(function* () {
     yield* writeFileStringAtomically({ filePath: filePath(workspace.threadId), contents }).pipe(
       Effect.provide(services),
     );
+    yield* PubSub.publish(written, workspace.threadId);
     return workspace;
   }, Effect.mapError(storage));
   const submittedAnswers = Effect.fn("ThreadWorkspace.submittedAnswers")(function* (
@@ -274,31 +310,6 @@ const make = Effect.gen(function* () {
         })),
       })),
     };
-  });
-  // The thread mirrors waiting questions so the sidebar count needs no workspace reads. A failed
-  // dispatch leaves the mirror stale until the next read of this workspace or the startup
-  // reconcile repairs it.
-  const syncQuestions = Effect.fn("ThreadWorkspace.syncQuestions")(function* (
-    mirrored: ReadonlyArray<OrchestrationV2ThreadQuestionSummary>,
-    workspace: Workspace,
-  ) {
-    const questions = mirroredQuestions(workspace);
-    if (NodeUtil.isDeepStrictEqual(mirrored, questions)) return;
-    yield* orchestrator
-      .dispatch({
-        type: "thread.questions.sync",
-        commandId: CommandId.make(`questions-sync:${NodeCrypto.randomUUID()}`),
-        threadId: workspace.threadId,
-        questions: [...questions],
-      })
-      .pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("Could not mirror thread questions; the next read retries.", {
-            threadId: workspace.threadId,
-            cause,
-          }),
-        ),
-      );
   });
   // A sent comment takes the note it carried once its turn starts; a chosen option stays a draft.
   // An answer carrying the same draft wins: its note is what the agent was sent.
@@ -388,10 +399,8 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     scan: "drafts" | "sent" = "sent",
   ) {
-    const thread: OrchestrationV2AppThread = yield* requireThread(threadId);
-    const workspace = yield* deliverAnswers(yield* load(threadId), scan);
-    yield* syncQuestions(thread.questions ?? [], workspace);
-    return workspace;
+    yield* requireThread(threadId);
+    return yield* deliverAnswers(yield* load(threadId), scan);
   });
   const load = Effect.fn("ThreadWorkspace.load")(function* (threadId: ThreadId) {
     const contents = yield* fs.readFileString(filePath(threadId)).pipe(
@@ -555,7 +564,7 @@ const make = Effect.gen(function* () {
       ...next,
       revision: current.revision + 1,
       updatedAt: now,
-      items: next.items.map(({ linkStates: _, ...item }) => item),
+      items: withTaskRefs(next.items.map(({ linkStates: _, ...item }) => item)),
     });
   });
   const apply = (current: Workspace, changes: ThreadListUpdateInput["changes"], now: string) => {
@@ -573,6 +582,7 @@ const make = Effect.gen(function* () {
         details: change.details ?? old?.details ?? "",
         parentId: change.parentId === undefined ? (old?.parentId ?? null) : change.parentId,
         links: change.links ?? old?.links ?? [],
+        ...(old?.ref === undefined ? {} : { ref: old.ref }),
       } satisfies ListItem;
       item.doneAt = item.state === "done" || item.state === "dropped" ? (old?.doneAt ?? now) : null;
       const keys = item.text.match(/\bBW-\d+\b/g) ?? [];
@@ -635,9 +645,7 @@ const make = Effect.gen(function* () {
     current: Workspace,
     questions: ReadonlyArray<ThreadQuestion>,
   ) {
-    const next = yield* commit(current, { ...current, questions }, current.revision);
-    yield* syncQuestions(mirroredQuestions(current), next);
-    return next;
+    return yield* commit(current, { ...current, questions }, current.revision);
   });
   const findQuestion = (workspace: Workspace, id: string) => {
     const index = workspace.questions.findIndex((question) => question.id === id);
@@ -649,6 +657,9 @@ const make = Effect.gen(function* () {
     workspace: Schema.Struct({
       threadId: ThreadId,
       questions: Schema.optional(Schema.Array(Schema.Unknown)),
+      items: Schema.optional(
+        Schema.Array(Schema.Struct({ owner: Schema.optional(Schema.String) })),
+      ),
     }),
   });
   const storedWorkspaces = Effect.fn("ThreadWorkspace.storedWorkspaces")(function* (
@@ -661,7 +672,7 @@ const make = Effect.gen(function* () {
       ),
       Effect.mapError(storage),
     );
-    const stored: Array<{ readonly threadId: ThreadId; readonly hasQuestions: boolean }> = [];
+    const stored: Array<{ readonly threadId: ThreadId; readonly hasWaitingSources: boolean }> = [];
     for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
       const value = yield* fs.readFileString(path.join(directory, file)).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(StoredWorkspace))),
@@ -681,7 +692,10 @@ const make = Effect.gen(function* () {
       if (value === undefined) continue;
       stored.push({
         threadId: value.workspace.threadId,
-        hasQuestions: (value.workspace.questions?.length ?? 0) > 0,
+        // Questions are never deleted, and a user task stays in the list once done.
+        hasWaitingSources:
+          (value.workspace.questions?.length ?? 0) > 0 ||
+          (value.workspace.items ?? []).some((item) => item.owner === "you"),
       });
     }
     return stored;
@@ -1112,21 +1126,28 @@ const make = Effect.gen(function* () {
         ),
       };
     }, lock.withPermit),
-    reconcileQuestions: Effect.gen(function* () {
-      // Questions are never deleted, so a file without any has nothing to mirror.
-      const stored = (yield* storedWorkspaces("skip")).filter((entry) => entry.hasQuestions);
-      // One permit per thread, so requests arriving during startup wait for one repair at most.
-      for (const { threadId } of stored)
-        yield* read(threadId, "drafts").pipe(
-          lock.withPermit,
-          Effect.catch((cause) =>
-            cause.code === "not_found"
-              ? Effect.void
-              : Effect.logWarning("Could not reconcile thread questions.", { threadId, cause }),
-          ),
-        );
-      return stored.length;
-    }).pipe(Effect.withSpan("ThreadWorkspace.reconcileQuestions")),
+    waitingItems: Effect.fn("ThreadWorkspace.waitingItems")(
+      function* (threadId) {
+        const workspace = yield* read(threadId, "drafts");
+        const items = withTaskRefs(workspace.items);
+        const numbered =
+          items === workspace.items ? workspace : yield* write({ ...workspace, items });
+        return [...questionWaitingItems(numbered), ...taskWaitingItems(numbered)];
+      },
+      lock.withPermit,
+      // A deleted thread waits on nobody.
+      Effect.catchIf(
+        (error) => error.code === "not_found",
+        () => Effect.succeed([]),
+      ),
+    ),
+    waitingThreads: storedWorkspaces("skip").pipe(
+      Effect.map((stored) =>
+        stored.filter((entry) => entry.hasWaitingSources).map((entry) => entry.threadId),
+      ),
+      Effect.withSpan("ThreadWorkspace.waitingThreads"),
+    ),
+    changes: Stream.fromPubSub(written),
     followQuestionDeliveries: Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
       Effect.gen(function* () {
         if (event.type === "message.updated") {
@@ -1148,7 +1169,12 @@ const make = Effect.gen(function* () {
           // A start, cancel or edit only matters to an answer or comment already sent, which
           // only a waiting question can have.
           const { thread } = yield* orchestrator.getThreadRecords(event.threadId, []);
-          if (!(thread.questions ?? []).some((question) => question.state !== "withdrawn")) return;
+          if (
+            !(thread.waiting ?? []).some(
+              (item) => item.kind === "question" && item.state !== "dismissed",
+            )
+          )
+            return;
         }
         yield* read(event.threadId, "drafts").pipe(lock.withPermit);
       }).pipe(

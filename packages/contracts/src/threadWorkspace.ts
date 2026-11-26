@@ -47,6 +47,8 @@ export const ListItem = Schema.Struct({
   }),
   links: Schema.Array(ListLink),
   linkStates: Schema.optional(Schema.Array(ListLinkState)),
+  /** A user task's number in its thread, T1, T2, ...; never given out again. */
+  ref: Schema.optional(TrimmedNonEmptyString),
 });
 export type ListItem = typeof ListItem.Type;
 export const ThreadArtifactVersion = Schema.Struct({
