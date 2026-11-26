@@ -12,24 +12,29 @@ import {
   type WorkspaceListHeaderProps,
 } from "./WorkspaceListHeader.types";
 import { APP_BASE_NAME } from "../../../lib/mobileBranding";
-import {
-  InboxAppBarButton,
-  InboxSheetOutsideWorkspaceBar,
-} from "../../inbox/InboxAppBarButton.android";
+import { useEvidenceHeader } from "../../evidence/useEvidenceHeader";
 import { useInboxHeader } from "../../inbox/useInboxHeader";
+import { SheetsOutsideWorkspaceBar, WorkspaceHeaderButton } from "./WorkspaceHeaderButton.android";
 
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
   const inbox = useInboxHeader();
+  const evidence = useEvidenceHeader();
   return (
     <>
-      <WorkspaceListAppBar {...props} inbox={inbox} />
-      <InboxSheetOutsideWorkspaceBar>{inbox.sheet}</InboxSheetOutsideWorkspaceBar>
+      <WorkspaceListAppBar {...props} inbox={inbox} evidence={evidence} />
+      <SheetsOutsideWorkspaceBar>
+        {inbox.sheet}
+        {evidence.sheet}
+      </SheetsOutsideWorkspaceBar>
     </>
   );
 }
 
 function WorkspaceListAppBar(
-  props: WorkspaceListHeaderProps & { readonly inbox: ReturnType<typeof useInboxHeader> },
+  props: WorkspaceListHeaderProps & {
+    readonly inbox: ReturnType<typeof useInboxHeader>;
+    readonly evidence: ReturnType<typeof useEvidenceHeader>;
+  },
 ) {
   const navigation = useNavigation();
   const workspace = useWorkspaceTabs();
@@ -103,8 +108,28 @@ function WorkspaceListAppBar(
             ]
           : undefined
       }
+      // Evidence sits before Inbox, so Inbox keeps its place as Evidence shows and hides.
       trailing={
-        connectionState.hasConnections ? <InboxAppBarButton inbox={props.inbox} /> : undefined
+        connectionState.hasConnections
+          ? [
+              props.evidence.available ? (
+                <WorkspaceHeaderButton
+                  key="evidence"
+                  accessibilityLabel={props.evidence.accessibilityLabel}
+                  icon="checkmark.circle"
+                  badge={props.evidence.badge}
+                  onPress={props.evidence.open}
+                />
+              ) : null,
+              <WorkspaceHeaderButton
+                key="inbox"
+                accessibilityLabel={props.inbox.accessibilityLabel}
+                icon="bell.badge"
+                badge={props.inbox.badge}
+                onPress={props.inbox.open}
+              />,
+            ]
+          : undefined
       }
     />
   );

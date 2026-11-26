@@ -75,6 +75,8 @@ it.each([
   [qa(), false, "open"],
   [qa({ discussedMessageId: MessageId.make("message-1") }), false, "discussing"],
   [qa(), true, "in-composer"],
+  [qa({ state: "quiet", raised: [] }), false, "quiet"],
+  [qa({ state: "quiet", raised: [] }), true, "in-composer"],
   [qa({ state: "problem", by: "agent", note: "Overlaps" }), false, "agent-fixing"],
   [qa({ state: "waived", by: "user" }), false, "dismissed"],
   [qa({ state: "confirmed", by: "agent" }), false, "recorded"],

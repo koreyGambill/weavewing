@@ -2,6 +2,7 @@ import { Box, Icon, IconButton, RNHostView } from "@expo/ui/jetpack-compose";
 import { size } from "@expo/ui/jetpack-compose/modifiers";
 import type { MenuAction } from "@react-native-menu/menu";
 import {
+  Children,
   createContext,
   use,
   useLayoutEffect,
@@ -42,7 +43,7 @@ export interface WorkspaceAppBarProps {
     readonly actions: MenuAction[];
     readonly onSelect: (id: string) => void;
   };
-  /** One extra 48dp button before search, drawn by React Native over the bar's end. */
+  /** Extra 48dp buttons before search, one per child, drawn by React Native over the bar's end. */
   readonly trailing?: ReactNode;
 }
 
@@ -134,6 +135,7 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
   const { colors } = useControlTheme();
   const tint = colors["--color-header-foreground"];
   const { height, paddingTop, paddingBottom } = useToolbarLayout();
+  const trailingCount = Children.toArray(props.trailing).length;
   const filterMenu = filter ? (
     <AndroidAnchoredMenu
       actions={filter.actions}
@@ -177,8 +179,8 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
               <View
                 collapsable={false}
                 className="justify-center"
-                // Keeps the title clear of the trailing button drawn over the bar.
-                style={{ height: ACTION_SIZE, paddingRight: props.trailing ? ACTION_SIZE : 0 }}
+                // Keeps the title clear of the trailing buttons drawn over the bar.
+                style={{ height: ACTION_SIZE, paddingRight: trailingCount * ACTION_SIZE }}
               >
                 {props.titleContent ?? (
                   <AppText textRole="title" numberOfLines={1} className="text-header-foreground">
@@ -218,9 +220,9 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
             {filterMenu}
           </View>
         ) : null}
-        {props.trailing ? (
+        {trailingCount > 0 ? (
           <View
-            className="absolute"
+            className="absolute flex-row"
             style={{ right: ACTION_END_INSET + 2 * ACTION_SIZE, top: (height - ACTION_SIZE) / 2 }}
           >
             {props.trailing}
