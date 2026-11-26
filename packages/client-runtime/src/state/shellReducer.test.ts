@@ -7,7 +7,9 @@ import {
   applyShellStreamEvents,
   type ShellStreamEvent,
   mergeShellSnapshotProjects,
+  NO_WAITING_GAPS,
   reuseUnchangedThreadShells,
+  trackWaitingGaps,
 } from "./shellReducer.ts";
 
 const repositoryIdentity = {
@@ -490,6 +492,48 @@ describe("waiting rows a server left out as unchanged", () => {
       applyShellStreamEvent(snapshot, update).threads.find((entry) => entry.id === v2ThreadShell.id)
         ?.waiting,
     ).toEqual(fresh);
+  });
+
+  it("keeps the rows a full update sent earlier in the same batch, with the marker's counts", () => {
+    const fresh = [
+      { ...rows[0]!, title: "Renamed" },
+      { ...rows[0]!, ref: "T2", key: "t2" },
+    ];
+    const later = { ...counts, task: 3, live: 3 };
+    const next = applyShellStreamEvents(snapshot, [
+      {
+        kind: "thread.updated",
+        sequence: 1,
+        location: "active",
+        thread: { ...v2ThreadShell, waiting: fresh, waitingCounts: counts },
+      },
+      {
+        kind: "thread.updated",
+        sequence: 2,
+        location: "active",
+        thread: { ...withoutRows, waitingCounts: later },
+        waitingUnchanged: true,
+      },
+    ]);
+    const thread = next.threads.find((entry) => entry.id === v2ThreadShell.id);
+    expect(thread?.waiting).toEqual(fresh);
+    expect(thread?.waitingCounts).toEqual(later);
+    expect(thread?.status).toBe("idle");
+  });
+
+  it("reloads once for a marked thread that holds no rows, and again only after rows came", () => {
+    const bare = { ...snapshot, threads: [withoutRows, snapshot.threads[1]!] };
+    // The other thread holds rows, so its marker needs nothing.
+    const first = trackWaitingGaps(NO_WAITING_GAPS, bare, [unchanged(1), unchanged(2, other)]);
+    expect(first.reload).toBe(true);
+    expect([...first.gaps.rows]).toEqual([withoutRows]);
+    const again = trackWaitingGaps(first.gaps, bare, [unchanged(3)]);
+    expect(again.reload).toBe(false);
+    // Rows arrive, so the shell may be saved, and a later gap may ask again.
+    const filled = trackWaitingGaps(again.gaps, snapshot, []);
+    expect(filled.gaps.rows.size + filled.gaps.asked.size).toBe(0);
+    expect(trackWaitingGaps(filled.gaps, bare, [unchanged(4)]).reload).toBe(true);
+    expect(trackWaitingGaps(NO_WAITING_GAPS, snapshot, [unchanged(1)]).reload).toBe(false);
   });
 
   it("drops a removed thread's rows, so they cannot come back with a later update", () => {

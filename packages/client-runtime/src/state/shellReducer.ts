@@ -21,6 +21,58 @@ function withKeptWaiting(
   if (event.waitingUnchanged !== true || previous?.waiting === undefined) return event.thread;
   return { ...event.thread, waiting: previous.waiting };
 }
+
+/**
+ * The threads an update among `items` marked `waitingUnchanged` that still hold no rows in
+ * `snapshot`: the server believed this client had rows it does not have.
+ */
+function threadsLackingKeptWaiting(
+  snapshot: OrchestrationV2ShellSnapshot,
+  items: ReadonlyArray<OrchestrationV2ShellStreamItem>,
+): ReadonlyArray<OrchestrationV2ThreadShell> {
+  const marked = new Set(
+    items.flatMap((item) =>
+      item.kind === "thread.updated" && item.waitingUnchanged === true ? [item.thread.id] : [],
+    ),
+  );
+  if (marked.size === 0) return [];
+  return snapshot.threads.filter((thread) => marked.has(thread.id) && thread.waiting === undefined);
+}
+
+/** Rows a marked update left without the waiting rows this client should have held. */
+export interface WaitingGaps {
+  /** The shells lacking their rows, which must not be saved. */
+  readonly rows: ReadonlySet<OrchestrationV2ThreadShell>;
+  /** Threads that asked for a reload; each asks again only after rows arrive, so none loops. */
+  readonly asked: ReadonlySet<OrchestrationV2ThreadShell["id"]>;
+}
+
+export const NO_WAITING_GAPS: WaitingGaps = { rows: new Set(), asked: new Set() };
+
+/** The gaps once `items` have produced `snapshot`, and whether the rows must reload. */
+export function trackWaitingGaps(
+  gaps: WaitingGaps,
+  snapshot: OrchestrationV2ShellSnapshot,
+  items: ReadonlyArray<OrchestrationV2ShellStreamItem>,
+): { readonly gaps: WaitingGaps; readonly reload: boolean } {
+  const lacking = threadsLackingKeptWaiting(snapshot, items);
+  if (lacking.length === 0 && gaps.rows.size === 0 && gaps.asked.size === 0) {
+    return { gaps, reload: false };
+  }
+  const current = new Set(snapshot.threads);
+  const asked = new Set([...gaps.asked, ...lacking.map((thread) => thread.id)]);
+  return {
+    reload: lacking.some((thread) => !gaps.asked.has(thread.id)),
+    gaps: {
+      rows: new Set([...[...gaps.rows].filter((row) => current.has(row)), ...lacking]),
+      asked: new Set(
+        snapshot.threads.flatMap((thread) =>
+          asked.has(thread.id) && thread.waiting === undefined ? [thread.id] : [],
+        ),
+      ),
+    },
+  };
+}
 const sameProjectShell = Schema.toEquivalence(OrchestrationProjectShell);
 const sameLinks = Schema.toEquivalence(Schema.UndefinedOr(Schema.Array(ThreadPullRequestLink)));
 const sameRepositoryIdentity = Schema.toEquivalence(

@@ -39,7 +39,9 @@ import {
   type ShellStreamEvent,
   mergeShellSnapshotProjects,
   reuseUnchangedThreadShells,
+  NO_WAITING_GAPS,
   sameThreadPullRequests,
+  trackWaitingGaps,
 } from "./shellReducer.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
@@ -212,6 +214,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   // Rows still waiting for their deferred pull request links, which must not be saved:
   // the cache would keep them without links until the next server refresh.
   let pendingLinkRows: ReadonlySet<OrchestrationV2ThreadShell> = new Set();
+  let waitingGaps = NO_WAITING_GAPS;
   const persistLatest = Effect.fn("EnvironmentShellState.persistLatest")(function* (
     flush: boolean,
   ) {
@@ -219,7 +222,12 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       const latest = yield* Ref.get(latestLive);
       if (Option.isNone(latest) || latest.value === lastPersisted) return;
       const { snapshot, origin } = latest.value;
-      if (snapshot.threads.some((thread) => pendingLinkRows.has(thread))) return;
+      if (
+        snapshot.threads.some(
+          (thread) => pendingLinkRows.has(thread) || waitingGaps.rows.has(thread),
+        )
+      )
+        return;
       if (
         lastPersisted !== undefined &&
         origin === lastPersisted.origin &&
@@ -390,6 +398,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       };
     }
     flushDeltas();
+    if (Option.isSome(next.snapshot)) {
+      // A marker means the server believes this client holds the rows. Without them the strip
+      // shows counts only, and the rows reload as after a refusal.
+      const tracked = trackWaitingGaps(waitingGaps, next.snapshot.value, items);
+      waitingGaps = tracked.gaps;
+      if (tracked.reload) snapshotRequired = true;
+    }
     yield* Ref.set(awaitingCompletion, waiting);
     let nextOrigin = yield* Ref.get(origin);
     if (snapshotRequired) {

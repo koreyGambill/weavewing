@@ -378,6 +378,74 @@ describe("environment shell synchronization", () => {
     }),
   );
 
+  describe("waiting rows left out as unchanged", () => {
+    const rows = [
+      { kind: "task" as const, ref: "T1", key: "t1", title: "Task T1", state: "open" as const },
+    ];
+    const waitingCounts = { question: 0, qa: 0, task: 1, discussing: 0, liveQuestions: 0, live: 1 };
+    const update = (sequence: number, waiting?: typeof rows): OrchestrationV2ShellStreamItem => ({
+      kind: "thread.updated",
+      sequence,
+      location: "active",
+      thread: {
+        ...v2ThreadShell,
+        status: "idle",
+        waitingCounts,
+        ...(waiting === undefined ? {} : { waiting }),
+      },
+      ...(waiting === undefined ? { waitingUnchanged: true as const } : {}),
+    });
+    const savedRows = (saved: ReadonlyArray<OrchestrationV2ShellSnapshot>) =>
+      saved.map((snapshot) => [snapshot.snapshotSequence, snapshot.threads[0]?.waiting]);
+
+    it.effect("saves the rows it kept, not the update without them", () =>
+      Effect.gen(function* () {
+        const saved = yield* SubscriptionRef.make<ReadonlyArray<OrchestrationV2ShellSnapshot>>([]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const h = yield* makePersistenceHarness((_id, snapshot) =>
+              SubscriptionRef.update(saved, (values) => [...values, snapshot]),
+            );
+            yield* TestClock.adjust("500 millis");
+            yield* h.send(update(2, rows), (snapshot) => snapshot.snapshotSequence === 2);
+            yield* h.send(update(3), (snapshot) => snapshot.snapshotSequence === 3);
+            yield* TestClock.adjust("10 seconds");
+          }),
+        );
+        expect(savedRows(yield* SubscriptionRef.get(saved))).toEqual([
+          [1, undefined],
+          [3, rows],
+        ]);
+      }),
+    );
+
+    it.effect("saves no shell whose rows were left out before this client held any", () =>
+      Effect.gen(function* () {
+        const saved = yield* SubscriptionRef.make<ReadonlyArray<OrchestrationV2ShellSnapshot>>([]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const h = yield* makePersistenceHarness((_id, snapshot) =>
+              SubscriptionRef.update(saved, (values) => [...values, snapshot]),
+            );
+            yield* TestClock.adjust("500 millis");
+            const lacking = yield* h.send(update(2), (snapshot) => snapshot.snapshotSequence === 2);
+            // Until the truth arrives the thread has its counts and no rows, so only counts show.
+            expect(lacking.threads[0]).toMatchObject({ waitingCounts });
+            expect(lacking.threads[0]?.waiting).toBeUndefined();
+            yield* TestClock.adjust("10 seconds");
+            expect(savedRows(yield* SubscriptionRef.get(saved))).toEqual([[1, undefined]]);
+            yield* h.send(update(3, rows), (snapshot) => snapshot.snapshotSequence === 3);
+            yield* TestClock.adjust("10 seconds");
+          }),
+        );
+        expect(savedRows(yield* SubscriptionRef.get(saved))).toEqual([
+          [1, undefined],
+          [3, rows],
+        ]);
+      }),
+    );
+  });
+
   it.effect("retries a failed shell save after a cursor-only update", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make<ReadonlyArray<number>>([]);
@@ -1650,6 +1718,30 @@ describe("environment shell cold start", () => {
       yield* TestClock.adjust("250 millis");
       const retried = yield* Queue.take(h.subscriptions);
       expect(retried.input).toMatchObject({ afterSequence: CACHED_SEQUENCE + 2 });
+    }),
+  );
+
+  it.effect("reloads over HTTP when an update leaves out rows this client never held", () =>
+    Effect.gen(function* () {
+      const h = yield* makeColdStart(RECENT_ORIGIN);
+      const resume = yield* Queue.take(h.subscriptions);
+      expect(resume.input).toMatchObject({ afterSequence: CACHED_SEQUENCE });
+      // The cached thread holds no waiting rows, yet the server marks them unchanged.
+      const { waiting: _none, ...thread } = v2ThreadShell;
+      yield* Queue.offer(resume.events, {
+        kind: "thread.updated",
+        sequence: CACHED_SEQUENCE + 1,
+        location: "active",
+        thread: {
+          ...thread,
+          waitingCounts: { question: 0, qa: 0, task: 1, discussing: 0, liveQuestions: 0, live: 1 },
+        },
+        waitingUnchanged: true,
+      });
+      const reload = yield* Queue.take(h.subscriptions);
+      expect(reload.input).toMatchObject({ afterSequence: HTTP_SEQUENCE });
+      expect(reload.input).not.toHaveProperty("httpSnapshotFallback");
+      expect(yield* Ref.get(h.httpLoads)).toBe(1);
     }),
   );
 
