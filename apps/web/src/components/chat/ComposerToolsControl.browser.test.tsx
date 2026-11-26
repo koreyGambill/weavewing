@@ -94,7 +94,6 @@ const renderControl = (
       environmentId={environmentId}
       thread={thread}
       provider={providerSettings as typeof provider}
-      presentation="row"
     />,
   );
 

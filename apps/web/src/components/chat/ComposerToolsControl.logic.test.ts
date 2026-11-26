@@ -70,6 +70,14 @@ describe("toolsLabel", () => {
       ),
     ).toMatchObject({ hidden: false, text: "Tools all on" });
   });
+
+  it("gives the thread menu the value after Tools", () => {
+    expect(toolsLabel(connectorsOff, undefined).value).toBe("8 off");
+    expect(toolsLabel(connectorsOff, wakeupAndConnectors).value).toBe("2 on · 6 off");
+    expect(
+      toolsLabel({ omittedBuiltinTools: [], claudeAiConnectors: "inherit" }, undefined).value,
+    ).toBe("all on");
+  });
 });
 
 describe("toolRows", () => {

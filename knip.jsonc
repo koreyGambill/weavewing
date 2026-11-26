@@ -101,13 +101,7 @@
     "apps/web": {
       // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
       // fixtures run under node.
-      // The thread tools control is finished ahead of the composer row that hosts it; drop
-      // its entry once the row imports it.
-      "entry": [
-        "scripts/warm-dep-cache.ts",
-        "test/fixtures/**/*.mjs",
-        "src/components/chat/ComposerToolsControl.tsx",
-      ],
+      "entry": ["scripts/warm-dep-cache.ts", "test/fixtures/**/*.mjs"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.

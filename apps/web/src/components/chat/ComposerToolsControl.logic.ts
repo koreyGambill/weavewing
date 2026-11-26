@@ -76,6 +76,8 @@ export interface ToolsLabel {
   readonly offCount: number;
   /** "Tools all on", "Tools 8 off" or "Tools 2 on · 6 off". */
   readonly text: string;
+  /** The text after "Tools", which the thread menu shows beside its "Tools" row. */
+  readonly value: string;
 }
 
 /**
@@ -86,24 +88,20 @@ export function toolsLabel(
   provider: Pick<ClaudeSettings, "omittedBuiltinTools" | "claudeAiConnectors"> | null,
   overrides: ThreadToolOverrides | undefined,
 ): ToolsLabel {
-  if (provider === null) return { hidden: true, onCount: 0, offCount: 0, text: "" };
+  if (provider === null) return { hidden: true, onCount: 0, offCount: 0, text: "", value: "" };
   const rows = toolRows(provider);
   const connectorsForced = overrides?.claudeAiConnectors === true;
   const connectorsCount = provider.claudeAiConnectors === "off" || connectorsForced;
   const onCount = rows.filter((row) => isRowOn(row, overrides)).length + (connectorsForced ? 1 : 0);
   const offCount =
     rows.length + (connectorsCount ? 1 : 0) - onCount + (overrides?.omittedMcpServers.length ?? 0);
-  return {
-    hidden: false,
-    onCount,
-    offCount,
-    text:
-      offCount === 0
-        ? "Tools all on"
-        : onCount === 0
-          ? `Tools ${offCount} off`
-          : `Tools ${onCount} on · ${offCount} off`,
-  };
+  const value =
+    offCount === 0
+      ? "all on"
+      : onCount === 0
+        ? `${offCount} off`
+        : `${onCount} on · ${offCount} off`;
+  return { hidden: false, onCount, offCount, text: `Tools ${value}`, value };
 }
 
 export function withRowSwitched(

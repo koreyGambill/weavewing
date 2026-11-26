@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
   type ThreadToolOverrides,
   type OrchestrationV2ListThreadMcpServersResult,
+  type ScopedThreadRef,
   threadToolOverridesNotice,
 } from "@t3tools/contracts";
 import {
@@ -15,18 +16,22 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { WrenchIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type Ref, useImperativeHandle, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { useEnvironmentSettings } from "../../hooks/useSettings";
-import { useServerConfigs } from "../../state/entities";
+import { useQuietThreadShell, useServerConfigs } from "../../state/entities";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { MenuItem, MenuItemDetail } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { ComposerControl } from "./ComposerControl";
+import { useComposerRowItemPlacement } from "./ComposerRow";
+import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRow";
+import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   claudeSettingsForInstance,
   connectorsMode,
@@ -54,68 +59,67 @@ export interface ComposerToolsThread {
   readonly pendingBackgroundTasks: ReadonlyArray<unknown>;
 }
 
-/** One item a composer row can host, shown inline or folded into the row's overflow menu. */
-export interface ComposerRowItem {
-  readonly id: string;
-  readonly priority: number;
-  readonly hidden: boolean;
-  readonly renderRowItem: () => ReactNode;
-  readonly renderMenuRow: () => ReactNode;
-}
-
-const TOOLS_ROW_ITEM_PRIORITY = 40;
-
 const NO_INVENTORY_ATOM: Atom.Atom<
   AsyncResult.AsyncResult<OrchestrationV2ListThreadMcpServersResult, unknown>
 > = Atom.make(AsyncResult.initial<OrchestrationV2ListThreadMcpServersResult, unknown>()).pipe(
   Atom.withLabel("thread-tools:no-inventory"),
 );
 
-/** The per-thread tools item for the composer row; hidden for threads not on Claude. */
-export function useComposerToolsRowItem(
-  environmentId: EnvironmentId,
-  thread: ComposerToolsThread,
-): ComposerRowItem {
-  const providerInstances = useEnvironmentSettings(
-    environmentId,
-    (settings) => settings.providerInstances,
-  );
-  const supported =
-    useServerConfigs().get(environmentId)?.environment.capabilities.threadToolOverrides === true;
-  const provider = supported
-    ? claudeSettingsForInstance({ providerInstances }, thread.providerInstanceId)
-    : null;
-  const label = toolsLabel(provider, thread.toolOverrides);
-  const render = (presentation: "row" | "menu") =>
-    provider === null ? null : (
-      <ComposerToolsControl
-        environmentId={environmentId}
-        thread={thread}
-        provider={provider}
-        presentation={presentation}
-      />
-    );
+/**
+ * The row item for a thread's tools. Hidden for threads not on Claude and on servers without
+ * per-thread tools; everything it shows comes from provider settings and the thread shell.
+ */
+export function useComposerToolsRowItem(threadRef: ScopedThreadRef | null): ComposerRowItem {
+  const environmentId = threadRef?.environmentId ?? null;
+  const shell = useQuietThreadShell(threadRef);
+  const configs = useServerConfigs();
+  const config = environmentId === null ? undefined : configs.get(environmentId);
+  const controlRef = useRef<ComposerToolsControlHandle>(null);
+  const provider =
+    config?.environment.capabilities.threadToolOverrides === true && shell !== null
+      ? claudeSettingsForInstance(config.settings, shell.providerInstanceId)
+      : null;
   return {
-    id: "thread-tools",
-    priority: TOOLS_ROW_ITEM_PRIORITY,
-    hidden: label.hidden,
-    renderRowItem: () => render("row"),
-    renderMenuRow: () => render("menu"),
+    id: "tools",
+    priority: COMPOSER_ROW_PRIORITY.tools,
+    hidden: environmentId === null || shell === null || provider === null,
+    renderRowItem: () =>
+      environmentId !== null && shell !== null && provider !== null ? (
+        <ComposerToolsControl
+          ref={controlRef}
+          environmentId={environmentId}
+          thread={shell}
+          provider={provider}
+        />
+      ) : null,
+    renderMenuRow: ({ openPopover, setValueElement }) => (
+      <MenuItem onClick={() => openPopover(() => controlRef.current?.open())}>
+        <WrenchIcon />
+        Tools
+        <MenuItemDetail ref={setValueElement} />
+      </MenuItem>
+    ),
   };
 }
 
+export interface ComposerToolsControlHandle {
+  readonly open: () => void;
+}
+
 export function ComposerToolsControl({
+  ref,
   environmentId,
   thread,
   provider,
-  presentation,
 }: {
+  ref?: Ref<ComposerToolsControlHandle>;
   environmentId: EnvironmentId;
   thread: ComposerToolsThread;
   provider: Pick<ClaudeSettings, "omittedBuiltinTools" | "claudeAiConnectors">;
-  presentation: "row" | "menu";
 }) {
   const [open, setOpen] = useState(false);
+  useImperativeHandle(ref, () => ({ open: () => setOpen(true) }), []);
+  const rowPlacement = useComposerRowItemPlacement();
   // Staged switches outlive a closed popover, so stopping a turn does not lose them.
   const [staged, setStaged] = useState<{
     readonly threadId: ThreadId;
@@ -124,32 +128,31 @@ export function ComposerToolsControl({
   const saved = thread.toolOverrides ?? EMPTY_TOOL_OVERRIDES;
   const stagedValue = staged?.threadId === thread.id ? staged.value : saved;
   const label = toolsLabel(provider, thread.toolOverrides);
-  const trigger =
-    presentation === "row" ? (
-      <ComposerControl size="xs" aria-label={`${label.text}. Change tools for this thread`} />
-    ) : (
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label={`${label.text}. Change tools for this thread`}
-      />
-    );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={trigger} data-thread-tools-trigger="">
+      <PopoverTrigger
+        render={
+          <ComposerControl size="xs" aria-label={`${label.text}. Change tools for this thread`} />
+        }
+        data-thread-tools-trigger=""
+      >
         <WrenchIcon aria-hidden="true" />
-        <span>
-          <span className="font-medium text-foreground">Tools</span>{" "}
-          {label.text.slice("Tools ".length)}
+        <span className="whitespace-nowrap">
+          <span className="font-medium text-foreground">Tools</span> {label.value}
         </span>
       </PopoverTrigger>
+      {rowPlacement?.menuValue ? createPortal(label.value, rowPlacement.menuValue) : null}
       {open ? (
         <PopoverPopup
           side="top"
-          align="start"
+          align={rowPlacement?.inMenu ? "end" : "start"}
           width="lg"
           padding="none"
           aria-label="Tools for this thread"
+          {...(rowPlacement?.inMenu
+            ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.finalFocus }
+            : {})}
+          {...composerFloatingLayerProps}
         >
           <ToolsPopoverContent
             environmentId={environmentId}

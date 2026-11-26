@@ -15,6 +15,7 @@ import { MenuItem, MenuItemDetail } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl } from "./ComposerControl";
+import { useComposerToolsRowItem } from "./ComposerToolsControl";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   type ComposerRowAgentsSummary,
@@ -83,8 +84,8 @@ function ComposerRowAgents(props: {
 }
 
 /**
- * The thread's own row items: Agents, then the ⋯-only side chat and bookmarks. Every value
- * comes from data the thread view already holds.
+ * The thread's own row items: Agents and Tools, then the ⋯-only side chat and bookmarks. Every
+ * value comes from data the thread view already holds.
  */
 export function useThreadComposerRowItems(input: {
   /** Null for a draft or embedded view, which gets none of these items. */
@@ -96,6 +97,7 @@ export function useThreadComposerRowItems(input: {
   readonly onRevealBookmark: (bookmark: MessageFollowUp) => void;
 }): ReadonlyArray<ComposerRowItem> {
   const bookmarks = orderBookmarks(useThreadFollowUpList(input.bookmarksThreadRef));
+  const tools = useComposerToolsRowItem(input.threadRef);
   const { threadRef, bookmarksThreadRef, onOpenSideChat, onRevealBookmark } = input;
   if (threadRef === null) return [];
   const agents = summarizeComposerRowAgents(input.agents);
@@ -126,6 +128,7 @@ export function useThreadComposerRowItems(input: {
         ),
       },
     },
+    tools,
     {
       id: "side-chat",
       priority: null,
