@@ -1970,8 +1970,20 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
             },
           },
         ],
+        [
+          "turnRewindingToken",
+          {
+            ...scopeFor("turnRewindingToken", ["orchestration", "context-rewind-turn"]),
+            thread: {
+              threadId: ThreadId.make("thread-turnRewindingToken"),
+              providerSessionId: "turnRewindingToken",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+            },
+          },
+        ],
       ]);
       const rewindSummaries: Array<string> = [];
+      const rewindToolCalls: Array<number | undefined> = [];
       const tool = (name: string, description: string) =>
         Tool.make(name, {
           description,
@@ -1998,6 +2010,7 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           McpHttpServer.layerToolSearch,
           McpHttpServer.layerQuestionToolkit.pipe(Layer.provide(ThreadWorkspace.layerTest)),
           McpHttpServer.layerContextRewindToolkit,
+          McpHttpServer.layerContextRewindTurnToolkit,
         ),
       ).pipe(
         Layer.provide(ServerSettings.layerTest()),
@@ -2005,7 +2018,7 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadShell: (threadId) =>
               Effect.succeed(McpToolAccessTestkit.liveThreadShell(threadId)),
-            rewindContext: ({ summary }) =>
+            rewindContext: ({ summary, toolCalls }) =>
               summary === "refuse"
                 ? Effect.fail(
                     new ThreadManagementService.ThreadManagementContextRewindError({
@@ -2015,6 +2028,7 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
                   )
                 : Effect.sync(() => {
                     rewindSummaries.push(summary);
+                    rewindToolCalls.push(toolCalls);
                     return { removedToolCalls: 2 };
                   }),
           }),
@@ -2144,6 +2158,23 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
       };
       expect(refused.isError).toBe(true);
       expect(refused._meta).toBeUndefined();
+      expect(yield* rewinding.listed).not.toContain("context_rewind_turn");
+
+      // The whole-turn variant follows `context-rewind-turn`, takes no count and ends no turn.
+      expect(
+        (yield* deferring.call("tool_search", { query: "context_rewind_turn" })).structuredContent,
+      ).toEqual({ tools: [] });
+      const turnRewinding = yield* session("turnRewindingToken", false);
+      const turnListed = yield* turnRewinding.listed;
+      expect(turnListed).toContain("context_rewind_turn");
+      expect(turnListed).not.toContain("context_rewind");
+      const turnRewound = (yield* turnRewinding.call("context_rewind_turn", {
+        summary: "SUP-1163",
+      })) as { readonly isError?: boolean; readonly _meta?: Record<string, unknown> };
+      expect(turnRewound.isError).toBe(false);
+      expect(turnRewound._meta).toBeUndefined();
+      expect(rewindSummaries).toEqual(["SUP-1047", "SUP-1163"]);
+      expect(rewindToolCalls).toEqual([undefined, undefined]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
