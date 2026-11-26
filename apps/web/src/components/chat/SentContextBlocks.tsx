@@ -44,6 +44,7 @@ const KIND_NAMES: Record<string, string> = {
   "review-comment": "Review comment",
   response: "Replied-to response",
   thread: "Thread",
+  "waiting-item": "Discussed item",
 };
 
 const kindName = (block: SentContextBlock) => KIND_NAMES[block.kind] ?? block.kind;
