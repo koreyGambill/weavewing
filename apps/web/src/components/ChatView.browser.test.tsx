@@ -1175,17 +1175,23 @@ it("keeps a narrow location label's ellipsis inside the box it is given", async 
     }),
   );
   await expect.element(page.getByRole("button", { name: "Agents: 1 working" })).toBeVisible();
+  // How far any text in the location's labels runs past its label's box.
   const overflow = () => {
-    const label = document.querySelector<HTMLElement>(
+    const labels = document.querySelectorAll<HTMLElement>(
       '[data-composer-row-item="location"] [data-composer-label]',
     );
-    if (!label) return Number.POSITIVE_INFINITY;
-    const right = label.getBoundingClientRect().right;
+    if (labels.length === 0) return Number.POSITIVE_INFINITY;
     return Math.max(
       0,
-      ...Array.from(label.querySelectorAll<HTMLElement>("span"), (span) => {
-        const box = span.getBoundingClientRect();
-        return box.width === 0 ? 0 : box.right - right;
+      ...Array.from(labels, (label) => {
+        const right = label.getBoundingClientRect().right;
+        return Math.max(
+          0,
+          ...Array.from(label.querySelectorAll<HTMLElement>("span"), (span) => {
+            const box = span.getBoundingClientRect();
+            return box.width === 0 ? 0 : box.right - right;
+          }),
+        );
       }),
     );
   };
