@@ -83,6 +83,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
 import * as PortScanner from "../../preview/PortScanner.ts";
+import * as ClaudeInstructionUpdates from "./ClaudeInstructionUpdates.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { WorkflowAgentTranscriptReadObserver } from "../workflowAgentTranscript.ts";
 import * as ServerConfig from "../../config.ts";
@@ -2998,7 +2999,16 @@ describe("ClaudeAdapterV2 attachments", () => {
               { type: "text" as const, text: command + attachmentNotes },
             ]
           : [expectedImageBlock, ...(!resumed ? [expectedDocumentBlock] : []), requestBlock];
-        assert.deepEqual(offeredMessages[0]?.message.content, expectedContent);
+        // A resumed session with no instruction record also gets T3's instruction notice first.
+        const offeredContent = offeredMessages[0]?.message.content;
+        assert.deepEqual(
+          resumed && Array.isArray(offeredContent)
+            ? offeredContent.filter(
+                (block) => !(block.type === "text" && block.text.startsWith("<system-reminder>")),
+              )
+            : offeredContent,
+          expectedContent,
+        );
 
         const providerTurnId = idAllocator.derive.providerTurn({
           driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
@@ -4223,6 +4233,388 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  describe("ClaudeAdapterV2 instruction updates on resume", () => {
+    const layers = Layer.mergeAll(
+      IdAllocator.layer,
+      McpProviderSessions.layer,
+      NodeServices.layer,
+      NodeCrypto.layer,
+    );
+    // The harness has no T3 MCP session, so the append is T3's runtime text alone.
+    const sections = ClaudeAdapterV2.claudeSystemPromptSections({
+      append: ClaudeAdapterV2.claudeSystemPromptAppend({ hasT3Mcp: false, deviceTools: false }),
+      hasT3Mcp: false,
+      deviceTools: false,
+    });
+    const startedWithout = (name: string) =>
+      ClaudeInstructionUpdates.claudeInstructionRecord(
+        sections.filter((section) => section.name !== name),
+      );
+    const withRecord = (
+      providerThread: OrchestrationV2ProviderThread,
+      record: ClaudeInstructionUpdates.ClaudeInstructionRecord | undefined,
+    ): OrchestrationV2ProviderThread => ({
+      ...providerThread,
+      nativeMetadata:
+        record === undefined
+          ? null
+          : { ...providerThread.nativeMetadata, claudeInstructions: record },
+    });
+    type Harness = Effect.Success<typeof makeWakeHarness>;
+    const startTurn = Effect.fnUntraced(function* (
+      harness: Harness,
+      input: {
+        readonly ordinal: number;
+        readonly providerThread: OrchestrationV2ProviderThread;
+        readonly text?: string;
+        readonly resumed?: boolean;
+      },
+    ) {
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: input.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make(`attempt-instruction-update-${input.ordinal}`),
+          providerTurnOrdinal: input.ordinal,
+          text: input.text ?? "What changed?",
+          attachments: [],
+          nativeThreadHasTurns: input.resumed ?? true,
+        }),
+      );
+      return harness.offeredMessages.at(-1)?.message.content;
+    });
+    const finishTurn = Effect.fnUntraced(function* (harness: Harness, ordinal: number) {
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: `instruction-update-result-${ordinal}`, result: "Done." }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+    });
+    const failTurn = Effect.fnUntraced(function* (harness: Harness, ordinal: number) {
+      yield* harness.offerAndWait(
+        makeResultFrame({
+          uuid: `instruction-update-failure-${ordinal}`,
+          result: "",
+          subtype: "error_during_execution",
+          isError: true,
+          errors: ["process lost"],
+        }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+    });
+    const persisted = (harness: Harness) => {
+      const event = harness.events.findLast(
+        (candidate) => candidate.type === "provider_thread.updated",
+      );
+      if (event?.type !== "provider_thread.updated") throw new Error("No provider thread update.");
+      return event.providerThread;
+    };
+    // The test model adds an effort prefix ahead of the user's text.
+    const isPlainPrompt = (content: unknown) =>
+      typeof content === "string" && content.endsWith("What changed?");
+    const noticeOf = (content: unknown) =>
+      Array.isArray(content) &&
+      content[0]?.type === "text" &&
+      content[0].text.startsWith("<system-reminder>")
+        ? (content[0].text as string)
+        : null;
+
+    it.effect("tells a resumed session about a section it lacks once, ahead of the prompt", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const first = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(
+            harness.providerThread,
+            startedWithout("<pull_request_linking>"),
+          ),
+        });
+        assert.include(noticeOf(first), '<section name="<pull_request_linking>" change="added">');
+        assert.notInclude(noticeOf(first), "<runtime_info>");
+        assert.lengthOf(Array.isArray(first) ? first : [], 2);
+        assert.isTrue(
+          Array.isArray(first) && isPlainPrompt(first[1]?.type === "text" ? first[1].text : null),
+        );
+        yield* finishTurn(harness, 1);
+        assert.deepEqual(
+          persisted(harness).nativeMetadata?.claudeInstructions?.sections,
+          ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
+        );
+        // The notice reaches Claude only, never the thread's own messages or items.
+        assert.isFalse(
+          harness.events.some(
+            (event) =>
+              event.type !== "provider_thread.updated" &&
+              encodeJsonString(event).includes("<system-reminder>"),
+          ),
+        );
+
+        const second = yield* startTurn(harness, {
+          ordinal: 2,
+          providerThread: persisted(harness),
+        });
+        assert.isTrue(isPlainPrompt(second));
+        yield* finishTurn(harness, 2);
+
+        // A restarted server resumes from the persisted record and has nothing to say.
+        const restarted = yield* makeWakeHarness;
+        const third = yield* startTurn(restarted, {
+          ordinal: 3,
+          providerThread: persisted(harness),
+        });
+        assert.isTrue(isPlainPrompt(third));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("sends nothing to a resumed session that already has the current sections", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const content = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(
+            harness.providerThread,
+            ClaudeInstructionUpdates.claudeInstructionRecord(sections),
+          ),
+        });
+        assert.isTrue(isPlainPrompt(content));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("records a new session's start append and sends it no notice", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const content = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: harness.providerThread,
+          resumed: false,
+        });
+        assert.isTrue(isPlainPrompt(content));
+        yield* finishTurn(harness, 1);
+        assert.deepEqual(
+          persisted(harness).nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.claudeInstructionRecord(sections),
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("gives a session with no record every current section once", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const content = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(harness.providerThread, undefined),
+        });
+        assert.include(noticeOf(content), "cannot tell which version");
+        assert.include(noticeOf(content), '<section name="<runtime_info>">');
+        yield* finishTurn(harness, 1);
+        assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, {
+          start: null,
+          sections: ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
+        });
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("sends a notice again when Claude never accepted the prompt that carried it", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const record = startedWithout("<pull_request_linking>");
+        const first = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(harness.providerThread, record),
+        });
+        assert.isNotNull(noticeOf(first));
+        yield* failTurn(harness, 1);
+        assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, record);
+
+        const second = yield* startTurn(harness, {
+          ordinal: 2,
+          providerThread: persisted(harness),
+        });
+        assert.equal(noticeOf(second), noticeOf(first));
+        yield* failTurn(harness, 2);
+
+        // Two restarts with no accepted turn still owe exactly the one notice.
+        const restarted = yield* makeWakeHarness;
+        yield* makeWakeHarness;
+        const third = yield* startTurn(restarted, {
+          ordinal: 3,
+          providerThread: persisted(harness),
+        });
+        assert.equal(noticeOf(third), noticeOf(first));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("holds the notice back from a slash command until the next normal turn", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const command = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(
+            harness.providerThread,
+            startedWithout("<pull_request_linking>"),
+          ),
+          text: "/context",
+        });
+        assert.isTrue(typeof command === "string" && command.endsWith("/context"));
+        yield* finishTurn(harness, 1);
+        assert.deepEqual(
+          persisted(harness).nativeMetadata?.claudeInstructions,
+          startedWithout("<pull_request_linking>"),
+        );
+        const next = yield* startTurn(harness, { ordinal: 2, providerThread: persisted(harness) });
+        assert.include(noticeOf(next), "<pull_request_linking>");
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("makes the process append the session's own after compaction", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const content = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(
+            harness.providerThread,
+            startedWithout("<pull_request_linking>"),
+          ),
+          text: "/compact",
+        });
+        assert.isNull(noticeOf(content));
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: { trigger: "manual", pre_tokens: 1500, post_tokens: 400 },
+            uuid: "00000000-0000-4000-8000-000000000913",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* finishTurn(harness, 1);
+        assert.deepEqual(
+          persisted(harness).nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.claudeInstructionRecord(sections, { compacted: true }),
+        );
+        const next = yield* startTurn(harness, { ordinal: 2, providerThread: persisted(harness) });
+        assert.isTrue(isPlainPrompt(next));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("starts a session that /clear opened with the process append", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(
+            harness.providerThread,
+            startedWithout("<pull_request_linking>"),
+          ),
+          text: "/clear",
+        });
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "init",
+            session_id: "cleared-native-session",
+            uuid: "00000000-0000-4000-8000-000000000914",
+          }),
+        );
+        yield* finishTurn(harness, 1);
+        const cleared = persisted(harness);
+        assert.equal(cleared.nativeThreadRef?.nativeId, "cleared-native-session");
+        assert.deepEqual(
+          cleared.nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.claudeInstructionRecord(sections),
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("keeps notices in a fork at the head and drops them from an earlier fork", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({
+          forkSession: () => Effect.succeed({ sessionId: "forked-native-session" }),
+        });
+        const delivered = {
+          ...startedWithout("<pull_request_linking>"),
+          sections: ClaudeInstructionUpdates.claudeInstructionRecord(sections).sections,
+        };
+        const source = withRecord(harness.providerThread, delivered);
+        const atHead = yield* harness.runtime.forkThread({
+          sourceProviderThread: source,
+          targetThreadId: ThreadId.make("thread-claude-fork-head"),
+        });
+        assert.deepEqual(atHead.nativeMetadata?.claudeInstructions, delivered);
+
+        // A rolled-back source pins its head before notices it may have accepted.
+        const earlier = yield* harness.runtime.forkThread({
+          sourceProviderThread: {
+            ...source,
+            nativeConversationHeadRef: {
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeId: "rolled-back-head",
+              strength: "weak",
+            },
+          },
+          targetThreadId: ThreadId.make("thread-claude-fork-earlier"),
+        });
+        assert.deepEqual(
+          earlier.nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.claudeInstructionRecordBeforeNotices(delivered),
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("reports the append a resumed session uses and its notice as its own part", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const prepared: Array<
+          Parameters<
+            NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["onContextPrepared"]>
+          >[0]
+        > = [];
+        const changed = ClaudeInstructionUpdates.claudeInstructionRecord(
+          sections.map((section) =>
+            section.name === "<pull_request_linking>"
+              ? { ...section, text: "\n\n<pull_request_linking>\nOLD\n</pull_request_linking>" }
+              : section,
+          ),
+        );
+        yield* harness.runtime.startTurn({
+          ...makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: withRecord(harness.providerThread, changed),
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-instruction-update-footprint"),
+            text: "What changed?",
+            attachments: [],
+            nativeThreadHasTurns: true,
+          }),
+          onContextPrepared: (context) => Effect.sync(() => prepared.push(context)),
+        });
+        const context = prepared.at(-1)!;
+        const notice = noticeOf(harness.offeredMessages.at(-1)?.message.content)!;
+        assert.include(context.source, "as this session started with it");
+        assert.deepEqual(
+          context.entries.find((entry) => entry.key === "t3_update_notice")?.text,
+          notice,
+        );
+        assert.deepEqual(context.sizedEntries, [
+          {
+            key: "t3:earlier-copy",
+            label: "Earlier copy of <pull_request_linking>",
+            bytes: changed.start!.find((section) => section.name === "<pull_request_linking>")!
+              .bytes,
+          },
+        ]);
+        const sent =
+          context.entries.reduce((total, entry) => total + Buffer.byteLength(entry.text), 0) +
+          (context.sizedEntries ?? []).reduce((total, entry) => total + entry.bytes, 0);
+        assert.equal(
+          sent,
+          changed.start!.reduce((total, section) => total + section.bytes, 0) +
+            Buffer.byteLength(notice),
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+  });
 
   describe("ClaudeAdapterV2 session title sync", () => {
     type TitleSyncHarness = Effect.Success<ReturnType<typeof makeWakeHarnessWithOptions>>;

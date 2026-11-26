@@ -23,6 +23,26 @@ it("extracts complete child preambles and ignores an unclosed remainder", () => 
   expect(Footprints.childPreambleEntries("<child_preamble".repeat(10_000))).toEqual([]);
 });
 
+it("files the QA section under QA and counts an update notice as its own part", () => {
+  const orchestration = T3_CODE_ORCHESTRATION_SECTIONS.join("\n\n");
+  const qa = T3_CODE_ORCHESTRATION_SECTIONS.find((section) => section.startsWith("## T3 Code QA"))!;
+  const notice = `<system-reminder>\n<section name="## T3 Code QA" change="added">\n${qa}\n</section>\n</system-reminder>`;
+  const parts = Footprints.splitPreparedContext([
+    { key: "t3_code_orchestration", text: orchestration },
+    { key: "t3_update_notice", text: notice },
+  ]);
+  expect(parts.find((part) => part.label === "QA")?.bytes).toBe(Buffer.byteLength(qa));
+  expect(parts.find((part) => part.label === "Threads and environments")?.text).not.toContain(
+    "## T3 Code QA",
+  );
+  expect(parts.find((part) => part.label === "Instruction update notice")?.bytes).toBe(
+    Buffer.byteLength(notice),
+  );
+  expect(parts.reduce((sum, part) => sum + part.bytes, 0)).toBe(
+    Buffer.byteLength(orchestration + notice),
+  );
+});
+
 it.effect(
   "persists measured payload sizes without prompt text and scopes snapshots by thread, run, and attempt",
   () =>
@@ -88,6 +108,9 @@ it.effect(
         source: "actual test payload",
         instructionSources: Array.from({ length: 65 }, () => source),
         entries,
+        sizedEntries: [
+          { key: "t3:earlier-copy", label: "Earlier copy of ## T3 Code QA", bytes: 700 },
+        ],
       });
       const reopened = yield* open();
       const saved = yield* reopened.list(threadId, runId);
@@ -98,6 +121,15 @@ it.effect(
       expect(
         saved.find((item) => item.attemptId === "attempt/sources-only")?.instructionSources,
       ).toHaveLength(64);
+      expect(saved.find((item) => item.attemptId === "attempt/sources-only")?.parts).toContainEqual(
+        {
+          key: "t3:earlier-copy",
+          label: "Earlier copy of ## T3 Code QA",
+          category: "t3",
+          bytes: 700,
+          estimatedTokens: 175,
+        },
+      );
       expect(saved.find((item) => item.attemptId === "attempt/one")?.injectedTools).toEqual([
         "t3_context_read",
         "list_read",

@@ -7,6 +7,17 @@ import {
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import {
+  claudeAppendSections,
+  claudeInstructionRecord,
+  claudeInstructionRecordBeforeNotices,
+  claudeInstructionUpdate,
+  claudeSectionDigest,
+  sameClaudeInstructionRecord,
+  type ClaudeAppendSection,
+  type ClaudeInstructionRecord,
+  type ClaudeInstructionUpdate,
+} from "./ClaudeInstructionUpdates.ts";
+import {
   dynamicToolTitle,
   formatReadToolLabel,
   formatSearchToolLabel,
@@ -2366,24 +2377,85 @@ export function claudePreparedContextEntries(
   return entries;
 }
 
-/** The text T3 appends to Claude Code's preset system prompt on every turn. */
-export function claudeSystemPromptAppend(input: {
+interface ClaudeT3AppendInput {
   readonly hasT3Mcp: boolean;
   readonly deviceTools: boolean;
   readonly questionTools?: boolean;
-  readonly launchAppend?: ReadonlyArray<string>;
-}): string {
-  return [
+}
+
+function claudeT3Append(input: ClaudeT3AppendInput): string {
+  return (
     buildRuntimeInstructions({ harness: "Claude Code" }) +
-      (input.hasT3Mcp
-        ? T3_CODE_ORCHESTRATION_INSTRUCTIONS +
-          CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
-          CLAUDE_SEND_TO_USER_INSTRUCTIONS +
-          (input.deviceTools ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "") +
-          (input.questionTools ? `\n${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n` : "")
-        : ""),
-    ...(input.launchAppend ?? []),
-  ].join("\n\n");
+    (input.hasT3Mcp
+      ? T3_CODE_ORCHESTRATION_INSTRUCTIONS +
+        CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
+        CLAUDE_SEND_TO_USER_INSTRUCTIONS +
+        (input.deviceTools ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "") +
+        (input.questionTools ? `\n${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n` : "")
+      : "")
+  );
+}
+
+/** The text T3 appends to Claude Code's preset system prompt on every turn. */
+export function claudeSystemPromptAppend(
+  input: ClaudeT3AppendInput & { readonly launchAppend?: ReadonlyArray<string> },
+): string {
+  return [claudeT3Append(input), ...(input.launchAppend ?? [])].join("\n\n");
+}
+
+/** The append's named sections, which a resumed session compares with its record. */
+export function claudeSystemPromptSections(
+  input: ClaudeT3AppendInput & { readonly append: string },
+): ReadonlyArray<ClaudeAppendSection> {
+  return claudeAppendSections(input.append, claudeT3Append(input));
+}
+
+/**
+ * What a resumed session actually has: Claude Code replays the append the session started with,
+ * and T3's update notice rides on the first turn. Start sections whose text changed since are
+ * known only by size.
+ */
+function claudeResumedPreparedContext(input: {
+  readonly record: ClaudeInstructionRecord | undefined;
+  readonly sections: ReadonlyArray<ClaudeAppendSection>;
+  readonly notice: string | null;
+}): {
+  readonly source: string;
+  readonly entries: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  readonly sizedEntries: ReadonlyArray<{
+    readonly key: string;
+    readonly label: string;
+    readonly bytes: number;
+  }>;
+} {
+  const current = new Map(
+    input.sections.map((section) => [
+      section.name,
+      { section, digest: claudeSectionDigest(section.text) },
+    ]),
+  );
+  const start = input.record?.start ?? null;
+  const known = (start ?? []).flatMap((section) => {
+    const match = current.get(section.name);
+    return match?.digest === section.digest ? [match.section.text] : [];
+  });
+  return {
+    source:
+      start === null
+        ? "Claude Code replays this session's first systemPrompt.append, which predates T3's record, so its size is unknown; T3's update notice is counted separately; preset harness text unavailable"
+        : "Claude SDK systemPrompt.append as this session started with it, which Claude Code replays on resume; T3's update notice is counted separately; preset harness text unavailable",
+    entries: [
+      ...claudePreparedContextEntries(known.join("")),
+      ...(input.notice === null ? [] : [{ key: "t3_update_notice", text: input.notice }]),
+    ],
+    sizedEntries: (start ?? [])
+      .filter((section) => current.get(section.name)?.digest !== section.digest)
+      .map(({ name, bytes }) => ({
+        key: "t3:earlier-copy",
+        label: `Earlier copy of ${name}`,
+        bytes,
+      })),
+  };
 }
 
 export function makeClaudeQueryOptions(input: {
@@ -3043,6 +3115,17 @@ const resolveClaudeForkUpToMessageId = Effect.fn("ClaudeAdapterV2.resolveForkUpT
   },
 );
 
+/** A fork that keeps every turn of a source whose conversation was never cut back. */
+function claudeForkIsAtHead(input: ProviderAdapter.ProviderAdapterV2ForkThreadInput): boolean {
+  if (input.sourceProviderThread.nativeConversationHeadRef !== null) return false;
+  if (input.providerTurnId === undefined || input.sourceProviderTurns === undefined) return true;
+  const sourceTurns = input.sourceProviderTurns
+    .filter((turn) => turn.providerThreadId === input.sourceProviderThread.id)
+    .toSorted((left, right) => left.ordinal - right.ordinal);
+  const boundaryIndex = sourceTurns.findIndex((turn) => turn.id === input.providerTurnId);
+  return boundaryIndex >= 0 && !sourceTurns.slice(boundaryIndex + 1).some(isTerminalProviderTurn);
+}
+
 const resolveClaudeRollbackResumeSessionAt = Effect.fn(
   "ClaudeAdapterV2.resolveRollbackResumeSessionAt",
 )(function* (input: ProviderAdapter.ProviderAdapterV2RollbackThreadInput) {
@@ -3108,6 +3191,21 @@ function isSupportedClaudeImageMimeType(
   mimeType: string,
 ): mimeType is SupportedClaudeImageMimeType {
   return supportedClaudeImageMimeTypes.has(mimeType);
+}
+
+/** Puts T3's instruction notice ahead of the prompt as its own block, the way Claude Code adds its own. */
+function withClaudeInstructionNotice(message: SDKUserMessage, notice: string): SDKUserMessage {
+  const content = message.message.content;
+  return {
+    ...message,
+    message: {
+      ...message.message,
+      content: [
+        { type: "text", text: notice },
+        ...(typeof content === "string" ? [{ type: "text" as const, text: content }] : content),
+      ],
+    },
+  };
 }
 
 export function makeClaudeUserMessage(input: {
@@ -5347,6 +5445,8 @@ interface ActiveClaudeTurnContext {
   readonly steerUuids: Set<string>;
   // Claude can run another model than requested, such as when an organization disallows it.
   executedModel: string | undefined;
+  // The instruction notice this turn's prompt carries, recorded once Claude Code accepts the prompt.
+  instructionUpdate: ClaudeInstructionUpdate | null;
 }
 
 interface ActiveClaudeProviderRetry {
@@ -5404,6 +5504,8 @@ interface ClaudeLiveQueryContext {
   // Per process, not per session: a relative temp dir follows the cwd this CLI
   // was launched in, and a later turn's cwd can differ.
   readonly taskOutputRoot: string | undefined;
+  // The append this process was opened with, which compaction and /clear make the session's own.
+  readonly appendSections: ReadonlyArray<ClaudeAppendSection>;
 }
 
 interface ActiveClaudeToolCall {
@@ -6194,6 +6296,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         // Sessions Claude Code reported gone on resume; resumeThread fails them into a fresh session.
         const missingNativeThreads = new Set<string>();
         const pdfBudgets = new Map<string, ReturnType<typeof makeClaudeAttachmentBudget>>();
+        // By native session: what each session holds of T3's append, and the notice a resumed
+        // process still owes its first normal turn.
+        const instructionRecords = new Map<string, ClaudeInstructionRecord>();
+        const pendingInstructionUpdates = new Map<string, ClaudeInstructionUpdate>();
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
         // Claude 5 task tools edit one list per native session, across turns.
         const taskListsByNativeThread = yield* Ref.make(
@@ -6535,13 +6641,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const budget = pdfBudgets.get(nativeThreadId);
           const hasAppliedTitle = appliedSessionTitles.has(nativeThreadId);
           const recordedTitle = providerThread.nativeMetadata?.title;
-          if (budget === undefined && !hasAppliedTitle && recordedTitle === undefined) {
+          // After /clear the event still names the old session; the record follows the new one.
+          const instructions = instructionRecords.get(
+            clearedNativeSessions.get(nativeThreadId) ?? nativeThreadId,
+          );
+          if (
+            budget === undefined &&
+            !hasAppliedTitle &&
+            recordedTitle === undefined &&
+            instructions === undefined
+          ) {
             return providerThread;
           }
           return {
             ...providerThread,
             nativeMetadata: {
               ...providerThread.nativeMetadata,
+              ...(instructions === undefined ? {} : { claudeInstructions: instructions }),
               ...(budget === undefined
                 ? {}
                 : {
@@ -6586,7 +6702,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           return Queue.offer(events, event).pipe(Effect.asVoid);
         };
 
-        const persistAttachmentBudget = Effect.fnUntraced(function* (nativeThreadId: string) {
+        const persistAdapterNativeMetadata = Effect.fnUntraced(function* (nativeThreadId: string) {
           const providerThread = (yield* Ref.get(lastProviderThreadByNativeThread)).get(
             nativeThreadId,
           );
@@ -6601,6 +6717,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               updatedAt: yield* DateTime.now,
             },
           });
+        });
+
+        // Claude Code has the prompt in its transcript, so the session now holds the notice.
+        const recordInstructionUpdate = Effect.fnUntraced(function* (
+          context: ActiveClaudeTurnContext,
+        ) {
+          const update = context.instructionUpdate;
+          if (update === null) return;
+          context.instructionUpdate = null;
+          if (pendingInstructionUpdates.get(context.nativeThreadId) === update) {
+            pendingInstructionUpdates.delete(context.nativeThreadId);
+          }
+          instructionRecords.set(context.nativeThreadId, update.next);
+          yield* persistAdapterNativeMetadata(context.nativeThreadId);
         });
 
         // Usage without input is a placeholder, not a context measurement.
@@ -9454,6 +9584,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly threadDisposition?: "reusable" | "broken";
           readonly result?: SDKResultMessage;
         }) {
+          // CLIs that neither echo nor report the prompt's lifecycle confirm it by completing.
+          if (requested.status === "completed") yield* recordInstructionUpdate(requested.context);
           // A turn stopped by the retry budget settles as failed with the retry's error.
           const retryBudgetFailure = requested.context.retryBudgetFailure;
           const input =
@@ -11243,7 +11375,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 budget.committed.bytes -= compacted.bytes;
               }
               budget.compacting = null;
-              yield* persistAttachmentBudget(context.nativeThreadId);
+            }
+            // Compaction rebuilds the session's system prompt from this process's append.
+            const compactedQuery = yield* Ref.get(queryContext);
+            if (compactedQuery?.nativeThreadId === context.nativeThreadId) {
+              context.instructionUpdate = null;
+              pendingInstructionUpdates.delete(context.nativeThreadId);
+              instructionRecords.set(
+                context.nativeThreadId,
+                claudeInstructionRecord(compactedQuery.appendSections, { compacted: true }),
+              );
+            }
+            if (budget !== undefined || compactedQuery?.nativeThreadId === context.nativeThreadId) {
+              yield* persistAdapterNativeMetadata(context.nativeThreadId);
             }
             if (context.streamUsage !== null) context.streamUsage.usage = null;
             const postTokens = message.compact_metadata.post_tokens;
@@ -12290,6 +12434,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ? "early"
                   : "result_only";
             }
+            yield* recordInstructionUpdate(context);
             yield* releaseHeldRootFrames(context);
             yield* handleRoutedSdkMessage(input);
             return;
@@ -12301,6 +12446,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
             if (lifecycle.state === "started") {
               context.promptStarted = true;
+              yield* recordInstructionUpdate(context);
             }
             // Previously recorded prompt uuids complete without starting a turn.
             if (lifecycle.state === "completed" && !context.promptStarted) {
@@ -13176,18 +13322,60 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { toolOverrides: turnInput.appThread.toolOverrides }),
           });
+          const systemPrompt = queryOptions.systemPrompt;
+          const append =
+            typeof systemPrompt === "object" && systemPrompt !== null && "append" in systemPrompt
+              ? (systemPrompt.append ?? "")
+              : typeof systemPrompt === "string"
+                ? systemPrompt
+                : "";
+          const hasT3Mcp = mcpOverrides.mcpServers !== undefined;
+          const appendSections = claudeSystemPromptSections({
+            append,
+            hasT3Mcp,
+            deviceTools: hasT3Mcp && mcpSession?.capabilities?.has("device") === true,
+            questionTools: hasT3Mcp && mcpSession?.capabilities?.has("questions") === true,
+          });
+          // Claude Code replays a resumed session's first system prompt, so changes reach it as a
+          // notice on the first normal turn; a new session starts with the current append.
+          const instructionUpdate = shouldResume
+            ? claudeInstructionUpdate({
+                record:
+                  instructionRecords.get(nativeThreadId) ??
+                  turnInput.providerThread.nativeMetadata?.claudeInstructions,
+                sections: appendSections,
+                cut: resumeSessionAt !== undefined,
+              })
+            : { notice: null, next: claudeInstructionRecord(appendSections) };
+          if (instructionUpdate.notice === null) {
+            pendingInstructionUpdates.delete(nativeThreadId);
+            instructionRecords.set(nativeThreadId, instructionUpdate.next);
+          } else {
+            pendingInstructionUpdates.set(nativeThreadId, instructionUpdate);
+          }
+          const preparedContext = (injectedTools?: ReadonlyArray<string>) =>
+            shouldResume
+              ? {
+                  ...claudeResumedPreparedContext({
+                    record: instructionUpdate.next,
+                    sections: appendSections,
+                    notice: instructionUpdate.notice,
+                  }),
+                  ...(injectedTools === undefined ? {} : { injectedTools }),
+                }
+              : injectedTools === undefined
+                ? {
+                    source: "Claude SDK systemPrompt.append; preset harness text unavailable",
+                    entries: claudePreparedContextEntries(append),
+                  }
+                : {
+                    source:
+                      "Claude SDK systemPrompt.append and init.tools; preset harness text unavailable",
+                    entries: claudePreparedContextEntries(append),
+                    injectedTools,
+                  };
           if (turnInput.onContextPrepared) {
-            const prompt = queryOptions.systemPrompt;
-            const append =
-              typeof prompt === "object" && prompt !== null && "append" in prompt
-                ? (prompt.append ?? "")
-                : typeof prompt === "string"
-                  ? prompt
-                  : "";
-            yield* turnInput.onContextPrepared({
-              source: "Claude SDK systemPrompt.append; preset harness text unavailable",
-              entries: claudePreparedContextEntries(append),
-            });
+            yield* turnInput.onContextPrepared(preparedContext());
           }
           const resolvedTurnCwd = yield* fileSystem
             .realPath(turnInput.runtimePolicy.cwd ?? ".")
@@ -13224,6 +13412,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             updated.add(nativeThreadId);
             return updated;
           });
+          if (
+            instructionUpdate.notice === null &&
+            !sameClaudeInstructionRecord(
+              instructionUpdate.next,
+              turnInput.providerThread.nativeMetadata?.claudeInstructions,
+            )
+          ) {
+            yield* persistAdapterNativeMetadata(nativeThreadId);
+          }
           // A new session's spawn applied this turn's title. A resume keeps the session's stored
           // title, so the last applied one stays authoritative until a turn compares again.
           if (!shouldResume) {
@@ -13264,6 +13461,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               resolvedTurnCwd,
               hostPlatform,
             ),
+            appendSections,
           };
           // One step, so the replaced process cannot exit between the install and the handoff.
           yield* Ref.update(queryContext, (replaced) => {
@@ -13292,19 +13490,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     context.receivedInit = true;
                     context.capabilities = new Set(message.capabilities ?? []);
                     if (turnInput.onContextPrepared) {
-                      const prompt = queryOptions.systemPrompt;
-                      const append =
-                        typeof prompt === "object" && prompt !== null && "append" in prompt
-                          ? (prompt.append ?? "")
-                          : typeof prompt === "string"
-                            ? prompt
-                            : "";
-                      yield* turnInput.onContextPrepared({
-                        source:
-                          "Claude SDK systemPrompt.append and init.tools; preset harness text unavailable",
-                        entries: claudePreparedContextEntries(append),
-                        injectedTools: message.tools,
-                      });
+                      yield* turnInput.onContextPrepared(preparedContext(message.tools));
                     }
                     context.claudeCodeVersion = message.claude_code_version;
                   }
@@ -13315,6 +13501,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     message.session_id !== context.nativeThreadId
                   ) {
                     clearedNativeSessions.set(context.nativeThreadId, message.session_id);
+                    // A cleared session starts its own system prompt from this process's append.
+                    pendingInstructionUpdates.delete(message.session_id);
+                    instructionRecords.set(
+                      message.session_id,
+                      claudeInstructionRecord(context.appendSections),
+                    );
                   }
                   if (
                     message.type === "system" &&
@@ -13487,13 +13679,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             );
             const pdfReservation = yield* reserveClaudePdfBudget(
               pdfBudgets.get(nativeThreadId)!,
-              persistAttachmentBudget(nativeThreadId),
+              persistAdapterNativeMetadata(nativeThreadId),
             );
             const promptText = applyClaudePromptEffortPrefix(
               turnText,
               compileClaudeModelSelection(turnInput.modelSelection, modelCatalog).promptEffort,
             );
-            const userMessage =
+            const preparedUserMessage =
               promptUuid === null
                 ? null
                 : turnInput.resume
@@ -13530,6 +13722,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               queryPolicy,
               rewindCut,
             );
+            // A slash command must open its prompt, so the notice waits for the next normal turn.
+            const instructionUpdate =
+              preparedUserMessage === null ||
+              turnInput.resume ||
+              turnText.trimStart().startsWith("/")
+                ? undefined
+                : pendingInstructionUpdates.get(nativeThreadId);
+            const userMessage =
+              preparedUserMessage === null || instructionUpdate?.notice == null
+                ? preparedUserMessage
+                : withClaudeInstructionNotice(preparedUserMessage, instructionUpdate.notice);
+            if (instructionUpdate?.notice != null) {
+              const bytes = Buffer.byteLength(instructionUpdate.notice, "utf8");
+              pdfReservation.budget.pending.bytes += bytes;
+              pdfReservation.bytes += bytes;
+            }
             yield* applySessionTitle(querySession.query, nativeThreadId, turnInput.appThread.title);
             const autoCompactWindow = yield* resolveAutoCompactWindow(
               querySession.settingsCwd,
@@ -13598,6 +13806,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               pendingSteers: new Map(),
               steerUuids: new Set(),
               executedModel: undefined,
+              instructionUpdate: instructionUpdate ?? null,
             };
             const attachTurn = Effect.gen(function* () {
               // Set before claiming: a query that exits after the claim finalizes this turn; one that exits before it fails the start.
@@ -14047,7 +14256,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   pagesUsed: CLAUDE_ATTACHMENT_MAX_PAGES,
                   bytesUsed: CLAUDE_ATTACHMENT_MAX_BYTES,
                 }),
-              persistAttachmentBudget(existing.nativeThreadId),
+              persistAdapterNativeMetadata(existing.nativeThreadId),
             );
             // A selection sent with the steer applies to the running turn when the live process can switch to it.
             const steerSelection =
@@ -14990,6 +15199,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               // usage even at an earlier fork point; this is conservative.
               const claudeAttachmentBudget =
                 forkInput.sourceProviderThread.nativeMetadata?.claudeAttachmentBudget;
+              // The fork replays the source's system prompt and the notices before its cut.
+              const sourceInstructions =
+                instructionRecords.get(sourceNativeThreadId) ??
+                forkInput.sourceProviderThread.nativeMetadata?.claudeInstructions;
+              const claudeInstructions = claudeForkIsAtHead(forkInput)
+                ? sourceInstructions
+                : claudeInstructionRecordBeforeNotices(sourceInstructions);
               return makeProviderThread({
                 idAllocator,
                 providerInstanceId: adapterOptions.instanceId,
@@ -15003,7 +15219,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     ? {}
                     : { providerTurnId: forkInput.providerTurnId }),
                 },
-                ...(forked.headMessageId === undefined && claudeAttachmentBudget === undefined
+                ...(forked.headMessageId === undefined &&
+                claudeAttachmentBudget === undefined &&
+                claudeInstructions === undefined
                   ? {}
                   : {
                       nativeMetadata: {
@@ -15011,6 +15229,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                           ? {}
                           : { forkHeadMessageId: forked.headMessageId }),
                         ...(claudeAttachmentBudget === undefined ? {} : { claudeAttachmentBudget }),
+                        ...(claudeInstructions === undefined ? {} : { claudeInstructions }),
                       },
                     }),
                 now,

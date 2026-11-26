@@ -30,6 +30,9 @@ export interface PreparedContext {
   readonly injectedTools?: ReadonlyArray<string> | undefined;
   readonly instructionSources?: ReadonlyArray<string> | undefined;
   readonly entries: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  readonly sizedEntries?:
+    | ReadonlyArray<{ readonly key: string; readonly label: string; readonly bytes: number }>
+    | undefined;
 }
 
 /** Extracts thread child preambles for instruction-size accounting. */
@@ -78,9 +81,11 @@ const sectionLabel = (text: string) =>
     ? "Thread list and artifacts"
     : text.includes("### Visuals and preview")
       ? "Visuals and preview"
-      : text.includes("## T3 Code orchestration")
-        ? "Delegation"
-        : "Threads and environments";
+      : text.includes("## T3 Code QA")
+        ? "QA"
+        : text.includes("## T3 Code orchestration")
+          ? "Delegation"
+          : "Threads and environments";
 const knownParts = [
   ...T3_CODE_ORCHESTRATION_SECTIONS.map((text) => ({
     key: `t3:${sectionLabel(text).toLowerCase().replaceAll(" ", "-")}`,
@@ -131,6 +136,11 @@ export function splitPreparedContext(
     );
   };
   for (const entry of entries) {
+    // A notice repeats sections the session lacked; it is its own cost, not those sections'.
+    if (entry.key === "t3_update_notice") {
+      add("t3:update-notice", "Instruction update notice", "t3", entry.text);
+      continue;
+    }
     const category = entry.key.startsWith("t3_code_")
       ? "t3"
       : entry.key.startsWith("custom_")
@@ -192,9 +202,17 @@ export function splitPreparedContext(
 }
 
 const measurePreparedContext = (
-  entries: PreparedContext["entries"],
-): ReadonlyArray<InstructionFootprintPart> =>
-  splitPreparedContext(entries).map(({ text: _text, ...part }) => part);
+  context: Pick<PreparedContext, "entries" | "sizedEntries">,
+): ReadonlyArray<InstructionFootprintPart> => [
+  ...splitPreparedContext(context.entries).map(({ text: _text, ...part }) => part),
+  ...(context.sizedEntries ?? []).map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    category: "t3" as const,
+    bytes: entry.bytes,
+    estimatedTokens: Math.ceil(entry.bytes / 4),
+  })),
+];
 
 const Persisted = Schema.Struct({
   formatVersion: Schema.Literal(1),
@@ -221,7 +239,7 @@ const make = Effect.gen(function* () {
         providerTurnOrdinal: input.providerTurnOrdinal,
         attemptId: input.attemptId,
         capturedAt: DateTime.formatIso(yield* DateTime.now),
-        parts: measurePreparedContext(input.entries),
+        parts: measurePreparedContext(input),
         truncated:
           (input.injectedTools?.length ?? 0) > 256 || (input.instructionSources?.length ?? 0) > 64,
         ...(input.injectedTools === undefined

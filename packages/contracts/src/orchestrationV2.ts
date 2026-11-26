@@ -1333,6 +1333,20 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   claudeAttachmentBudget: Schema.optional(
     Schema.Struct({ bytesUsed: NonNegativeInt, pagesUsed: NonNegativeInt }),
   ),
+  claudeInstructions: Schema.optional(
+    Schema.Struct({
+      /** The append Claude Code replays on resume; null when the session predates the record. */
+      start: Schema.NullOr(
+        Schema.Array(
+          Schema.Struct({ name: Schema.String, digest: Schema.String, bytes: NonNegativeInt }),
+        ),
+      ),
+      /** The sections the session holds now: its start append plus the update notices it accepted. */
+      sections: Schema.Array(Schema.Struct({ name: Schema.String, digest: Schema.String })),
+      /** Compaction replaced the start append, so a resume at an earlier point may see an older one. */
+      compacted: Schema.optional(Schema.Boolean),
+    }),
+  ),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;

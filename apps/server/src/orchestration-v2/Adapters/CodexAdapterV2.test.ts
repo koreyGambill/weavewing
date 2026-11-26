@@ -85,6 +85,7 @@ import {
   contextRewindTurnModelText,
 } from "../contextRewind.ts";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
+import { T3_CODE_ORCHESTRATION_SECTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
 
@@ -344,6 +345,24 @@ describe("CodexAdapterV2 runtime policy", () => {
         value: "Filtered to overdue",
       });
       assert.isDefined(withT3.additionalContext?.["t3_code_runtime"]);
+    }),
+  );
+
+  // Codex keeps no copy of T3's text between turns, so a thread resumed after an update gets the
+  // update's sections with its next turn; Claude needs a notice for the same case.
+  it.effect("sends every current T3 instruction section in full with every turn", () =>
+    Effect.gen(function* () {
+      for (const turn of ["first", "resumed"]) {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-current-instructions",
+          codexInput: [{ type: "text", text: `${turn} turn` }],
+          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          hasT3Mcp: true,
+        });
+        const values = Object.values(params.additionalContext ?? {}).map((entry) => entry.value);
+        for (const section of T3_CODE_ORCHESTRATION_SECTIONS) assert.include(values, section);
+      }
     }),
   );
 });

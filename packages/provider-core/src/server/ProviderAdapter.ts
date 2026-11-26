@@ -637,6 +637,10 @@ export interface ProviderAdapterV2TurnInput {
     readonly injectedTools?: ReadonlyArray<string> | undefined;
     readonly instructionSources?: ReadonlyArray<string> | undefined;
     readonly entries: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+    /** Text the provider holds that the app knows only by size, such as an earlier append. */
+    readonly sizedEntries?:
+      | ReadonlyArray<{ readonly key: string; readonly label: string; readonly bytes: number }>
+      | undefined;
   }) => Effect.Effect<void>;
 }
 
