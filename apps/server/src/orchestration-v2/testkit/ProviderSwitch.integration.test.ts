@@ -6018,16 +6018,18 @@ describe("orchestration v2 provider switching", () => {
     const root = ThreadId.make("thread:rewind-summary");
     const withRewindSummaryHarness = <A, E, R>(
       name: string,
-      adapter: Pick<
-        Parameters<typeof makeTestAdapter>[0],
-        | "failedRunOrdinals"
-        | "interruptedRunOrdinals"
-        | "failResumeOnce"
-        | "holdRunOrdinal"
-        | "holdFirstTurn"
-        | "releaseFirstTurn"
-        | "heldRunningToolCall"
-        | "responseByRunOrdinal"
+      adapter: Partial<
+        Pick<
+          Parameters<typeof makeTestAdapter>[0],
+          | "failedRunOrdinals"
+          | "interruptedRunOrdinals"
+          | "failResumeOnce"
+          | "holdRunOrdinal"
+          | "holdFirstTurn"
+          | "releaseFirstTurn"
+          | "heldRunningToolCall"
+          | "responseByRunOrdinal"
+        >
       >,
       body: (input: {
         readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
