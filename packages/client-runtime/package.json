@@ -595,6 +595,10 @@
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
     },
+    "./work-map": {
+      "types": "./src/workMap.ts",
+      "default": "./src/workMap.ts"
+    },
     "./provider-instance-ids": {
       "types": "./src/providerInstanceIds.ts",
       "default": "./src/providerInstanceIds.ts"
