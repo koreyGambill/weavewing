@@ -235,7 +235,7 @@ export function WorkspaceToolbar(props: {
             <Toolbar.Button
               identifier="workspace-evidence"
               accessibilityLabel={evidence.accessibilityLabel}
-              icon={evidence.awaiting > 0 ? "checklist.unchecked" : "checklist"}
+              icon={evidence.waiting ? "checklist.unchecked" : "checklist"}
               onPress={evidence.open}
             />
           ) : null}

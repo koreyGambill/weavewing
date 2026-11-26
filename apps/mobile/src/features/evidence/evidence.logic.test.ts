@@ -9,10 +9,10 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  evidenceAwaitingCount,
   evidenceButtonLabel,
   evidenceEnvironmentHeading,
   evidenceSheetState,
+  evidenceThreadsWaitingCount,
   groupLandings,
   landingQaSummary,
   landingQaThreadId,
@@ -53,14 +53,15 @@ const page = (
   next: EvidenceListResult["next"] = null,
 ): EvidenceListResult => ({ items, next });
 
-describe("evidenceAwaitingCount", () => {
-  it("sums the threads' exact QA counts, not the landings or rows the client has loaded", () => {
-    // Two threads report 25 and 4 waiting, more than any one page of landings or capped rows.
+describe("evidenceThreadsWaitingCount", () => {
+  it("counts threads with changes to check, never the changes in them", () => {
     const threads = [
       { environmentId: LAPTOP, archivedAt: null, waitingCounts: counts(25) },
+      { environmentId: LAPTOP, archivedAt: null, waitingCounts: counts(1) },
       { environmentId: SERVER, archivedAt: null, waitingCounts: counts(4) },
+      { environmentId: SERVER, archivedAt: null, waitingCounts: counts(0) },
     ];
-    expect(evidenceAwaitingCount(threads, new Set([LAPTOP, SERVER]))).toBe(29);
+    expect(evidenceThreadsWaitingCount(threads, new Set([LAPTOP, SERVER]))).toBe(3);
   });
 
   it("leaves out archived threads, threads without counts and environments not listed", () => {
@@ -70,16 +71,16 @@ describe("evidenceAwaitingCount", () => {
       { environmentId: SERVER, archivedAt: null, waitingCounts: counts(2) },
       { environmentId: LAPTOP, archivedAt: null, waitingCounts: counts(1) },
     ];
-    expect(evidenceAwaitingCount(threads, new Set([LAPTOP]))).toBe(1);
+    expect(evidenceThreadsWaitingCount(threads, new Set([LAPTOP]))).toBe(1);
   });
 });
 
 it.each([
   [0, "Evidence"],
-  [1, "Evidence, 1 change awaits your QA"],
-  [3, "Evidence, 3 changes await your QA"],
-])("labels the entry for %i awaiting as %s", (awaiting, label) => {
-  expect(evidenceButtonLabel(awaiting)).toBe(label);
+  [1, "Evidence, 1 thread has changes to check"],
+  [3, "Evidence, 3 threads have changes to check"],
+])("labels the entry for %i threads waiting as %s", (threads, label) => {
+  expect(evidenceButtonLabel(threads)).toBe(label);
 });
 
 it("counts a landing's QA in web's words and order, leaving out empty states", () => {
