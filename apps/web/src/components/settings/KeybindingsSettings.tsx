@@ -1538,6 +1538,50 @@ export function useKeybindingEditing() {
   };
 }
 
+/** The leader toggle and the leader key, shared by Settings and the shortcut reference. */
+export function LeaderSettingsSection({
+  allRows,
+  leaderOn,
+  savingCommand,
+  saveKeybinding,
+  rowActions,
+}: Pick<
+  ReturnType<typeof useKeybindingEditing>,
+  "allRows" | "leaderOn" | "savingCommand" | "saveKeybinding" | "rowActions"
+>) {
+  const leaderRow = allRows.find((row) => row.command === "keybindings.leader");
+  return (
+    <SettingsSection title="Leader" aria-label="Leader">
+      <SettingsRow
+        title="Use leader key"
+        description="Press the leader, release it, then press a tile or tab key within 1.5 seconds. With the default Ctrl+A leader, hold Ctrl briefly before pressing A to use Select All."
+        control={
+          <Switch
+            aria-label="Use leader key"
+            checked={leaderOn}
+            disabled={savingCommand !== null}
+            onCheckedChange={(checked) =>
+              saveKeybinding({
+                command: "keybindings.leader",
+                key: leaderRow?.key ?? "ctrl+a",
+                ...(checked ? {} : { when: "false" }),
+              })
+            }
+          />
+        }
+      />
+      {leaderRow ? (
+        <KeybindingSettingsRow
+          key={leaderRow.id}
+          row={leaderRow}
+          isSaving={savingCommand === "keybindings.leader"}
+          {...rowActions}
+        />
+      ) : null}
+    </SettingsSection>
+  );
+}
+
 export function KeybindingsSettingsPanel() {
   const { environment: primaryEnvironment } = useSettingsScope();
   const {
@@ -1574,7 +1618,6 @@ export function KeybindingsSettingsPanel() {
     setHandledSearchTargetId(searchTargetId);
     if (searchTargetId.startsWith("keybinding-")) setQuery("");
   }
-  const leaderRow = allRows.find((row) => row.command === "keybindings.leader");
   const rows = filterKeybindingRows(allRows, query);
   const groups = groupKeybindingRows(rows.filter((row) => row.command !== "keybindings.leader"));
   const anchorIds = keybindingAnchorIds(rows);
@@ -1606,34 +1649,13 @@ export function KeybindingsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <div inert={!canWriteSettings}>
-        <SettingsSection title="Leader">
-          <SettingsRow
-            title="Use leader key"
-            description="Press the leader, release it, then press a tile or tab key within 1.5 seconds. With the default Ctrl+A leader, hold Ctrl briefly before pressing A to use Select All."
-            control={
-              <Switch
-                aria-label="Use leader key"
-                checked={leaderOn}
-                disabled={savingCommand !== null}
-                onCheckedChange={(checked) =>
-                  saveKeybinding({
-                    command: "keybindings.leader",
-                    key: leaderRow?.key ?? "ctrl+a",
-                    ...(checked ? {} : { when: "false" }),
-                  })
-                }
-              />
-            }
-          />
-          {leaderRow ? (
-            <KeybindingSettingsRow
-              key={leaderRow.id}
-              row={leaderRow}
-              isSaving={savingCommand === "keybindings.leader"}
-              {...rowActions}
-            />
-          ) : null}
-        </SettingsSection>
+        <LeaderSettingsSection
+          allRows={allRows}
+          leaderOn={leaderOn}
+          savingCommand={savingCommand}
+          saveKeybinding={saveKeybinding}
+          rowActions={rowActions}
+        />
       </div>
       <SettingsSection
         {...searchableSetting("keybindings")}

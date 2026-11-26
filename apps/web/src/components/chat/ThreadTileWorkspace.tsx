@@ -30,7 +30,6 @@ import {
   PictureInPicture2,
   Plus,
   SquareDashed,
-  CircleHelp,
   GripVertical,
   X,
 } from "lucide-react";
@@ -2121,33 +2120,6 @@ export function ThreadTileWorkspace(props: {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      <div className="pointer-events-none absolute right-1 bottom-1 z-20">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                className="pointer-events-auto rounded bg-background p-1 text-muted-foreground"
-                tabIndex={0}
-                aria-label="Tiling shortcuts"
-              />
-            }
-          >
-            <CircleHelp className="size-3" />
-          </TooltipTrigger>
-          <TooltipPopup>
-            {shortcut("workspace.tile.actions")}: tile actions.{" "}
-            {shortcut("workspace.tile.splitRight")}: new tile right.{" "}
-            {shortcut("workspace.tile.splitDown")}: new tile below.{" "}
-            {shortcut("workspace.tile.resize")}:{" "}
-            {props.panels.keybindings.findLast((rule) => rule.command === "workspace.tile.resize")
-              ?.shortcut.leader
-              ? "resize with H/J/K/L or arrows, then Enter to keep or Esc to cancel."
-              : "hold and move the mouse or use arrows to resize."}{" "}
-            Alt+H/J/K/L: resize by a step. Drag a tab to group it or split at an edge. Drag the
-            title bar to move the whole tile.
-          </TooltipPopup>
-        </Tooltip>
-      </div>
     </div>
   );
 }

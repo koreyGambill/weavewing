@@ -3,6 +3,7 @@ import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import {
   KeybindingSettingsRow,
+  LeaderSettingsSection,
   NewKeybindingSettingsRow,
   useKeybindingEditing,
 } from "../settings/KeybindingsSettings";
@@ -69,6 +70,7 @@ function ShortcutReferenceContent() {
     connectedEnvironments,
     commandOptions,
     allRows,
+    leaderOn,
     whenVariables,
     rowActions,
     savingCommand,
@@ -78,12 +80,14 @@ function ShortcutReferenceContent() {
   } = useKeybindingEditing();
   const [query, setQuery] = useState("");
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const rows = allRows
-    .filter((row) =>
-      words.every((word) =>
-        `${commandLabel(row.command)} ${row.command} ${row.key}`.toLowerCase().includes(word),
-      ),
-    )
+  const matching = allRows.filter((row) =>
+    words.every((word) =>
+      `${commandLabel(row.command)} ${row.command} ${row.key}`.toLowerCase().includes(word),
+    ),
+  );
+  const showLeader = matching.some((row) => row.command === "keybindings.leader");
+  const rows = matching
+    .filter((row) => row.command !== "keybindings.leader")
     .toSorted((a, b) => {
       const aIndex = workspaceOrder.indexOf(a.command);
       const bIndex = workspaceOrder.indexOf(b.command);
@@ -131,6 +135,15 @@ function ShortcutReferenceContent() {
               />
             </SettingsGroup>
           ) : null}
+          {showLeader ? (
+            <LeaderSettingsSection
+              allRows={allRows}
+              leaderOn={leaderOn}
+              savingCommand={savingCommand}
+              saveKeybinding={saveKeybinding}
+              rowActions={rowActions}
+            />
+          ) : null}
           {sections
             .filter((section) => section.rows.length)
             .map((section) => (
@@ -148,7 +161,7 @@ function ShortcutReferenceContent() {
               </SettingsSection>
             ))}
         </div>
-        {!rows.length ? (
+        {!rows.length && !showLeader ? (
           <p className="text-sm text-muted-foreground">No matching shortcuts.</p>
         ) : null}
         {!canWriteSettings ? (

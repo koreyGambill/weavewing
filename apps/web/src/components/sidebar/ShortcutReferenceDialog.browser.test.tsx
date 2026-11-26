@@ -108,3 +108,32 @@ it("records a new shortcut in place and saves it to every connected environment"
   ]);
   expect(onOpenChange).not.toHaveBeenCalled();
 });
+
+it("explains the leader and changes the leader key from the reference", async () => {
+  setup();
+  using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  await using screen = await render(<ShortcutReferenceDialog open onOpenChange={vi.fn()} />, {
+    router: false,
+  });
+  const leader = screen.getByRole("region", { name: "Leader" });
+  await expect.element(leader.getByText(/Press the leader, release it/)).toBeVisible();
+  await expect.element(leader.getByRole("switch", { name: "Use leader key" })).toBeChecked();
+  await expect
+    .element(screen.getByRole("region", { name: "More" }).getByText("Leader Key"))
+    .not.toBeInTheDocument();
+
+  await userEvent.click(leader.getByRole("button", { name: /^Edit shortcut for Leader Key:/ }));
+  await userEvent.keyboard("{Control>}b{/Control}");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await vi.waitFor(() => expect(mocks.command).toHaveBeenCalledTimes(2));
+  const input = {
+    command: "keybindings.leader",
+    key: "mod+b",
+    replace: { command: "keybindings.leader", key: "ctrl+a" },
+  };
+  expect(mocks.command.mock.calls).toEqual([
+    [{ environmentId: "env-a", input }],
+    [{ environmentId: "env-b", input }],
+  ]);
+});
