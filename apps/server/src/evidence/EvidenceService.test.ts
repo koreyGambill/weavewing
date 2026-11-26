@@ -1355,3 +1355,126 @@ it.effect("reads a stored reason this build no longer raises by dropping it", ()
     }),
   ).pipe(Effect.provide(testLayer)),
 );
+
+it.effect(
+  "keeps a card for a change that waited from before reasons were kept once it is answered",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* evidence.record(recordInput("older", [change("waiting"), change("settled")]));
+        // As migration 115 leaves rows from before reasons were kept.
+        yield* sql`UPDATE evidence_qa SET raised_json = NULL WHERE landing_id = 'older'`;
+        yield* sql`UPDATE evidence_qa SET state = 'confirmed' WHERE change_id = 'settled'`;
+        yield* evidence.setQa({ landingId: "older", changeId: "waiting", state: "confirmed" });
+        yield* evidence.setQa({ landingId: "older", changeId: "settled", state: "waived" });
+        const raised = (yield* evidence.get({ landingId: "older" })).changes.map((item) => [
+          item.id,
+          item.qa.state,
+          item.qa.raised,
+        ]);
+        assert.deepStrictEqual(raised, [
+          ["waiting", "confirmed", ["legacy"]],
+          ["settled", "waived", undefined],
+        ]);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("leaves an agent's record to the agent unless the user changes its state", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(recordInput("first", [change("a"), change("b")]));
+      yield* seedRunInput("lead", [{ id: "message-1", payload: { createdBy: "user" } }]);
+      yield* evidence.agentSetQa({
+        threadId: lead,
+        landingId: "first",
+        changeId: "a",
+        state: "dismissed",
+        note: "The user said the old flow is gone.",
+      });
+      assert.strictEqual(
+        yield* errorOf(
+          evidence.setQa({ landingId: "first", changeId: "a", state: "waived", note: "Mine now" }),
+        ),
+        "The agent recorded this; reopen it to change it.",
+      );
+      const kept = (yield* evidence.get({ landingId: "first" })).changes[0]!.qa;
+      assert.deepStrictEqual(
+        [kept.by, kept.messageId, kept.note],
+        ["agent", "message-1", "The user said the old flow is gone."],
+      );
+      // The user's own note edit keeps it theirs, and reopening takes over the agent's record.
+      yield* evidence.setQa({ landingId: "first", changeId: "b", state: "waived" });
+      const own = yield* evidence.setQa({
+        landingId: "first",
+        changeId: "b",
+        state: "waived",
+        note: "Covered by CI.",
+      });
+      assert.deepStrictEqual([own.by, own.note], ["user", "Covered by CI."]);
+      const reopened = yield* evidence.setQa({
+        landingId: "first",
+        changeId: "a",
+        state: "pending",
+      });
+      assert.deepStrictEqual([reopened.by, reopened.messageId], ["user", undefined]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("leaves a change the user is discussing out of what waits on them", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(recordInput("first", [change("a")]));
+      yield* evidence.record(recordInput("second", [change("b")]));
+      assert.deepStrictEqual(yield* evidence.counts(), { pending: 2, problem: 0 });
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("message-discuss"),
+        changes: [{ landingId: "first", changeId: "a" }],
+      });
+      assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, problem: 0 });
+      assert.deepStrictEqual(
+        (yield* evidence.list({ needsQa: true })).items.map((item) => item.id),
+        ["second"],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+  "reads the landings a timeline places even when they are older than the newest page",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        for (let index = 0; index < 52; index++) {
+          const minute = String(index).padStart(2, "0");
+          yield* evidence.record(
+            recordInput(`landing-${minute}`, [change("a")], {
+              landedAt: `2026-11-20T10:${minute}:00.000Z`,
+            }),
+          );
+        }
+        yield* evidence.record(
+          recordInput("elsewhere", [change("a")], { threadId: ThreadId.make("other") }),
+        );
+        const newest = yield* evidence.thread({ threadId: lead });
+        assert.strictEqual(newest.landings.length, 50);
+        assert.isFalse(newest.landings.some((landing) => landing.id === "landing-00"));
+        const placed = yield* evidence.thread({
+          threadId: lead,
+          landingIds: ["landing-00", "landing-51", "elsewhere"],
+        });
+        assert.strictEqual(placed.landings.length, 51);
+        assert.strictEqual(placed.landings.at(-1)!.id, "landing-00");
+        assert.isFalse(placed.landings.some((landing) => landing.id === "elsewhere"));
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);

@@ -30,8 +30,12 @@ export const EvidenceQaState = Schema.Literals([
 ]);
 export type EvidenceQaState = typeof EvidenceQaState.Type;
 
-/** Why a recorded change asks for the user's QA. A change with none is recorded quietly. */
+/**
+ * Why a recorded change asks for the user's QA. A change with none is recorded quietly. `legacy`
+ * marks a change that was waiting on the user before reasons were kept, once it is answered.
+ */
 export const EvidenceQaRaiseReason = Schema.Literals([
+  "legacy",
   "captures",
   "review_waived",
   "review_changes_requested",
@@ -271,10 +275,14 @@ export type EvidenceAgentQaInput = typeof EvidenceAgentQaInput.Type;
 
 export const EVIDENCE_THREAD_LANDING_LIMIT = 50;
 
-export const EvidenceThreadInput = Schema.Struct({ threadId: ThreadId });
+export const EvidenceThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Landings the loaded timeline places, read even when they are older than the newest page. */
+  landingIds: Schema.optional(Schema.Array(EvidenceSlug).check(Schema.isMaxLength(200))),
+});
 export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
 
-/** The landings a thread shows: recorded in it or for it, newest first and capped. */
+/** The landings a thread shows, recorded in it or for it: the newest, capped, plus any requested. */
 export const EvidenceThreadResult = Schema.Struct({ landings: Schema.Array(EvidenceLanding) });
 export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
 
