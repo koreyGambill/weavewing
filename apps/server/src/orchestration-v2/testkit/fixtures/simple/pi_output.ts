@@ -36,8 +36,23 @@ export function assertPiSettledTokenUsage(
       ? [field(entry.frame, "data")]
       : [],
   );
+  // A turn keeps its first streamed input count; Pi's settled stats are cumulative.
+  const firstInputs: Array<unknown> = [];
+  let awaitingFirstInput = false;
+  for (const entry of transcript.entries) {
+    if (entry.type === "expect_outbound" && field(entry.frame, "type") === "prompt") {
+      awaitingFirstInput = true;
+    } else if (awaitingFirstInput && entry.type === "emit_inbound") {
+      const input = field(field(entry.frame, "usage"), "input");
+      if (typeof input === "number" && input > 0) {
+        firstInputs.push(input);
+        awaitingFirstInput = false;
+      }
+    }
+  }
   const turns = projectionFor(result, transcript.scenario).providerTurns;
   assert.lengthOf(turns, stats.length);
+  assert.lengthOf(firstInputs, stats.length);
   for (const [index, turn] of turns.entries()) {
     const contextUsage = field(stats[index], "contextUsage");
     const tokens = field(stats[index], "tokens");
@@ -46,6 +61,7 @@ export function assertPiSettledTokenUsage(
       usedTokens: field(contextUsage, "tokens"),
       maxTokens: field(contextUsage, "contextWindow"),
       inputTokens: field(tokens, "input"),
+      firstInputTokens: firstInputs[index],
       cachedInputTokens: field(tokens, "cacheRead"),
       outputTokens: field(tokens, "output"),
     });
