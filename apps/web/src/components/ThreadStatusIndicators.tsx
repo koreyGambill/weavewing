@@ -121,7 +121,7 @@ export function useLinkedThreadPullRequest(
 
 /** The pull request a thread shows: its current link, else the one found for its branch. */
 export function useThreadDisplayedPullRequest(
-  environmentId: EnvironmentId,
+  environmentId: EnvironmentId | null,
   thread: Pick<
     EnvironmentThreadShell,
     "pullRequests" | "linkedPullRequest" | "branchPullRequest"
@@ -508,7 +508,7 @@ function PrStatusTooltipContent({ status }: { status: PrStatusIndicator }) {
 
 export function resolveDisplayedThreadPr(input: {
   threadBranch: string | null;
-  gitStatus: VcsStatusResult | null;
+  gitStatus: Pick<VcsStatusResult, "refName" | "pr"> | null;
   linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
   linkedPullRequestStatus?: LinkedThreadPullRequestStatus | null | undefined;
 }): ThreadPr | null {

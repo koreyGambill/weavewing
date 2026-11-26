@@ -4,7 +4,14 @@ import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ThreadId, WorktreeProvider } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  type EnvironmentId,
+  type ProjectId,
+  type ThreadId,
+  type WorktreeProvider,
+} from "@t3tools/contracts";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, PlusIcon, ScaleIcon } from "lucide-react";
 import {
   type Ref,
@@ -48,7 +55,12 @@ import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
 import { useAtomValue } from "@effect/atom-react";
 import { createDevelopmentEnvironment } from "../state/developmentEnvironmentLifecycle";
-import { XwingCheckoutChooser } from "./xwing/XwingCheckoutChooser";
+import {
+  XwingCheckoutChooser,
+  type XwingCheckoutChooserHandle,
+} from "./xwing/XwingCheckoutChooser";
+import { ComposerLocationActionsContext } from "./chat/composerLocationActions";
+import { useEnvironmentScope } from "../state/session";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -503,6 +515,9 @@ export const BranchToolbar = memo(function BranchToolbar({
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const environmentSelectorRef = useRef<BranchToolbarEnvironmentSelectorHandle>(null);
+  const xwingChooserRef = useRef<XwingCheckoutChooserHandle>(null);
+  const canReadThreads = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
+  const canOperateThreads = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const [createEnvironmentOpen, setCreateEnvironmentOpen] = useState(false);
   const supportsXwing = useXwingEnvironmentsSupport(environmentId);
   const worktreeProvider = useEnvironmentSettings(
@@ -665,6 +680,23 @@ export const BranchToolbar = memo(function BranchToolbar({
       whereProjectTitle;
 
   const canOpenEnvironmentSelector = !envLocked && (showEnvironmentPicker || addTargets.length > 0);
+  // A started thread's location menu opens the Xwing chooser, which then shows no trigger.
+  const xwingChooserOffered =
+    isServerThread &&
+    showGitControls &&
+    showXwingChooser &&
+    supportsXwing &&
+    canReadThreads &&
+    canOperateThreads;
+  const locationActions = {
+    chooseXwingEnvironment: xwingChooserOffered
+      ? (anchor: HTMLElement) => xwingChooserRef.current?.open(anchor)
+      : undefined,
+    newEnvironment:
+      xwingChooserOffered && canCreateEnvironment
+        ? () => setCreateEnvironmentOpen(true)
+        : undefined,
+  };
   const items: ReadonlyArray<ComposerRowItem> = [
     {
       id: "computer",
@@ -720,9 +752,13 @@ export const BranchToolbar = memo(function BranchToolbar({
               worktreeProvider={worktreeProvider}
             />
           ) : null}
-          {where}
+          <ComposerLocationActionsContext value={locationActions}>
+            {where}
+          </ComposerLocationActionsContext>
           {showGitControls && showXwingChooser ? (
             <XwingCheckoutChooser
+              ref={xwingChooserRef}
+              hideTrigger={isServerThread}
               environmentId={environmentId}
               threadId={threadId}
               draftId={draftId}

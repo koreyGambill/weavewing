@@ -1,24 +1,28 @@
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { projectPickerPathLabel } from "@t3tools/client-runtime/project-picker";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect } from "react";
-import { MapPinIcon } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
+import { Boxes, FolderIcon, MapPinIcon, PlusIcon } from "lucide-react";
 
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import type { DraftId } from "~/composerDraftStore";
 import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { registerCommands } from "~/shortcuts/dispatcher";
-import { useProject } from "~/state/entities";
+import { useProject, useQuietThreadShell } from "~/state/entities";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { cn } from "~/lib/utils";
 import { InlineButton } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ComposerContextLabel } from "../ComposerContextLabel";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { xwingEnvironmentLabel } from "../xwing/xwingEnvironments.logic";
 import { ComposerControl } from "./ComposerControl";
+import { composerFloatingLayerProps } from "./composerEventScope";
+import { useComposerLocationActions } from "./composerLocationActions";
 import { DraftProjectPicker } from "./DraftProjectPicker";
 import { openChangeThreadFolder } from "./changeThreadFolderDialogState";
 import { useDraftPlaceSelection } from "./useDraftPlaceSelection";
@@ -26,7 +30,7 @@ import { useProjectPickerHomes } from "./useProjectPickerBrowse";
 
 /**
  * The project and folder a thread runs in, under the composer. Before the first message it
- * opens the project picker; afterwards it opens Change folder. Muted at the default place.
+ * opens the project picker; afterwards it opens the location menu. Muted at the default place.
  */
 export function ComposerWhereLine({
   environmentId,
@@ -69,6 +73,13 @@ export function ComposerWhereLine({
   const shortcut = shortcutLabelForCommand(keybindings, "projectPicker.open");
   const threadRef = scopeThreadRef(environmentId, threadId);
   const started = draftId === null;
+  const boundEnvironment = useQuietThreadShell(started ? threadRef : null)?.developmentEnvironment;
+  const environmentLabel = boundEnvironment
+    ? xwingEnvironmentLabel({
+        number: boundEnvironment.number ?? undefined,
+        name: boundEnvironment.name,
+      })
+    : null;
   const ownsRoute =
     routeTarget?.kind === "server" &&
     routeTarget.threadRef.environmentId === environmentId &&
@@ -119,25 +130,34 @@ export function ComposerWhereLine({
   const ariaLabel = isScratch ? `Folder ${folderLabel}` : `${project.title}, ${folderLabel}`;
 
   if (started) {
+    // An Xwing environment names the place; its folder follows where there is room.
+    const placeContent = environmentLabel ? (
+      <>
+        <Boxes className="shrink-0" />
+        <ComposerContextLabel>
+          <span className="flex min-w-0 text-foreground">
+            <span className="min-w-0 max-w-full shrink-0 truncate whitespace-pre font-medium">
+              {environmentLabel}
+            </span>
+            <span className="flex min-w-0 font-mono @max-md/composer-surface:hidden">
+              <span className="whitespace-pre font-sans"> · </span>
+              <MiddleTruncate value={folderLabel} showTitle={false} />
+            </span>
+          </span>
+        </ComposerContextLabel>
+      </>
+    ) : (
+      content
+    );
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerControl
-              size="xs"
-              className="min-w-0 max-w-full flex-initial justify-start"
-              aria-label={`Change folder: ${ariaLabel}`}
-              data-composer-context-control
-              onClick={() => openChangeThreadFolder(threadRef)}
-            />
-          }
-        >
-          {content}
-        </TooltipTrigger>
-        <TooltipPopup>
-          {folder} · Change folder{shortcut ? ` · ${shortcut}` : ""}
-        </TooltipPopup>
-      </Tooltip>
+      <ComposerLocationMenu
+        threadRef={threadRef}
+        ariaLabel={`Location: ${environmentLabel ? `${environmentLabel}, ` : ""}${ariaLabel}`}
+        tooltip={`${environmentLabel ? `${environmentLabel} · ` : ""}${folder}`}
+        shortcut={shortcut}
+      >
+        {placeContent}
+      </ComposerLocationMenu>
     );
   }
 
@@ -191,5 +211,75 @@ export function ComposerWhereLine({
         </span>
       )}
     </>
+  );
+}
+
+/** The started thread's location, whose click offers the ways to change where it works. */
+function ComposerLocationMenu(props: {
+  readonly threadRef: ScopedThreadRef;
+  readonly ariaLabel: string;
+  readonly tooltip: string;
+  readonly shortcut: string | null;
+  readonly children: ReactNode;
+}) {
+  const actions = useComposerLocationActions();
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
+  // Set when an item hands focus to another popup, so the menu does not take it back.
+  const [focusHandedOff, setFocusHandedOff] = useState(false);
+  const { chooseXwingEnvironment, newEnvironment } = actions;
+  return (
+    <Menu
+      onOpenChange={(open) => {
+        if (open) setFocusHandedOff(false);
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger render={<span className="flex min-w-0 max-w-full" />}>
+          <MenuTrigger
+            ref={setTrigger}
+            render={
+              <ComposerControl
+                size="xs"
+                className="min-w-0 max-w-full flex-initial justify-start"
+                aria-label={props.ariaLabel}
+                data-composer-context-control
+              />
+            }
+          >
+            {props.children}
+          </MenuTrigger>
+        </TooltipTrigger>
+        <TooltipPopup>{props.tooltip}</TooltipPopup>
+      </Tooltip>
+      <MenuPopup
+        side="top"
+        align="start"
+        finalFocus={!focusHandedOff}
+        {...composerFloatingLayerProps}
+      >
+        <MenuItem onClick={() => openChangeThreadFolder(props.threadRef)}>
+          <FolderIcon />
+          Change folder…
+          {props.shortcut ? <MenuShortcut>{props.shortcut}</MenuShortcut> : null}
+        </MenuItem>
+        {chooseXwingEnvironment && trigger ? (
+          <MenuItem
+            onClick={() => {
+              setFocusHandedOff(true);
+              chooseXwingEnvironment(trigger);
+            }}
+          >
+            <Boxes />
+            Xwing environment…
+          </MenuItem>
+        ) : null}
+        {newEnvironment ? (
+          <MenuItem onClick={newEnvironment}>
+            <PlusIcon />
+            New environment…
+          </MenuItem>
+        ) : null}
+      </MenuPopup>
+    </Menu>
   );
 }

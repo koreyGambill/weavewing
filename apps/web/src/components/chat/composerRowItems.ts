@@ -92,11 +92,13 @@ export function openComposerRowControl(
   return trigger != null;
 }
 
-/** Leave order: lower numbers leave into ⋯ first. */
+/** Leave order: lower numbers leave into ⋯ first. Agents, diff and location never leave. */
 export const COMPOSER_ROW_PRIORITY = {
-  tools: 10,
-  computer: 20,
-  branch: 30,
+  automation: 10,
+  tools: 20,
+  computer: 30,
+  pullRequest: 40,
+  branch: 50,
 } as const;
 
 /** The narrowest a shrinking item's label gets before items start leaving. */

@@ -10,7 +10,7 @@ import {
 } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { Boxes, PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { type Ref, useImperativeHandle, useState } from "react";
 
 import { type DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { randomUUID } from "../../lib/utils";
@@ -44,12 +44,19 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { filterXwingCheckoutChoices, xwingEnvironmentLabel } from "./xwingEnvironments.logic";
 
+export interface XwingCheckoutChooserHandle {
+  /** Opens the chooser anchored to `anchor`, returning focus there when it closes. */
+  readonly open: (anchor: HTMLElement) => void;
+}
+
 /**
  * Picks the Xwing environment a thread works in. The server lists the project's checkouts and
  * resolves the chosen one; a draft keeps the choice for its first send, and a started thread
  * moves when it is stopped.
  */
 export function XwingCheckoutChooser({
+  ref,
+  hideTrigger = false,
   environmentId,
   threadId,
   draftId,
@@ -58,6 +65,9 @@ export function XwingCheckoutChooser({
   showLabel = false,
   onCreateOpenChange,
 }: {
+  readonly ref?: Ref<XwingCheckoutChooserHandle>;
+  /** Leaves the trigger out, for a row whose location menu opens the chooser instead. */
+  readonly hideTrigger?: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly draftId: DraftId | null | undefined;
@@ -81,6 +91,17 @@ export function XwingCheckoutChooser({
     "Move thread to Xwing environment",
   );
   const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      open: (next) => {
+        setAnchor(next);
+        setOpen(true);
+      },
+    }),
+    [],
+  );
   const [query, setQuery] = useState("");
   const [localCreateOpen, setLocalCreateOpen] = useState(false);
   const [createPending, setCreatePending] = useState(false);
@@ -205,35 +226,40 @@ export function XwingCheckoutChooser({
           if (choice) choose(choice);
         }}
       >
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <ComboboxTrigger
-                render={showLabel ? <ThreadDetailsControl /> : <ComposerControl size="xs" />}
-                className="min-w-0 shrink active:scale-100"
-                aria-label="Xwing environment"
-                data-composer-context-control
-              />
-            }
-          >
-            <Boxes className="size-3 shrink-0" />
-            {selected || showLabel ? (
-              <ComposerContextLabel>{selected?.label ?? "Choose environment"}</ComposerContextLabel>
-            ) : null}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {selected
-              ? serverThread !== null
-                ? `Works in ${selected.label}. Choose another environment to move this stopped thread.`
-                : `Starts in ${selected.label}.`
-              : "Work in an Xwing environment"}
-          </TooltipPopup>
-        </Tooltip>
+        {hideTrigger ? null : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <ComboboxTrigger
+                  render={showLabel ? <ThreadDetailsControl /> : <ComposerControl size="xs" />}
+                  className="min-w-0 shrink active:scale-100"
+                  aria-label="Xwing environment"
+                  data-composer-context-control
+                />
+              }
+            >
+              <Boxes className="size-3 shrink-0" />
+              {selected || showLabel ? (
+                <ComposerContextLabel>
+                  {selected?.label ?? "Choose environment"}
+                </ComposerContextLabel>
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup>
+              {selected
+                ? serverThread !== null
+                  ? `Works in ${selected.label}. Choose another environment to move this stopped thread.`
+                  : `Starts in ${selected.label}.`
+                : "Work in an Xwing environment"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         <ComboboxPopup
           align="start"
           side="top"
           className="flex w-[min(24rem,calc(100vw-2rem))] flex-col"
           {...composerFloatingLayerProps}
+          {...(anchor ? { anchor, finalFocus: () => anchor } : {})}
         >
           {canOperate ? (
             <Button

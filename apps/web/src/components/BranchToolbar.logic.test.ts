@@ -7,7 +7,6 @@ import {
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
-  resolveBranchToolbarPrBranch,
   resolveConfirmedSelectedRef,
   resolveDefaultWorktreeBaseBranch,
   resolveLocalCheckoutBranchMismatch,
@@ -37,17 +36,6 @@ describe("resolveDraftEnvModeAfterBranchChange", () => {
         effectiveEnvMode: "local",
       }),
     ).toBe("worktree");
-  });
-});
-
-describe("resolveBranchToolbarPrBranch", () => {
-  it("hides PR state while an optimistic branch switch is in flight", () => {
-    expect(
-      resolveBranchToolbarPrBranch({
-        activeThreadBranch: "feature/current",
-        resolvedActiveBranch: "feature/next",
-      }),
-    ).toBeNull();
   });
 });
 

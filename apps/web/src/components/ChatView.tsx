@@ -3426,6 +3426,9 @@ export default function ChatView(props: ChatViewProps) {
   const composerRowItems = useThreadComposerRowItems({
     threadRef: !embedded && isServerThread ? activeThreadRef : null,
     bookmarksThreadRef: !embedded && isServerThread ? displayedThreadRef : null,
+    chipsThreadRef: embedded ? null : activeThreadRef,
+    branch: activeThreadBranch,
+    gitStatus: gitStatusQuery.data,
     agents: serverProjection?.subagents,
     onOpenSideChat: sideChatsOffered && sideChat.available ? openSideChatStable : undefined,
     onRevealBookmark: revealBookmark,

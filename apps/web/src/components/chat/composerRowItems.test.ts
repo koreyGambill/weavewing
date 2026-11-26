@@ -59,6 +59,38 @@ describe("resolveComposerRowHiddenIds", () => {
     ).toEqual(["tools"]);
   });
 
+  it("leaves automation, Tools, computer, pull request, then branch, and keeps chips whole", () => {
+    // The full row in its on-screen order; chips and Tools never shorten.
+    const fullRow: ReadonlyArray<ComposerRowItemWidth> = [
+      ...items,
+      { id: "tools", priority: COMPOSER_ROW_PRIORITY.tools, natural: 50, minimum: 50 },
+      {
+        id: "pull-request",
+        priority: COMPOSER_ROW_PRIORITY.pullRequest,
+        natural: 40,
+        minimum: 40,
+      },
+      { id: "automation", priority: COMPOSER_ROW_PRIORITY.automation, natural: 80, minimum: 80 },
+    ];
+    const fullWidth = minimumRowWidth + 50 + 40 + 80 + 3 * 4;
+    const hiddenIn = (availableWidth: number) =>
+      resolveComposerRowHiddenIds({
+        items: fullRow,
+        availableWidth,
+        gap: 4,
+        menuWidth: 24,
+        previousHiddenIds: [],
+      });
+    expect(hiddenIn(fullWidth)).toEqual([]);
+    expect(hiddenIn(fullWidth - 1)).toEqual(["automation"]);
+    expect(hiddenIn(fullWidth - 84)).toEqual(["automation"]);
+    expect(hiddenIn(fullWidth - 85)).toEqual(["automation", "tools"]);
+    expect(hiddenIn(fullWidth - 138)).toEqual(["automation", "tools"]);
+    expect(hiddenIn(fullWidth - 139)).toEqual(["automation", "tools", "computer"]);
+    expect(hiddenIn(fullWidth - 243)).toEqual(["automation", "tools", "computer", "pull-request"]);
+    expect(hiddenIn(50)).toEqual(["automation", "tools", "computer", "pull-request", "branch"]);
+  });
+
   it("needs extra room before bringing an item back from the menu", () => {
     expect(hiddenAt(minimumRowWidth, ["computer"])).toEqual(["computer"]);
     expect(hiddenAt(minimumRowWidth + 15, ["computer"])).toEqual(["computer"]);

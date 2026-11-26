@@ -66,6 +66,9 @@ function ToolsRow(props: { readonly narrow?: boolean }) {
   const threadItems = useThreadComposerRowItems({
     threadRef,
     bookmarksThreadRef: null,
+    chipsThreadRef: null,
+    branch: null,
+    gitStatus: null,
     agents: [{ status: "running" }] as never,
     onOpenSideChat: undefined,
     onRevealBookmark: () => {},

@@ -4,6 +4,7 @@ import type {
   OrchestrationV2Subagent,
   ScopedThreadRef,
   ThreadId,
+  VcsStatusResult,
 } from "@t3tools/contracts";
 import { BookmarkIcon, BotIcon, MessagesSquareIcon } from "lucide-react";
 import { useState } from "react";
@@ -25,6 +26,7 @@ import {
 import { sideAreaDetailsRowItem } from "../sideAreaDetailsRowItem";
 import { bookmarkListSummary, ThreadBookmarkList } from "./ThreadBookmarkList";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { useComposerRowChipItems } from "./threadComposerRowChips";
 
 const AGENT_DOT_CLASS: Record<ComposerRowAgentsSummary["tone"], string> = {
   working: "bg-success",
@@ -85,14 +87,20 @@ function ComposerRowAgents(props: {
 }
 
 /**
- * The thread's own row items: Agents and Tools, then the ⋯-only side chat and bookmarks. Every
- * value comes from data the thread view already holds.
+ * The thread's own row items: Agents, Tools, and the pull request and automation chips, then the
+ * ⋯-only side chat and bookmarks. Every value comes from data the thread view already holds and
+ * the app-level scheduled-task list.
  */
 export function useThreadComposerRowItems(input: {
   /** Null for a draft or embedded view, which gets none of these items. */
   readonly threadRef: ScopedThreadRef | null;
   /** The thread whose bookmarks the list shows. */
   readonly bookmarksThreadRef: ScopedThreadRef | null;
+  /** The thread or draft the chips describe; null for an embedded view. */
+  readonly chipsThreadRef: ScopedThreadRef | null;
+  /** The ref the thread works on and its checkout's status, for a PR the shell lacks. */
+  readonly branch: string | null;
+  readonly gitStatus: Pick<VcsStatusResult, "refName" | "pr" | "sourceControlProvider"> | null;
   readonly agents: ReadonlyArray<OrchestrationV2Subagent> | undefined;
   readonly onOpenSideChat: (() => void) | undefined;
   readonly onRevealBookmark: (bookmark: MessageFollowUp) => void;
@@ -100,8 +108,13 @@ export function useThreadComposerRowItems(input: {
   const bookmarks = orderBookmarks(useThreadFollowUpList(input.bookmarksThreadRef));
   const tools = useComposerToolsRowItem(input.threadRef);
   const details = sideAreaDetailsRowItem(input.threadRef);
+  const chips = useComposerRowChipItems({
+    threadRef: input.chipsThreadRef,
+    branch: input.branch,
+    gitStatus: input.gitStatus,
+  });
   const { threadRef, bookmarksThreadRef, onOpenSideChat, onRevealBookmark } = input;
-  if (threadRef === null) return [];
+  if (threadRef === null) return chips;
   const agents = summarizeComposerRowAgents(input.agents);
   return [
     {
@@ -131,6 +144,7 @@ export function useThreadComposerRowItems(input: {
       },
     },
     tools,
+    ...chips,
     {
       id: "side-chat",
       priority: null,
