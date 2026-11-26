@@ -90,6 +90,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "workspace.focusPrevious",
   ...WORKSPACE_TILE_KEYBINDING_COMMANDS,
   "sidebar.toggle",
+  "waiting.show",
   "toolSidebar.toggle",
   "navigation.back",
   "navigation.forward",

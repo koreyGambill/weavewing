@@ -132,6 +132,7 @@ import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { WaitingOnYouRow } from "./waiting/threadList/WaitingOnYouRow";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -4325,6 +4326,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
+            <WaitingOnYouRow />
           </SidebarGroup>
         }
       >

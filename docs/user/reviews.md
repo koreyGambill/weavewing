@@ -106,7 +106,9 @@ waits on you.
 
 Deferred questions, items you are discussing, and changes the agent is fixing
 leave the count. A thread with items waiting shows one count in the thread
-list; hover it to see them by kind. Such a thread stays out of automatic
+list; hover it to see them by kind. **Waiting on you** at the top of the thread
+list gathers every such thread in one place (see
+[Working with threads](thread-sidebar.md)). Such a thread stays out of automatic
 settling until you answer or close them; you can still settle it yourself.
 
 **Waiting-on-you cards** in **Settings → Threads** turns all of this on or off,
