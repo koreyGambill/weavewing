@@ -63,14 +63,14 @@ Weavewing sends `/compact` only when you request it. Returning to an idle thread
 sending a message keeps the conversation history. Claude Code still compacts at
 its configured context threshold.
 
-## Leave out built-in tools
+## Built-in tools
 
-**Built-in tools to leave out** removes Claude Code tools from the model's context to save
-tokens. By default it leaves out all seven it lists, including the artifact tools, so Claude
-cannot publish claude.ai artifact pages from threads. **Keep artifact tools** leaves out only
-Task (native subagents), Workflow, ScheduleWakeup and ReportFindings; **Clear** keeps every tool;
-**Recommended** returns to the default. A change applies when a thread's Claude process next starts, which includes an existing thread
-resuming after a restart or an idle period.
+**Built-in tools** lists seven Claude Code tools. Claude has the ticked ones; an unticked tool is
+left out of the model's context to save tokens, and each shows an estimate of what it adds. By
+default all seven are unticked, so Claude cannot publish claude.ai artifact pages from threads.
+**Artifact tools only** ticks the three artifact tools; **All tools** ticks every tool;
+**Recommended** returns to the default. A change applies when a thread's Claude process next
+starts, which includes an existing thread resuming after a restart or an idle period.
 
 ## claude.ai connectors
 
