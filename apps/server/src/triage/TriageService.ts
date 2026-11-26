@@ -4,6 +4,7 @@ import {
   type ServerPrepareTriageInput,
   type ServerPrepareTriageResult,
 } from "@t3tools/contracts";
+import { RELEASE_REPOSITORY, releaseTag } from "@t3tools/shared/releaseIdentity";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -16,7 +17,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { buildTriageAppPrompt, type TriageSourceClone } from "./triagePrompt.ts";
 import { triageSourceCacheDir, writeTriageSession } from "./triageSession.ts";
 
-const T3CODE_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+const REPOSITORY_URL = `https://github.com/${RELEASE_REPOSITORY}`;
 
 // No tty: a credential prompt would hang until the timeout, so git must fail
 // instead. An empty GIT_ASKPASS also skips core.askPass and SSH_ASKPASS helpers.
@@ -57,7 +58,7 @@ export const pickSourceRef = (lsRemoteOutput: string, version: string) => {
       .filter((fields): fields is [string, string] => fields.length === 2)
       .map(([commit, ref]) => [ref, commit]),
   );
-  const tag = `v${version}`;
+  const tag = releaseTag(version);
   // Annotated tags list the tag object first and the commit as `^{}`.
   const tagCommit = commits.get(`refs/tags/${tag}^{}`) ?? commits.get(`refs/tags/${tag}`);
   if (tagCommit !== undefined) return { ref: tag, commit: tagCommit };
@@ -97,7 +98,7 @@ const make = Effect.gen(function* () {
       yield* runGit(
         "addSourceRemote",
         staging,
-        ["remote", "add", "origin", T3CODE_REPOSITORY_URL],
+        ["remote", "add", "origin", REPOSITORY_URL],
         10_000,
       );
       yield* runGit(
@@ -126,11 +127,11 @@ const make = Effect.gen(function* () {
   let releaseSource: { readonly ref: string; readonly commit: string } | undefined;
   const resolveSource = Effect.fn("TriageService.resolveSource")(function* () {
     if (releaseSource !== undefined) return releaseSource;
-    const tag = `refs/tags/v${serverVersion}`;
+    const tag = `refs/tags/${releaseTag(serverVersion)}`;
     const listed = yield* runGit(
       "resolveSourceRef",
       sourceDir,
-      ["ls-remote", T3CODE_REPOSITORY_URL, tag, `${tag}^{}`, "refs/heads/main"],
+      ["ls-remote", REPOSITORY_URL, tag, `${tag}^{}`, "refs/heads/main"],
       // Triage still starts without source; a dead network should not stall it.
       5_000,
     );

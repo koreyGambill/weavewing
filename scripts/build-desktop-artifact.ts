@@ -2943,7 +2943,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       icon: "icons",
       category: "Development",
       synopsis: "Desktop GUI for coding agents",
-      maintainer: "T3 Tools <hello@t3.codes>",
+      // The fork has no mailbox; a reserved .invalid domain keeps the field well formed.
+      maintainer: "Weavewing <noreply@weavewing.invalid>",
       protocols: [
         {
           name: "T3 Code",

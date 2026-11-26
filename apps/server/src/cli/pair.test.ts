@@ -504,10 +504,10 @@ describe("t3 pair", () => {
           ]);
           assert.isTrue(Exit.isFailure(exit));
           if (Exit.isFailure(exit)) {
-            assert.include(
-              String(Cause.squash(exit.cause)),
-              `t3@0.0.45 pair --base-dir ${baseDir}`,
-            );
+            const message = String(Cause.squash(exit.cause));
+            assert.include(message, "Install t3 0.0.45 from https://github.com/");
+            assert.include(message, `\`t3 pair --base-dir ${baseDir}\``);
+            assert.notInclude(message, "npx");
           }
         }),
       "127.0.0.1",

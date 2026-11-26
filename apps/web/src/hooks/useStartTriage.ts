@@ -5,6 +5,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { CLI_INSTALL_GUIDE_URL } from "@t3tools/shared/releaseIdentity";
 import { useRouter } from "@tanstack/react-router";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -16,7 +17,8 @@ import { writeTextToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useScratchProject } from "./useScratchProject";
 
-export const TRIAGE_CLI_COMMAND = "npx t3 triage";
+// The npm package `t3` is upstream's, so suggest the installed CLI.
+export const TRIAGE_CLI_COMMAND = "t3 triage";
 
 const copyTriageCliCommand = () =>
   writeTextToClipboard(TRIAGE_CLI_COMMAND, "command").catch(() =>
@@ -45,7 +47,7 @@ export function useStartTriage() {
       stackedThreadToast({
         type: "error",
         title: "Could not start triage",
-        description: `${description} Run ${TRIAGE_CLI_COMMAND} in a terminal on that machine instead.`,
+        description: `${description} Run ${TRIAGE_CLI_COMMAND} in a terminal on that machine instead. If t3 is missing there, install it from ${CLI_INSTALL_GUIDE_URL}.`,
         timeout: 0,
         actionProps: { children: "Copy command", onClick: () => void copyTriageCliCommand() },
         // "Copy command" is the copy that helps here, not the error text.

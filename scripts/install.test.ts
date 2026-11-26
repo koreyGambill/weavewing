@@ -13,10 +13,27 @@ const launcherScript = (executable: string) =>
   `#!/bin/sh\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`;
 
 const nightlies = Array.from({ length: 100 }, (_, index) => ({
-  tag_name: `v1.2.4-nightly.20261020.${200 - index}`,
+  tag_name: `weavewing-v1.2.4-nightly.20261020.${200 - index}`,
 }));
 
-describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home", () => {
+// The fork publishes the shell installer's CLI only for Linux x64 and macOS on Apple silicon.
+const linuxX64 =
+  HostProcess.Platform.defaultValue() === "linux" &&
+  HostProcess.Architecture.defaultValue() === "x64";
+
+/** Unpacks a stub of this fork's release, with the markers and executable reuse requires. */
+const markInstalled = async (target: string, version: string) => {
+  await NodeFSP.writeFile(NodePath.join(target, "t3"), `#!/bin/sh\necho 't3 v${version}'\n`, {
+    mode: 0o755,
+  });
+  await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), `${version}\n`);
+  await NodeFSP.writeFile(
+    NodePath.join(target, ".install-source"),
+    `koreyGambill/weavewing weavewing-v${version}\n`,
+  );
+};
+
+describe.skipIf(!linuxX64)("installer home", () => {
   it("installs a relative home from a directory ending in a newline", async () => {
     const temporaryRoot = await NodeFSP.realpath(
       await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-home-")),
@@ -29,7 +46,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
     const launcher = NodePath.join(root, "bin/t3");
     try {
       await NodeFSP.mkdir(target, { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), `${version}\n`);
+      await markInstalled(target, version);
       await NodeFSP.writeFile(NodePath.join(target, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
         mode: 0o755,
       });
@@ -68,7 +85,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
 });
 
 // regression: #22490
-describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer channel lookup", () => {
+describe.skipIf(!linuxX64)("installer channel lookup", () => {
   it.each([
     // regression: #32897
     ["stable", "1.2.3", 1],
@@ -80,13 +97,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
       if (failures-- > 0) return response.writeHead(504).end();
       const url = new URL(request.url ?? "/", "http://fixture");
       const body =
-        url.pathname === "/pingdotgg/t3code/releases/latest" &&
+        url.pathname === "/koreyGambill/weavewing/releases/latest" &&
         request.headers.accept === "application/json"
-          ? { tag_name: "v1.2.3" }
-          : url.pathname === "/repos/pingdotgg/t3code/releases"
-            ? { "1": nightlies, "2": [{ tag_name: `v${version}` }, { tag_name: "v1.2.3" }] }[
-                url.searchParams.get("page") ?? ""
-              ]
+          ? { tag_name: "weavewing-v1.2.3" }
+          : url.pathname === "/repos/koreyGambill/weavewing/releases"
+            ? {
+                "1": nightlies,
+                "2": [{ tag_name: `weavewing-v${version}` }, { tag_name: "weavewing-v1.2.3" }],
+              }[url.searchParams.get("page") ?? ""]
             : undefined;
       if (body === undefined) response.statusCode = 404;
       // The API pretty-prints and the installer reads it line by line.
@@ -95,7 +113,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
     try {
       // An existing completed install isolates release resolution from archive downloads.
       await NodeFSP.mkdir(target, { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), `${version}\n`);
+      await markInstalled(target, version);
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       const address = server.address();
       if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
@@ -138,56 +156,52 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
 });
 
 // regression: #35834
-describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
-  "installer archive download",
-  () => {
-    it("names the archive when it returns 404", async () => {
-      const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-archive-"));
-      const arch = HostProcess.Architecture.defaultValue() === "arm64" ? "arm64" : "x64";
-      const archive = `t3-1.2.3-linux-${arch}.tar.gz`;
-      const server = NodeHttp.createServer((request, response) => {
-        if (request.url === "/v1.2.3/SHA256SUMS")
-          return response.end(`${"0".repeat(64)}  ${archive}\n`);
-        response.writeHead(404).end();
-      });
-      try {
-        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-        const address = server.address();
-        if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
-        const { code, output } = await new Promise<{ code: number | null; output: string }>(
-          (resolve, reject) => {
-            const child = NodeChildProcess.spawn(
-              "sh",
-              [NodePath.resolve(import.meta.dirname, "install.sh")],
-              {
-                env: {
-                  ...process.env,
-                  T3CODE_CHANNEL: "",
-                  T3CODE_VERSION: "1.2.3",
-                  T3CODE_HOME: NodePath.join(root, "home"),
-                  T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-                  T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
-                },
-                stdio: ["ignore", "pipe", "pipe"],
-              },
-            );
-            let output = "";
-            child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
-            child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
-            child.on("error", reject);
-            child.on("close", (code) => resolve({ code, output }));
-          },
-        );
-        expect(code, output).not.toBe(0);
-        expect(output).toMatch(new RegExp(`t3 install: .*${archive.replaceAll(".", "\\.")}`));
-      } finally {
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        await NodeFSP.rm(root, { recursive: true, force: true });
-      }
+describe.skipIf(!linuxX64)("installer archive download", () => {
+  it("names the archive when it returns 404", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-archive-"));
+    const archive = "t3-1.2.3-linux-x64.tar.gz";
+    const server = NodeHttp.createServer((request, response) => {
+      if (request.url === "/weavewing-v1.2.3/SHA256SUMS")
+        return response.end(`${"0".repeat(64)}  ${archive}\n`);
+      response.writeHead(404).end();
     });
-  },
-);
+    try {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
+      const { code, output } = await new Promise<{ code: number | null; output: string }>(
+        (resolve, reject) => {
+          const child = NodeChildProcess.spawn(
+            "sh",
+            [NodePath.resolve(import.meta.dirname, "install.sh")],
+            {
+              env: {
+                ...process.env,
+                T3CODE_CHANNEL: "",
+                T3CODE_VERSION: "1.2.3",
+                T3CODE_HOME: NodePath.join(root, "home"),
+                T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+                T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+              },
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          );
+          let output = "";
+          child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+          child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+          child.on("error", reject);
+          child.on("close", (code) => resolve({ code, output }));
+        },
+      );
+      expect(code, output).not.toBe(0);
+      expect(output).toMatch(new RegExp(`t3 install: .*${archive.replaceAll(".", "\\.")}`));
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 /** Runs an installer for a version that is already unpacked, so only the t3 command step runs. */
 async function installOver(input: {
@@ -199,7 +213,7 @@ async function installOver(input: {
 }) {
   const target = NodePath.join(input.home, "runtime", "versions", "1.2.3");
   await NodeFSP.mkdir(target, { recursive: true });
-  await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), "1.2.3\n");
+  await markInstalled(target, "1.2.3");
   const installer = NodePath.resolve(import.meta.dirname, input.script);
   const [command, args] =
     input.script === "install.sh"
@@ -221,7 +235,7 @@ async function installOver(input: {
   return { code: result.status, output: `${result.stdout}${result.stderr}`, target };
 }
 
-describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 command", () => {
+describe.skipIf(!linuxX64)("install.sh t3 command", () => {
   it("replaces only this home's own launchers and prints a PATH command", async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-link-"));
     try {
@@ -419,7 +433,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
   });
 });
 
-describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer checksum", () => {
+describe.skipIf(!linuxX64)("installer checksum", () => {
   it.each(
     ["home\\data", "home\ndata"].flatMap((homeName) =>
       [true, false].map((validChecksum) => ({ homeName, validChecksum })),
@@ -535,4 +549,142 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
       }
     },
   );
+});
+
+/** Serves one fork release of `version` whose t3 prints `t3 v<version> <label>`. */
+async function serveRelease(root: string, version: string, label: string) {
+  const stem = `t3-${version}-linux-x64`;
+  await NodeFSP.mkdir(NodePath.join(root, stem));
+  await NodeFSP.writeFile(
+    NodePath.join(root, stem, "t3"),
+    `#!/bin/sh\necho 't3 v${version} ${label}'\n`,
+    { mode: 0o755 },
+  );
+  const archivePath = NodePath.join(root, `${stem}.tar.gz`);
+  NodeChildProcess.execFileSync("tar", ["-czf", archivePath, "-C", root, stem]);
+  const archive = await NodeFSP.readFile(archivePath);
+  const digest = NodeCrypto.createHash("sha256").update(archive).digest("hex");
+  const requests: Array<string> = [];
+  const server = NodeHttp.createServer((request, response) => {
+    requests.push(request.url ?? "");
+    if (request.url === `/weavewing-v${version}/SHA256SUMS`)
+      return response.end(`${digest}  ${stem}.tar.gz\n`);
+    if (request.url === `/weavewing-v${version}/${stem}.tar.gz`) return response.end(archive);
+    response.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
+  return { server, requests, origin: `http://127.0.0.1:${address.port}` };
+}
+
+describe.skipIf(!linuxX64)("installer cache provenance", () => {
+  it.each([
+    ["a bare version marker", undefined, true],
+    ["an upstream release record", "pingdotgg/t3code v1.2.3\n", true],
+    ["both markers but no executable", "koreyGambill/weavewing weavewing-v1.2.3\n", false],
+  ])("replaces a same-version folder with %s", async (_name, sourceRecord, withExecutable) => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-source-"));
+    const home = NodePath.join(root, "home");
+    const target = NodePath.join(home, "runtime/versions/1.2.3");
+    const { server, requests, origin } = await serveRelease(root, "1.2.3", "fork");
+    try {
+      await NodeFSP.mkdir(target, { recursive: true });
+      if (withExecutable)
+        await NodeFSP.writeFile(
+          NodePath.join(target, "t3"),
+          "#!/bin/sh\necho 't3 v1.2.3 upstream'\n",
+          {
+            mode: 0o755,
+          },
+        );
+      await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), "1.2.3\n");
+      if (sourceRecord !== undefined)
+        await NodeFSP.writeFile(NodePath.join(target, ".install-source"), sourceRecord);
+      // Async, because a synchronous child would block this process's fixture server.
+      const install = () =>
+        new Promise<{ status: number | null; stderr: string }>((resolve, reject) => {
+          const child = NodeChildProcess.spawn(
+            "sh",
+            [NodePath.resolve(import.meta.dirname, "install.sh")],
+            {
+              env: {
+                ...process.env,
+                T3CODE_CHANNEL: "",
+                T3CODE_VERSION: "1.2.3",
+                T3CODE_HOME: home,
+                T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+                T3CODE_RELEASE_BASE_URL: origin,
+              },
+              stdio: ["ignore", "ignore", "pipe"],
+            },
+          );
+          let stderr = "";
+          child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+          child.on("error", reject);
+          child.on("close", (status) => resolve({ status, stderr }));
+        });
+
+      const first = await install();
+      expect(first.status, first.stderr).toBe(0);
+      expect(first.stderr).not.toContain("already downloaded");
+      expect(
+        NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+          encoding: "utf8",
+        }).trim(),
+      ).toBe("t3 v1.2.3 fork");
+      expect(await NodeFSP.readFile(NodePath.join(target, ".install-source"), "utf8")).toBe(
+        "koreyGambill/weavewing weavewing-v1.2.3\n",
+      );
+
+      // The fork's own record is reused without another request.
+      const downloads = requests.length;
+      const second = await install();
+      expect(second.status, second.stderr).toBe(0);
+      expect(second.stderr).toContain("already downloaded");
+      expect(requests.length).toBe(downloads);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer platforms", () => {
+  it.each([
+    ["Linux", "aarch64", "there is no t3 CLI for linux-arm64"],
+    ["Darwin", "x86_64", "there is no t3 CLI or desktop app for Intel Macs"],
+  ])("stops on %s %s before any download", async (system, machine, message) => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-platform-"));
+    try {
+      const tools = NodePath.join(root, "tools");
+      await NodeFSP.mkdir(tools);
+      await NodeFSP.writeFile(
+        NodePath.join(tools, "uname"),
+        `#!/bin/sh\n[ "$1" = -s ] && echo ${system} || echo ${machine}\n`,
+        { mode: 0o755 },
+      );
+      const { status, stderr } = NodeChildProcess.spawnSync(
+        "sh",
+        [NodePath.resolve(import.meta.dirname, "install.sh")],
+        {
+          env: {
+            ...process.env,
+            PATH: `${tools}:${process.env.PATH ?? ""}`,
+            T3CODE_VERSION: "1.2.3",
+            T3CODE_HOME: NodePath.join(root, "home"),
+            T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+            T3CODE_RELEASE_BASE_URL: "http://127.0.0.1:1",
+          },
+          encoding: "utf8",
+        },
+      );
+      expect(status).not.toBe(0);
+      expect(stderr).toContain(`t3 install: ${message}`);
+      expect(stderr).not.toContain("Downloading");
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -1,5 +1,6 @@
 import { type EnvironmentId, SourceControlProviderKind } from "@t3tools/contracts";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import { RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
 import * as Schema from "effect/Schema";
 import { StarIcon } from "lucide-react";
 
@@ -12,7 +13,6 @@ import { toastManager } from "./ui/toast";
 // Separate keys so a count written by another tab can never undo a dismissal.
 const SENT_KEY = "t3code:github-star-prompt:sent";
 const DISMISSED_KEY = "t3code:github-star-prompt:dismissed";
-const REPOSITORY = "pingdotgg/t3code";
 const PROMPTS_BEFORE_ASKING = 5;
 const IDLE_MS = 30_000;
 // User-driven actions (send, navigate, type, scroll) start with one of these; touch fires pointerdown.
@@ -32,7 +32,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
   const openInBrowser = () => {
     close();
     void readLocalApi()
-      ?.shell.openExternal(`https://github.com/${REPOSITORY}`)
+      ?.shell.openExternal(`https://github.com/${RELEASE_REPOSITORY}`)
       .catch(() => undefined);
   };
   const starInPlace = async () => {
@@ -114,7 +114,7 @@ const starInput = (environmentId: EnvironmentId) => ({
   input: {
     provider: SourceControlProviderKind.make("github"),
     host: "github.com",
-    repository: REPOSITORY,
+    repository: RELEASE_REPOSITORY,
   },
 });
 

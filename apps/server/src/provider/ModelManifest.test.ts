@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderDriverKind } from "@t3tools/contracts";
+import { RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -248,15 +249,17 @@ const INVALID_REMOTE_MANIFESTS: ReadonlyArray<ModelManifest.ModelManifestData> =
   }),
 ];
 
-const layerHttpClient = (handler: () => Response) =>
+const layerHttpClient = (handler: (url: string) => Response) =>
   Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handler()))),
+    HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, handler(request.url))),
+    ),
   );
 
 const layerService = (input: {
   readonly prefix: string;
-  readonly response: () => Response;
+  readonly response: (url: string) => Response;
   readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
@@ -268,6 +271,28 @@ const layerService = (input: {
   );
 
 describe("ModelManifest service", () => {
+  it.effect("fetches the manifest from this fork's repository", () => {
+    const urls: Array<string> = [];
+    return Effect.gen(function* () {
+      const service = yield* ModelManifest.make;
+      yield* service.refresh;
+      assert.deepStrictEqual(urls, [
+        `https://raw.githubusercontent.com/${RELEASE_REPOSITORY}/main/apps/server/src/provider/model-manifest.json`,
+      ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layerService({
+          prefix: "model-manifest-source-test",
+          response: (url) => {
+            urls.push(url);
+            return Response.json(REMOTE_MANIFEST);
+          },
+        }),
+      ),
+    );
+  });
+
   it.effect("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {
       const service = yield* ModelManifest.make;

@@ -270,6 +270,18 @@ function initializer(text: string, start: number) {
   return text.slice(start);
 }
 
+// The hosted app origin stays until the fork has its own; these are its only sanctioned mentions.
+// A bare quoted origin passes even where code later joins it to a path; concatenating one fails.
+const HOSTED_APP_MENTIONS = [
+  /(["'`])https:\/\/(?:nightly\.)?app\.t3\.codes\1(?!\s*\+)/g,
+  /\(app\.t3\.codes\)|get app\.t3\.codes thread links|other computers, app\.t3\.codes|app\.t3\.codes serves stable/g,
+];
+const UPSTREAM_HOSTS = /(?:app|clerk)\.t3\.codes/i;
+// Upstream's repository as a link or fetch target; prose credit and license notices may name it.
+const UPSTREAM_REPOSITORY = /\/\/[^\s"'`<>()]*\bpingdotgg\b|["'`]pingdotgg\/[\w.-]+["'`]/i;
+// The web build's generated license manifest, also served from the server's copy of the client.
+const LICENSE_MANIFESTS = new Set(["apps/web/dist/third-party-licenses.json", "apps/server/dist/client/third-party-licenses.json"]);
+
 export function assertCleanBundle(root: string) {
   const dirs = ["apps/server/dist", "apps/web/dist", "apps/desktop/dist-electron"];
   for (const dir of dirs) {
@@ -282,6 +294,9 @@ export function assertCleanBundle(root: string) {
       // Source maps retain reference documentation and runtime env names, rather than build defaults.
       if (/pk_(?:live|test)_[A-Za-z0-9]+|phc_[A-Za-z0-9_]+|(?:[\w-]+\.)*posthog\.[a-z]+|ingest\.t3\.codes|relay\.t3\.codes|https?:[^\s"'`]*axiom\.co|xaat-[A-Za-z0-9]+/i.test(text))
         throw new Error(`Public config or credential baked into ${dir}/${relative}`);
+      const unsanctioned = HOSTED_APP_MENTIONS.reduce((rest, mention) => rest.replace(mention, ""), text);
+      if (UPSTREAM_HOSTS.test(unsanctioned) || (!LICENSE_MANIFESTS.has(`${dir}/${relative}`) && UPSTREAM_REPOSITORY.test(unsanctioned)))
+        throw new Error(`Upstream resource baked into ${dir}/${relative}`);
       if (/__T3CODE_BUILD_(?:RELAY|CLERK)[A-Z_]*__/.test(text))
         throw new Error(`Unresolved public build constant in ${dir}/${relative}`);
       if (/https?:[^\s"'`]*(?:\/v1\/(?:traces|metrics|logs)|:\b431[78]\b|otlp)[^\s"'`]*/i.test(text))

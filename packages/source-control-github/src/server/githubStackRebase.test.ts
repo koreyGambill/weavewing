@@ -92,6 +92,24 @@ it.layer(layer)("cascadeRebaseStack", (it) => {
     }),
   );
 
+  it.effect("commits rebased layers as Weavewing and keeps each commit's author", () =>
+    Effect.gen(function* () {
+      const repo = yield* setup;
+      yield* cascadeRebaseStack({
+        host: "github.com",
+        repository: "acme/web",
+        base: "main",
+        layers: repo.layers,
+        remote: repo.remote,
+      });
+
+      const top = yield* repo.head("feat/answer-doc");
+      expect(yield* repo.git("log", "--format=%ae %cn <%ce>", `main..${top}`)).toBe(
+        "t@t Weavewing <noreply@weavewing.invalid>\nt@t Weavewing <noreply@weavewing.invalid>",
+      );
+    }),
+  );
+
   it.effect("drops a squash-merged lower layer's commits from the layer above it", () =>
     Effect.gen(function* () {
       const repo = yield* setup;

@@ -4,8 +4,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { CLI_INSTALL_GUIDE_URL } from "@t3tools/shared/releaseIdentity";
 import { useNavigation } from "@react-navigation/native";
 import * as Clipboard from "expo-clipboard";
+import { Linking } from "react-native";
 
 import * as Dialog from "../../components/ui/Dialog";
 import { projectEnvironment } from "../../state/projects";
@@ -18,7 +20,8 @@ import {
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { usePrepareTriage } from "./usePrepareTriage";
 
-const CLI_COMMAND = "npx t3 triage";
+// The npm package `t3` is upstream's, so point at the installed CLI and the fork's install guide.
+const CLI_COMMAND = "t3 triage";
 
 /**
  * In-app `t3 triage`, as on web: the server writes the session files and
@@ -33,7 +36,7 @@ export function useStartTriage() {
   const fail = (message: string) =>
     Dialog.alert(
       "Could not start triage",
-      `${message} Run ${CLI_COMMAND} in a terminal on that machine instead.`,
+      `${message} Run ${CLI_COMMAND} in a terminal on that machine instead. If t3 is missing there, install it first.`,
       [
         {
           text: "Copy command",
@@ -41,6 +44,10 @@ export function useStartTriage() {
             void Clipboard.setStringAsync(CLI_COMMAND).catch(() =>
               Dialog.alert("Could not copy", `Type ${CLI_COMMAND} instead.`),
             ),
+        },
+        {
+          text: "Install guide",
+          onPress: () => void Linking.openURL(CLI_INSTALL_GUIDE_URL).catch(() => undefined),
         },
         { text: "OK", style: "cancel" },
       ],

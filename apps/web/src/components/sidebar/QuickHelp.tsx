@@ -1,3 +1,5 @@
+import { RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
+
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 
@@ -73,7 +75,7 @@ export default function QuickHelp({
                   <li key={guide}>
                     <a
                       className="underline"
-                      href={`https://github.com/pingdotgg/t3code/blob/main/docs/user/${guide}.md`}
+                      href={`https://github.com/${RELEASE_REPOSITORY}/blob/main/docs/user/${guide}.md`}
                       target="_blank"
                       rel="noreferrer"
                     >

@@ -11,6 +11,8 @@ export const DESKTOP_APP_ID = "dev.weavewing.desktop";
  * update matching bind to it, so it must not change once a signed build ships.
  */
 export const MACOS_BUNDLE_ID = "dev.wingstack.weavewing.desktop";
+/** Where to get the `t3` CLI; the npm package `t3` is upstream's. */
+export const CLI_INSTALL_GUIDE_URL = `https://github.com/${RELEASE_REPOSITORY}/blob/main/docs/user/install.md#command-line`;
 
 /** The GitHub tag for a Weavewing release version. */
 export function releaseTag(version: string): string {

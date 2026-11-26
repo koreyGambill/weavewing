@@ -1,8 +1,10 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
+import { CLI_INSTALL_GUIDE_URL, RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
 
-const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
-const DOWNLOAD_URL = "https://t3.codes/download";
-const ISSUE_URL = "https://github.com/pingdotgg/t3code/issues/new";
+// The npm package `t3` is upstream's, so the fallback is the installed CLI, with install help beside it.
+const FALLBACK_TRIAGE_COMMAND = "t3 triage";
+const RELEASES_URL = `https://github.com/${RELEASE_REPOSITORY}/releases`;
+const ISSUE_URL = `https://github.com/${RELEASE_REPOSITORY}/issues/new`;
 const LAST_FAILURE_KEY = "t3code:boot-failed-at";
 const REPEAT_FAILURE_MS = 5 * 60_000;
 const MAX_CAUSES = 3;
@@ -23,7 +25,7 @@ function launcherCommand(launcherPath: string) {
     : `'${launcherPath.replaceAll("'", `'"'"'`)}'`;
 }
 
-/** Desktop can run its bundled launcher without Node; everything else falls back to npx. */
+/** Desktop can run its bundled launcher; everything else falls back to a `t3` on PATH. */
 export async function resolveTriageCommand(bridge: DesktopBridge | undefined) {
   try {
     const state = await bridge?.cliCommand.getState();
@@ -318,7 +320,18 @@ export function showBootError(error: unknown) {
       },
     ),
   );
-  void resolveTriageCommand(bridge).then((value) => (command.textContent = value));
+  const installHint = element("p", {}, [
+    element("a", {
+      href: CLI_INSTALL_GUIDE_URL,
+      textContent: "No t3 command? Install it first",
+      target: "_blank",
+      rel: "noreferrer",
+    }),
+  ]);
+  void resolveTriageCommand(bridge).then((value) => {
+    command.textContent = value;
+    installHint.hidden = value !== FALLBACK_TRIAGE_COMMAND;
+  });
 
   let report = "(no error message)";
   try {
@@ -357,7 +370,7 @@ export function showBootError(error: unknown) {
     ...(bridge
       ? [
           link(
-            nightly ? `${DOWNLOAD_URL}?channel=nightly` : DOWNLOAD_URL,
+            nightly ? RELEASES_URL : `${RELEASES_URL}/latest`,
             nightly
               ? "Download and reinstall the latest nightly build"
               : "Download and reinstall T3 Code",
@@ -370,6 +383,7 @@ export function showBootError(error: unknown) {
           "Run this on the computer that runs T3 Code. Your agent can check the local logs and help you file a bug report.",
       }),
       element("div", { id: "boot-error-command" }, [command, copyCommand]),
+      installHint,
     ]),
     element("div", {}, [
       details,

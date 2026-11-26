@@ -344,7 +344,7 @@ test("the Mac build host comes from configuration and must be a plain SSH destin
   assert.equal(Release.macHost("builder@mac-builder.local"), "builder@mac-builder.local");
 });
 
-test("bundle boundary rejects baked analytics, OTLP endpoints and wrapped tracing defaults", () => {
+test("bundle boundary rejects baked analytics, OTLP endpoints, wrapped tracing defaults and upstream resources", () => {
   const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-bundle-"));
   try {
     for (const dir of ["apps/server/dist", "apps/web/dist", "apps/desktop/dist-electron"]) {
@@ -359,6 +359,31 @@ test("bundle boundary rejects baked analytics, OTLP endpoints and wrapped tracin
     }
     FS.writeFileSync(Path.join(root, "apps/server/dist/main.js"), 'tracesToken:f(g("")),tracesUrl:f(""),enabled:Boolean("T3CODE_TELEMETRY_ENABLED").pipe(withDefault(false))');
     assertCleanBundle(root);
+    const upstream = [
+      "https://app.t3.codes/pair",
+      'url="https://app.t3.codes/connect"',
+      'url="https://app.t3.codes"+"/connect"',
+      "https://clerk.t3.codes",
+      "app.t3.codes",
+      'href:"https://github.com/pingdotgg/t3code/issues"',
+      "fetch(`https://raw.githubusercontent.com/pingdotgg/t3code/main/PLAYBOOK.md`)",
+      'repository:"pingdotgg/t3code"',
+    ];
+    for (const value of upstream) {
+      FS.writeFileSync(Path.join(root, "apps/web/dist/main.js"), value);
+      assert.throws(() => assertCleanBundle(root), /Upstream resource/, value);
+    }
+    // The quoted origin passes on its own; a runtime join such as new URL(path, origin) is not caught.
+    FS.writeFileSync(Path.join(root, "apps/web/dist/main.js"), 'v1=`https://app.t3.codes`,o="https://nightly.app.t3.codes",l="Remote: phones, other computers, app.t3.codes",d="the website (app.t3.codes), the",c="Portions by pingdotgg contributors"');
+    FS.writeFileSync(Path.join(root, "apps/web/dist/third-party-licenses.json"), '[{"name":"t3code","sourceUrl":"https://github.com/pingdotgg/t3code","notice":"Copyright (c) 2025 T3 Tools Inc."}]');
+    assertCleanBundle(root);
+    FS.mkdirSync(Path.join(root, "apps/web/dist/assets"));
+    FS.writeFileSync(Path.join(root, "apps/web/dist/assets/third-party-licenses.json"), '[{"sourceUrl":"https://github.com/pingdotgg/t3code"}]');
+    assert.throws(() => assertCleanBundle(root), /Upstream resource/);
+    FS.rmSync(Path.join(root, "apps/web/dist/assets"), { recursive: true });
+    FS.writeFileSync(Path.join(root, "apps/web/dist/third-party-licenses.json"), '[{"homepage":"https://clerk.t3.codes"}]');
+    assert.throws(() => assertCleanBundle(root), /Upstream resource/);
+    FS.rmSync(Path.join(root, "apps/web/dist/third-party-licenses.json"));
     const env = buildEnvironment("/usr/bin", "/home/build", "/tmp/build");
     assert.equal(env.T3CODE_DESKTOP_UPDATE_REPOSITORY, "koreyGambill/weavewing");
     assert.equal(env.T3CODE_CLERK_PUBLISHABLE_KEY, undefined);

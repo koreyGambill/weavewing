@@ -62,7 +62,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   // cmd.exe expands `%` and reads the shim in the OEM code page, so such a path would not run.
   if (windows && /[%\u0080-\uffff]/.test(executable)) {
     return yield* new CliInstallError({
-      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx t3.`,
+      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Run that t3 by its full path instead.`,
     });
   }
   // Absolute, so the PATH hint never adds a folder that changes with the working directory.
