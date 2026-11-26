@@ -94,11 +94,15 @@ The popover also lists the MCP servers the thread's session can load, read when 
 marks the ones the current session has not loaded. Switching a server off keeps its tools out of
 the model's context; the server may still connect. T3 Code's own server always stays in.
 
-The claude.ai connectors form a group with one switch, which shows whether the thread has them
-and says whether that follows the provider setting or is set for this thread. Switching it to
-match the provider setting goes back to following it. With the group off, switching on one
-connector turns the group on for that connector alone. Only the connectors as a whole have a
-token estimate, so the popover shows no total when some of them may be left out.
+The claude.ai connectors form a group with one switch. Its description says what is on, such
+as "All 4 connectors on" or "2 of 4 connectors on", and whether that follows the provider setting
+or is set for this thread. Switching the group to match the provider setting goes back to following
+it, unless the thread had saved its own setting and you are only switching back to it. With the
+group off, switching on one connector turns the group on for that connector alone. Switching the
+group off clears the connectors you chose one by one, so switching it back on turns them all on;
+the description says so before you reload. A left-out server that the list no longer shows stays
+left out. Only the connectors as a whole have a token estimate, so the popover shows no total when
+some of them may be left out.
 
 **Reload session** saves the tools, and the thread's Claude session restarts before the next
 message, keeping the conversation. The change applies from that message, which can carry more
