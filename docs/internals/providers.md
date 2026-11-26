@@ -143,6 +143,32 @@ checkpoints but cannot roll back its conversation. The [checkpoint boundary](./o
 therefore rejects revert before touching files. Native permission and question option IDs must
 also survive normalization; a display label is not necessarily a valid reply.
 
+## Instruction text after an update
+
+Codex takes T3's instruction text with every turn, so a thread resumed after an update gets the
+new text. Claude Code does not: on every `--resume` it replays the system
+prompt the session first started with and ignores the append T3 passes. A Claude thread would keep
+its first instructions for life.
+
+The [Claude adapter](../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts) therefore
+records, in the provider thread's native metadata, digests of the append sections the session started
+with and of the sections it holds now. When a process opens by resuming, the
+[comparison](../../apps/server/src/orchestration-v2/Adapters/ClaudeInstructionUpdates.ts) puts one
+`<system-reminder>` ahead of the first normal turn. The reminder gives added and changed sections in
+full and names removed ones. The record moves forward only once Claude Code accepts that prompt, so
+a lost process sends the notice again rather than dropping it. The record follows Claude Code's own
+behaviour:
+
+- Compaction and `/clear` rebuild the prompt from the running process's append.
+- A fork replays its source's prompt.
+- A resume at an earlier point, such as a rewind, rollback or earlier fork, loses notices accepted
+  after that point.
+- A session with no record gets every current section once.
+
+The context breakdown reports the recorded start append, not the one T3 passed, and counts the
+notice separately. Tool descriptions are not covered: a tool Claude already loaded keeps its old
+description, so guidance whose change must reach existing threads belongs in the instruction text.
+
 ## Attachments and stored history
 
 Attachments live outside the project workspace. The

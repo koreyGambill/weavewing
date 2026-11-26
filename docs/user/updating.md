@@ -89,6 +89,10 @@ of an unfinished turn, the thread waits for your next message, even when crashes
 are more than five minutes apart. A completed turn or a planned shutdown resets
 that limit.
 
+Existing threads learn about Weavewing's changed agent instructions after an update. Codex threads
+get the new text with their next turn. Claude threads get one note listing the instructions that
+changed with their next message.
+
 Updates from the previous orchestration system preserve conversation transcripts but cannot carry
 every kind of runtime history forward. Read [Threads from older Weavewing versions](./thread-migration.md)
 before continuing an important older thread.
