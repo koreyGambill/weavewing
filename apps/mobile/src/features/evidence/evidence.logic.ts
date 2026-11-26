@@ -15,11 +15,11 @@ export interface EvidenceEnvironment {
 }
 
 /**
- * Changes waiting on the user's QA across the listed environments, summed from each thread's
- * exact counts, which the shell stream keeps current. Archived threads are left out, since the
- * phone does not list them; landings never stand in, because their pages are capped.
+ * How many threads have changes waiting on the user's QA, from each thread's exact count in the
+ * shell stream. It counts threads, never changes: a sum of changes across threads grows past
+ * anything a person can act on. Archived threads are absent from the stream and wait on nobody.
  */
-export function evidenceAwaitingCount(
+export function evidenceThreadsWaitingCount(
   threads: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly archivedAt: string | null;
@@ -27,17 +27,23 @@ export function evidenceAwaitingCount(
   }>,
   environmentIds: ReadonlySet<EnvironmentId>,
 ): number {
-  let count = 0;
-  for (const thread of threads) {
-    if (thread.archivedAt !== null || !environmentIds.has(thread.environmentId)) continue;
-    count += thread.waitingCounts?.qa ?? 0;
-  }
-  return count;
+  return threads.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      environmentIds.has(thread.environmentId) &&
+      (thread.waitingCounts?.qa ?? 0) > 0,
+  ).length;
 }
 
-export function evidenceButtonLabel(awaiting: number): string {
-  if (awaiting <= 0) return "Evidence";
-  return `Evidence, ${awaiting} ${awaiting === 1 ? "change awaits" : "changes await"} your QA`;
+/** "3 threads have changes to check"; null when none does. */
+export function threadsWaitingPhrase(threads: number): string | null {
+  if (threads <= 0) return null;
+  return `${threads} ${threads === 1 ? "thread has" : "threads have"} changes to check`;
+}
+
+export function evidenceButtonLabel(threadsWaiting: number): string {
+  const phrase = threadsWaitingPhrase(threadsWaiting);
+  return phrase === null ? "Evidence" : `Evidence, ${phrase}`;
 }
 
 /** Web's QA state words and order, as its Evidence view counts them on a landing. */

@@ -6,11 +6,15 @@ import type { AppSymbolName } from "../../../components/ui/AppSymbol";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { WorkspaceAppBarScope } from "../../../components/ui/WorkspaceAppBar.android";
 
-/** One of the thread list's app bar entries, such as Inbox or Evidence, with its count over the icon. */
+/**
+ * One of the thread list's app bar entries, such as Inbox or Evidence, with a count or a plain dot
+ * over the icon; the accessibility label carries what either means.
+ */
 export function WorkspaceHeaderButton(props: {
   readonly accessibilityLabel: string;
   readonly icon: AppSymbolName;
   readonly badge: string | null;
+  readonly dot?: boolean;
   readonly onPress: () => void;
 }) {
   return (
@@ -20,7 +24,15 @@ export function WorkspaceHeaderButton(props: {
         icon={props.icon}
         onPress={props.onPress}
       />
-      {props.badge === null ? null : (
+      {props.badge === null ? (
+        props.dot === true ? (
+          <View
+            pointerEvents="none"
+            importantForAccessibility="no-hide-descendants"
+            className="absolute top-2.5 right-2.5 size-2 rounded-full bg-primary"
+          />
+        ) : null
+      ) : (
         <View
           pointerEvents="none"
           importantForAccessibility="no-hide-descendants"

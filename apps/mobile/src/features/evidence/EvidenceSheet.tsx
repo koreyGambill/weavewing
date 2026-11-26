@@ -15,6 +15,7 @@ import {
   evidenceEnvironmentHeading,
   evidenceSheetState,
   groupLandings,
+  threadsWaitingPhrase,
   type EvidenceEnvironment,
   type EvidenceGroup,
 } from "./evidence.logic";
@@ -31,8 +32,8 @@ import {
  */
 export function EvidenceSheet(props: {
   readonly environments: ReadonlyArray<EvidenceEnvironment>;
-  /** Changes waiting on the user, from the threads' exact counts. */
-  readonly awaiting: number;
+  /** Threads with changes waiting on the user, from the threads' exact counts. */
+  readonly threadsWaiting: number;
   /** Runs once the sheet is gone, with the thread to open when the user asked for one. */
   readonly onClose: (thread: InboxThreadTarget | null) => void;
 }) {
@@ -84,14 +85,7 @@ export function EvidenceSheet(props: {
           />
         ) : (
           <>
-            <GroupHeading
-              title="Needs QA"
-              detail={
-                props.awaiting > 0
-                  ? `${props.awaiting} ${props.awaiting === 1 ? "change awaits" : "changes await"} you`
-                  : null
-              }
-            />
+            <GroupHeading title="Needs QA" detail={threadsWaitingPhrase(props.threadsWaiting)} />
             {state.needsQaEmpty ? (
               <Text className="px-1 font-sans text-sm text-foreground-secondary">
                 Nothing waiting for your QA.

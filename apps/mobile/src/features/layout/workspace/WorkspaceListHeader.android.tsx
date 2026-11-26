@@ -117,7 +117,8 @@ function WorkspaceListAppBar(
                   key="evidence"
                   accessibilityLabel={props.evidence.accessibilityLabel}
                   icon="checkmark.circle"
-                  badge={props.evidence.badge}
+                  badge={null}
+                  dot={props.evidence.waiting}
                   onPress={props.evidence.open}
                 />
               ) : null,
