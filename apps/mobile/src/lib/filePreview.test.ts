@@ -167,13 +167,14 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/client-runtime/state/runtime")>()),
   executeAtomQuery: (...args: unknown[]) => audio.query(...args),
 }));
-vi.mock("../state/projects", () => ({
-  projectEnvironment: {
-    searchEntries: (input: unknown) => input,
-    fileMetadata: (input: unknown) => input,
-  },
-}));
+vi.mock("../state/projects", () => ({ projectEnvironment: {} }));
 vi.mock("../state/server", () => ({ serverEnvironment: {} }));
+vi.mock("../state/filesystem", () => ({
+  filesystemEnvironment: { getMetadata: (input: unknown) => input },
+}));
+vi.mock("../features/cloud/publicConfig", () => ({
+  resolveCloudPublicConfig: () => ({ hostedApp: { url: null } }),
+}));
 vi.mock("../state/session", () => ({
   readEnvironmentScope: () => true,
   usePreparedConnection: () => ({ _tag: "Some", value: { httpBaseUrl: "https://example.com" } }),
@@ -522,14 +523,14 @@ describe("ThreadInlineFilePreview playback", () => {
       await act(async () =>
         finishLookup({
           _tag: "Success",
-          value: { entries: [{ path: "src/target.ts", kind: "file" }] },
+          value: { entries: [{ path: "/repo/target.ts", kind: "file" }] },
         }),
       );
       if (playback === "continued playback") {
         expect(audio.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFile", {
           environmentId,
           threadId,
-          path: ["src", "target.ts"],
+          path: ["target.ts"],
         });
         expect(signal.aborted).toBe(false);
       } else {
