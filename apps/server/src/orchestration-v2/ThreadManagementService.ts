@@ -1871,122 +1871,151 @@ const make = Effect.gen(function* () {
       );
   });
 
+  // Two requests could both pass the idle check before either summary turn starts.
+  const rewindingWithSummary = new Set<ThreadId>();
   const rewindWithSummary: ThreadManagementServiceShape["rewindWithSummary"] = Effect.fn(
     "ThreadManagementService.rewindWithSummary",
   )(function* (input) {
-    const fail = (
-      reason: OrchestrationV2RewindWithSummaryError["reason"],
-      detail?: string,
-      cause?: unknown,
-    ) =>
-      new OrchestrationV2RewindWithSummaryError({
+    if (rewindingWithSummary.has(input.threadId)) {
+      return yield* new OrchestrationV2RewindWithSummaryError({
         threadId: input.threadId,
-        reason,
-        ...(detail === undefined ? {} : { detail }),
-        ...(cause === undefined ? {} : { cause }),
+        reason: "refused",
+        detail: "A rewind with a summary is already running in this thread.",
       });
-    const records = yield* orchestrator
-      .getThreadRecords(
-        input.threadId,
-        [
-          "runs",
-          "attempts",
-          "providerThreads",
-          "providerTurns",
-          "providerSessions",
-          "runtimeRequests",
-          "contextTransfers",
-          "subagents",
-          "turnItems",
-        ],
-        { turnItemRunIds: [input.runId], turnItemTypes: ["assistant_message"] },
-      )
-      .pipe(Effect.mapError((cause) => fail("refused", "This thread could not be read.", cause)));
-    if (records.thread.deletedAt !== null)
-      return yield* fail("refused", "This thread was deleted.");
-    const refusal =
-      rewindToReplyThreadRefusal(records) ??
-      rewindToReplyPointRefusal(records, input.runId, input.replyMessageId);
-    if (refusal !== null) return yield* fail("refused", refusal);
-    const point = records.runs.find((run) => run.id === input.runId);
-    const reply = records.turnItems.findLast(
-      (item) => item.type === "assistant_message" && item.messageId === input.replyMessageId,
-    );
-    if (point === undefined || reply?.type !== "assistant_message") {
-      return yield* fail("refused", "Choose the final reply of a completed turn.");
     }
-    const turns = records.runs.filter(
-      (run) =>
-        run.ordinal > point.ordinal && run.startedAt !== null && run.status !== "rolled_back",
-    ).length;
-    const requestId = yield* Effect.sync(() => SecureRandom.uuidV4Unsafe());
-    const messageId = MessageId.make(`message:rewind-summary:${requestId}`);
-    yield* dispatch({
-      type: "message.dispatch",
-      origin: CONTEXT_REWIND_SUMMARY_ORIGIN,
-      commandId: CommandId.make(`command:rewind-summary:${requestId}`),
-      threadId: input.threadId,
-      messageId,
-      text: contextRewindSummaryPrompt({ turns, replyExcerpt: reply.text }),
-      attachments: [],
-      dispatchMode: { type: "start_immediately" },
-      createdBy: input.createdBy,
-      creationSource: "server",
-    }).pipe(
-      Effect.mapError((cause) =>
-        fail("refused", "The agent could not start writing the summary.", cause),
-      ),
-    );
-
-    const finish = Effect.gen(function* () {
-      const { runs } = yield* orchestrator.getThreadRecords(input.threadId, ["runs"]);
-      const requested = runs.find((run) => run.userMessageId === messageId);
-      if (requested === undefined) return yield* fail("summary-failed");
-      const { run } = yield* waitForThread({
-        projectId: records.thread.projectId,
-        threadId: input.threadId,
-        runId: requested.id,
-        timeoutMs: SETTLE_AFTER_RUN_WAIT_MS,
-      });
-      if (run?.status !== "completed") return yield* fail("summary-failed");
-      const { turnItems } = yield* orchestrator.getThreadRecords(input.threadId, ["turnItems"], {
-        turnItemRunIds: [run.id],
-        turnItemTypes: ["assistant_message"],
-      });
-      const summary = turnItems.findLast(
-        (item) =>
-          item.type === "assistant_message" &&
-          item.phase !== "commentary" &&
-          item.phase !== "partial_answer",
-      );
-      if (summary?.type !== "assistant_message" || summary.text.trim() === "") {
-        return yield* fail("summary-failed");
-      }
-      const archiveThreadId = ThreadId.make(yield* Effect.sync(() => SecureRandom.uuidV4Unsafe()));
-      yield* dispatch({
-        type: "thread.fork",
-        commandId: CommandId.make(`command:rewind-summary:${requestId}:rewind`),
-        createdBy: input.createdBy,
-        creationSource: input.creationSource,
-        sourceThreadId: input.threadId,
-        targetThreadId: archiveThreadId,
-        sourcePoint: {
-          type: "rewind_to_reply",
-          runId: input.runId,
-          messageId: input.replyMessageId,
-        },
-        sideChat: true,
-        rewindSummary: { runId: run.id, messageId: summary.messageId, text: summary.text.trim() },
-      }).pipe(Effect.mapError((cause) => fail("rewind-failed", undefined, cause)));
-      return { archiveThreadId, summarizedTurns: turns };
-    }).pipe(
-      Effect.mapError((cause) =>
-        isRewindWithSummaryError(cause) ? cause : fail("summary-failed", undefined, cause),
-      ),
-    );
+    rewindingWithSummary.add(input.threadId);
     // The summary turn runs on its own, so finish it even when the caller stops waiting.
-    return yield* Fiber.join(yield* Effect.forkIn(finish, layerScope));
+    const work = writeSummaryAndRewind(input).pipe(
+      Effect.ensuring(Effect.sync(() => rewindingWithSummary.delete(input.threadId))),
+    );
+    return yield* Fiber.join(yield* Effect.forkIn(work, layerScope));
   });
+
+  const writeSummaryAndRewind = Effect.fn("ThreadManagementService.writeSummaryAndRewind")(
+    function* (input: Parameters<ThreadManagementServiceShape["rewindWithSummary"]>[0]) {
+      const fail = (
+        reason: OrchestrationV2RewindWithSummaryError["reason"],
+        detail?: string,
+        cause?: unknown,
+      ) =>
+        new OrchestrationV2RewindWithSummaryError({
+          threadId: input.threadId,
+          reason,
+          ...(detail === undefined ? {} : { detail }),
+          ...(cause === undefined ? {} : { cause }),
+        });
+      const records = yield* orchestrator
+        .getThreadRecords(
+          input.threadId,
+          [
+            "runs",
+            "attempts",
+            "providerThreads",
+            "providerTurns",
+            "providerSessions",
+            "runtimeRequests",
+            "contextTransfers",
+            "subagents",
+            "turnItems",
+          ],
+          { turnItemRunIds: [input.runId], turnItemTypes: ["assistant_message"] },
+        )
+        .pipe(Effect.mapError((cause) => fail("refused", "This thread could not be read.", cause)));
+      if (records.thread.deletedAt !== null)
+        return yield* fail("refused", "This thread was deleted.");
+      const refusal =
+        rewindToReplyThreadRefusal(records) ??
+        rewindToReplyPointRefusal(records, input.runId, input.replyMessageId);
+      if (refusal !== null) return yield* fail("refused", refusal);
+      const point = records.runs.find((run) => run.id === input.runId);
+      const reply = records.turnItems.findLast(
+        (item) => item.type === "assistant_message" && item.messageId === input.replyMessageId,
+      );
+      if (point === undefined || reply?.type !== "assistant_message") {
+        return yield* fail("refused", "Choose the final reply of a completed turn.");
+      }
+      const turns = records.runs.filter(
+        (run) =>
+          run.ordinal > point.ordinal && run.startedAt !== null && run.status !== "rolled_back",
+      ).length;
+      const requestId = yield* Effect.sync(() => SecureRandom.uuidV4Unsafe());
+      const messageId = MessageId.make(`message:rewind-summary:${requestId}`);
+      yield* dispatch({
+        type: "message.dispatch",
+        origin: CONTEXT_REWIND_SUMMARY_ORIGIN,
+        commandId: CommandId.make(`command:rewind-summary:${requestId}`),
+        threadId: input.threadId,
+        messageId,
+        text: contextRewindSummaryPrompt({ turns, replyExcerpt: reply.text }),
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: input.createdBy,
+        creationSource: "server",
+      }).pipe(
+        Effect.mapError((cause) =>
+          fail("refused", "The agent could not start writing the summary.", cause),
+        ),
+      );
+
+      const finish = Effect.gen(function* () {
+        const { runs } = yield* orchestrator.getThreadRecords(input.threadId, ["runs"]);
+        const requested = runs.find((run) => run.userMessageId === messageId);
+        if (requested === undefined) return yield* fail("summary-failed");
+        const { run } = yield* waitForThread({
+          projectId: records.thread.projectId,
+          threadId: input.threadId,
+          runId: requested.id,
+          timeoutMs: SETTLE_AFTER_RUN_WAIT_MS,
+        });
+        if (run?.status !== "completed") return yield* fail("summary-failed");
+        // A steer from another client would turn the summary into a reply to that message.
+        const { messages } = yield* orchestrator.getThreadRecords(input.threadId, ["messages"], {
+          messageRunIds: [run.id],
+          messageRoles: ["user"],
+        });
+        if (messages.some((message) => message.id !== messageId)) {
+          return yield* fail("rewind-failed");
+        }
+        const { turnItems } = yield* orchestrator.getThreadRecords(input.threadId, ["turnItems"], {
+          turnItemRunIds: [run.id],
+          turnItemTypes: ["assistant_message"],
+        });
+        const summary = turnItems.findLast(
+          (item) =>
+            item.type === "assistant_message" &&
+            item.phase !== "commentary" &&
+            item.phase !== "partial_answer",
+        );
+        if (summary?.type !== "assistant_message" || summary.text.trim() === "") {
+          return yield* fail("summary-failed");
+        }
+        const archiveThreadId = ThreadId.make(
+          yield* Effect.sync(() => SecureRandom.uuidV4Unsafe()),
+        );
+        yield* dispatch({
+          type: "thread.fork",
+          commandId: CommandId.make(`command:rewind-summary:${requestId}:rewind`),
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+          sourceThreadId: input.threadId,
+          targetThreadId: archiveThreadId,
+          sourcePoint: {
+            type: "rewind_to_reply",
+            runId: input.runId,
+            messageId: input.replyMessageId,
+          },
+          sideChat: true,
+          rewindSummary: { runId: run.id, messageId: summary.messageId, text: summary.text.trim() },
+        }).pipe(Effect.mapError((cause) => fail("rewind-failed", undefined, cause)));
+        return { archiveThreadId, summarizedTurns: turns };
+      }).pipe(
+        Effect.mapError((cause) =>
+          isRewindWithSummaryError(cause) ? cause : fail("summary-failed", undefined, cause),
+        ),
+      );
+      return yield* finish;
+    },
+  );
 
   const stopDelegatedTasks: ThreadManagementServiceShape["stopDelegatedTasks"] = Effect.fn(
     "ThreadManagementService.stopDelegatedTasks",
