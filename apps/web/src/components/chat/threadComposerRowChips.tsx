@@ -24,7 +24,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl } from "./ComposerControl";
 import { useComposerRowItemPlacement } from "./ComposerRow";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRow";
+import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRowItems";
 import {
   automationRelationLabel,
   type ComposerRowAutomation,
