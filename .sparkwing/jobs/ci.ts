@@ -12,6 +12,7 @@ import {
   decideChanges,
   git,
   logged,
+  packageTestNames,
 } from "../lib/checkout.ts";
 
 // Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
@@ -136,13 +137,21 @@ definePipeline({
       run(ctx, "preview-bundle", ["python3", "-B", ".github/scripts/stage-preview-bundle.test.py"]),
     );
     test.step("release-checks", (ctx) => run(ctx, "release-checks", ["node", "--test", ...NODE_SCRIPT_TESTS]));
+    // vp run stops every remaining task after the first failure, so each package runs as its own
+    // vp run and the step reports every failing package.
     test.step("packages", async (ctx) => {
-      const packages = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
-      const filters =
-        packages.length > 0
-          ? packages.flatMap((name) => ["--filter", name])
-          : ["--filter", "!t3", "--filter", "!@t3tools/monorepo", "--filter", "!@t3tools/web"];
-      await run(ctx, "packages", ["vp", "run", "--parallel", "--concurrency-limit", "4", ...filters, "test"]);
+      const chosen = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
+      const queue = chosen.length > 0 ? chosen : packageTestNames(checkout(ctx).root);
+      const failed: string[] = [];
+      const worker = async () => {
+        for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+          await run(ctx, `packages-${name.replace(/[^\w.-]+/g, "-")}`, ["vp", "run", "--filter", name, "test"]).catch(
+            () => failed.push(name),
+          );
+        }
+      };
+      await Promise.all(Array.from({ length: 4 }, worker));
+      if (failed.length > 0) throw new Error(`Package tests failed: ${failed.sort().join(", ")}`);
     });
 
     p.job("test-web", (ctx) => run(ctx, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test"]))
@@ -151,14 +160,9 @@ definePipeline({
       .needs(changes)
       .skipIf(unless("test_web"));
 
-    p.job("test-server", (ctx) =>
-      run(ctx, "test-server", [
-        "vp", "run", "test:cached", "--",
-        "--concurrency", "4",
-        "--uncached", "apps/server/integration/transferBudgetV2.integration.test.ts",
-        "apps/server",
-      ]),
-    )
+    // One vitest run reports every failing file; test:cached runs a vp task per file, and vp run
+    // stops the rest after the first failure.
+    p.job("test-server", (ctx) => run(ctx, "test-server", ["vp", "run", "--filter", "t3", "test", "--maxWorkers=4"]))
       .inline()
       .cores(6)
       .needs(changes)

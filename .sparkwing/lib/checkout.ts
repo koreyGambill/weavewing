@@ -228,14 +228,27 @@ export interface Changes {
   };
 }
 
-/** CI's job decisions from the checkout's own .github/scripts/ci-changes.cjs. */
-export function decideChanges(root: string, files: readonly string[] | null, full: boolean): Changes {
+function ciChanges(root: string) {
   const require = NodeModule.createRequire(NodePath.join(root, "package.json"));
-  const ciChanges = require("./.github/scripts/ci-changes.cjs") as {
+  return require("./.github/scripts/ci-changes.cjs") as {
     readWorkspace(): WorkspacePackage[];
     decide(files: readonly string[] | null, packages: WorkspacePackage[], full: boolean): Changes;
   };
-  return ciChanges.decide(files, ciChanges.readWorkspace(), full);
+}
+
+/** CI's job decisions from the checkout's own .github/scripts/ci-changes.cjs. */
+export function decideChanges(root: string, files: readonly string[] | null, full: boolean): Changes {
+  const changes = ciChanges(root);
+  return changes.decide(files, changes.readWorkspace(), full);
+}
+
+/** Packages with a test script that CI's package test job covers; server and web have their own jobs. */
+export function packageTestNames(root: string): string[] {
+  const own = new Set(["t3", "@t3tools/web", "@t3tools/monorepo"]);
+  return ciChanges(root)
+    .readWorkspace()
+    .filter((pkg) => pkg.hasTest && !own.has(pkg.name))
+    .map((pkg) => pkg.name);
 }
 
 export const CODE = /\.(?:[cm]?[jt]sx?|astro)$/;
