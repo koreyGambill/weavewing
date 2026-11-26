@@ -349,3 +349,23 @@ it.each([
     await expect.element(dialog.getByText("1 switched on, about +12,900 tokens")).toBeVisible();
   },
 );
+
+it("keeps Reload session in view while the lists scroll in a short window", async () => {
+  await page.viewport(640, 420);
+  setup();
+  await using screen = await renderControl();
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  const dialog = dialogOf();
+  await expect.element(page.getByRole("list", { name: "claude.ai connectors" })).toBeVisible();
+  const button = dialog.getByRole("button", { name: "Reload session" }).element();
+  const tools = page.getByRole("list", { name: "Built-in tools" }).element();
+  const scroller = tools.parentElement!;
+  expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+  const inView = () => {
+    const box = button.getBoundingClientRect();
+    return box.top >= 0 && box.bottom <= window.innerHeight;
+  };
+  expect(inView()).toBe(true);
+  scroller.scrollTop = scroller.scrollHeight;
+  expect(inView()).toBe(true);
+});

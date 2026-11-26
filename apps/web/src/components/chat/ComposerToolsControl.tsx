@@ -235,40 +235,44 @@ function ToolsPopoverContent({
     onApplied();
   };
   return (
-    <div className="flex flex-col">
-      <header className="border-b px-3 pt-2.5 pb-2">
+    // The popup caps its height at the space beside the anchor; the lists scroll inside that
+    // cap so the footer and its Reload session button stay in view.
+    <div className="flex max-h-[calc(var(--available-height)-2px)] flex-col">
+      <header className="shrink-0 border-b px-3 pt-2.5 pb-2">
         <h2 className="font-semibold text-sm">Tools for this thread</h2>
         <p className="text-muted-foreground text-xs">
           Switch a left-out tool on, or a server off, for this thread only. Token figures are
           estimates of the context each adds.
         </p>
       </header>
-      {rows.length === 0 ? (
-        <p className="px-3 py-2 text-muted-foreground text-xs">
-          No built-in tools are left out for this provider.
-        </p>
-      ) : (
-        <ul className="divide-y" aria-label="Built-in tools">
-          {rows.map((row) => (
-            <ToolSwitchRow
-              key={row.key}
-              label={row.label}
-              description={row.description}
-              estimatedTokens={row.estimatedTokens}
-              on={isRowOn(row, staged)}
-              onChange={(on) => onStage(withRowSwitched(staged, row.key, on))}
-            />
-          ))}
-        </ul>
-      )}
-      <McpServersSection
-        canList={canList}
-        inventory={inventory}
-        onRetry={retryInventory}
-        provider={provider}
-        staged={staged}
-        onStage={onStage}
-      />
+      <div className="min-h-0 overflow-y-auto overscroll-contain">
+        {rows.length === 0 ? (
+          <p className="px-3 py-2 text-muted-foreground text-xs">
+            No built-in tools are left out for this provider.
+          </p>
+        ) : (
+          <ul className="divide-y" aria-label="Built-in tools">
+            {rows.map((row) => (
+              <ToolSwitchRow
+                key={row.key}
+                label={row.label}
+                description={row.description}
+                estimatedTokens={row.estimatedTokens}
+                on={isRowOn(row, staged)}
+                onChange={(on) => onStage(withRowSwitched(staged, row.key, on))}
+              />
+            ))}
+          </ul>
+        )}
+        <McpServersSection
+          canList={canList}
+          inventory={inventory}
+          onRetry={retryInventory}
+          provider={provider}
+          staged={staged}
+          onStage={onStage}
+        />
+      </div>
       <ToolsFooter
         state={footer}
         permitted={permitted}
@@ -491,7 +495,7 @@ function ToolsFooter({
 }) {
   const blocked = state.kind === "running" || state.kind === "background";
   return (
-    <footer className="flex items-center gap-3 border-t bg-card px-3 py-2.5">
+    <footer className="flex shrink-0 items-center gap-3 border-t bg-card px-3 py-2.5">
       <div className="min-w-0 flex-1 text-xs" aria-live="polite">
         {state.kind === "running" ? (
           <p className="text-warning-foreground">
