@@ -1137,7 +1137,7 @@ it("returns the branch from the thread menu when the row widens again", async ()
   await using _row = await renderRowAtWidth("row-sweep", "/w/render", 1280);
   await vi.waitFor(() => expect(branchInMenu()).toBe(false));
   // Two widths from the review's sweep: narrow until the branch leaves, then widen back.
-  await page.viewport(390, 860);
+  await page.viewport(320, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(true));
   await page.viewport(1280, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(false), { timeout: 3000 });
