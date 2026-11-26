@@ -549,16 +549,26 @@ export const layer: Layer.Layer<
           handoff.delivery === undefined &&
           isPendingForRun(handoff, true),
       );
-      // A rewind's summary rides with the next prompt on the conversation that rewind continued.
-      const rewindSummary = projection.contextHandoffs.find(
-        (handoff) =>
-          handoff.strategy === "checkpoint_summary" &&
-          handoff.status === "ready" &&
-          handoff.delivery === undefined &&
-          !archivedRunIds?.has(handoff.targetRunId) &&
-          projection.thread.contextSplit?.continuationProviderThreadId ===
-            handoff.toProviderThreadId,
-      );
+      // A rewind's summary waits for the user's own next message; scheduled, merge-back and
+      // fresh-context turns leave it pending. A provider switch carries it in its history instead.
+      const rewindSummary =
+        message?.createdBy === "user" &&
+        (message.origin === undefined || message.origin.kind === "user") &&
+        run.freshContext !== true
+          ? projection.contextHandoffs.find(
+              (handoff) =>
+                handoff.strategy === "checkpoint_summary" &&
+                handoff.status === "ready" &&
+                handoff.delivery === undefined &&
+                !archivedRunIds?.has(handoff.targetRunId),
+            )
+          : undefined;
+      const rewindContinuationNativeId =
+        rewindSummary === undefined
+          ? undefined
+          : projection.providerThreads.find(
+              (thread) => thread.id === rewindSummary.toProviderThreadId,
+            )?.nativeThreadRef?.nativeId;
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "fork" &&
@@ -2060,8 +2070,17 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
+          // Only into the conversation the rewind continued: its provider thread, or its native
+          // conversation resumed under another account.
+          const runningNativeId = runningProviderThread.nativeThreadRef?.nativeId;
           const rewindSummaryContext =
-            rewindSummary === undefined || compact || goalCommand ? "" : rewindSummary.summaryText;
+            rewindSummary === undefined ||
+            compact ||
+            goalCommand ||
+            (runningProviderThread.id !== rewindSummary.toProviderThreadId &&
+              (runningNativeId == null || runningNativeId !== rewindContinuationNativeId))
+              ? ""
+              : rewindSummary.summaryText;
           const refresh = explicitRefresh ?? automaticRefresh;
           const newestContext =
             refresh === undefined || compact || goalCommand

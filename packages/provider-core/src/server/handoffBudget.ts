@@ -168,6 +168,11 @@ export function historicalMessage(
     case "proposed_plan":
       text = item.markdown;
       break;
+    case "handoff":
+      // The summary a rewind kept stands in for the turns it removed; other handoffs copy history.
+      if (item.strategy !== "checkpoint_summary" || item.summary === undefined) return null;
+      text = item.title === null ? item.summary : `${item.title}\n\n${item.summary}`;
+      break;
     default:
       return null;
   }
