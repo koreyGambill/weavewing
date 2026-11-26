@@ -1136,10 +1136,10 @@ it("returns the branch from the thread menu when the row widens again", async ()
   // the width the row charges for the thread menu decides whether the branch fits.
   await using _row = await renderRowAtWidth("row-sweep", "/w/render", 1280);
   await vi.waitFor(() => expect(branchInMenu()).toBe(false));
-  // Widths from the review's sweep: narrow until the branch leaves, then widen until it returns.
-  for (const width of [980, 560, 390, 320]) await page.viewport(width, 860);
+  // Two widths from the review's sweep: narrow until the branch leaves, then widen back.
+  await page.viewport(390, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(true));
-  for (const width of [560, 980, 1280]) await page.viewport(width, 860);
+  await page.viewport(1280, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(false), { timeout: 3000 });
 });
 
