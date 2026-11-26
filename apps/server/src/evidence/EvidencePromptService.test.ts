@@ -415,6 +415,7 @@ it("matches landing commands on what the shell runs", () => {
     "gh pr view 12",
     "xwing env land --dry-run",
     "echo 'gh pr merge 12'",
+    "echo 'done && git merge feature'",
     "git commit -m 'git merge feature'",
   ];
   for (const input of lands) assert.isTrue(Service.isLandingCommand(input, target), input);
