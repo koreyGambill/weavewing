@@ -168,7 +168,16 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => ({
   executeAtomQuery: (...args: unknown[]) => audio.query(...args),
 }));
 vi.mock("../state/projects", () => ({ projectEnvironment: {} }));
-vi.mock("../state/server", () => ({ serverEnvironment: {} }));
+vi.mock("../state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  // The playback cases use remote URLs, so their server allows remote media to load.
+  const config = { settings: { autoLoadRemoteMedia: true } };
+  return {
+    serverEnvironment: {
+      configValueAtom: Atom.family((_environmentId: string) => Atom.make(config)),
+    },
+  };
+});
 vi.mock("../state/filesystem", () => ({
   filesystemEnvironment: { getMetadata: (input: unknown) => input },
 }));
@@ -179,7 +188,10 @@ vi.mock("../state/session", () => ({
   readEnvironmentScope: () => true,
   usePreparedConnection: () => ({ _tag: "Some", value: { httpBaseUrl: "https://example.com" } }),
 }));
-vi.mock("../state/atom-registry", () => ({ appAtomRegistry: {} }));
+vi.mock("../state/atom-registry", async () => {
+  const { AtomRegistry } = await import("effect/reactivity");
+  return { appAtomRegistry: AtomRegistry.make() };
+});
 vi.mock("../state/threads", () => ({ environmentThreadShells: {}, threadEnvironment: {} }));
 vi.mock("../state/entities", () => ({
   useLiveThreadLinkLabels: (text: string) => text,
