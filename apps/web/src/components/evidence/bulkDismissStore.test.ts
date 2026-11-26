@@ -8,8 +8,10 @@ const second = "env-2" as EnvironmentId;
 
 describe("bulk dismissal drafts", () => {
   it("keeps each environment's draft to itself and never opens it in another", () => {
-    const store = useBulkDismissStore.getState();
-    store.start(first);
+    // The second environment has a draft of its own from earlier.
+    useBulkDismissStore.getState().start(second);
+    useBulkDismissStore.getState().close();
+    useBulkDismissStore.getState().start(first);
     useBulkDismissStore.getState().edit(first, { day: "2026-11-01", reason: "old backlog" });
     useBulkDismissStore.getState().close();
     // Closed in the first environment, then the user switches: nothing opens in the second.
@@ -24,8 +26,9 @@ describe("bulk dismissal drafts", () => {
       day: "2026-11-01",
       reason: "old backlog",
     });
-    // Editing a draft that was never opened in the second environment changes nothing.
-    useBulkDismissStore.getState().edit(second, { reason: "stray" });
-    expect(useBulkDismissStore.getState().drafts[second]).toBeUndefined();
+    // An environment never opened has no draft to edit.
+    const third = "env-3" as EnvironmentId;
+    useBulkDismissStore.getState().edit(third, { reason: "stray" });
+    expect(useBulkDismissStore.getState().drafts[third]).toBeUndefined();
   });
 });

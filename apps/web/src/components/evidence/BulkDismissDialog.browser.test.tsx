@@ -124,6 +124,8 @@ it("never shows one environment's count in another, with the dialog open", async
   // The user switches environment while the dialog is open there.
   const other = "env-2" as EnvironmentId;
   useBulkDismissStore.getState().start(other);
+  // The same day there, so only the environment tells the two counts apart.
+  useBulkDismissStore.getState().edit(other, { day: "2026-11-25" });
   await screen.rerender(<BulkDismissDialog environmentId={other} onClose={() => undefined} />);
   await expect.element(screen.getByText("Counting…")).toBeVisible();
   await expect.element(screen.getByText("4 changes will be dismissed.")).not.toBeInTheDocument();
