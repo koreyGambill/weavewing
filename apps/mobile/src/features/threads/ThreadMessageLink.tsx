@@ -11,8 +11,6 @@ import { useEnvironmentQuery } from "../../state/query";
 import { threadCardReachable } from "./messageCards";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 
-const LINK_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
-
 /** The live title of a thread a card names, and whether this phone can open it. */
 export function useThreadCardTarget(ref: ScopedThreadRef | null, fallbackTitle?: string) {
   const shell = useQuietThreadShell(ref);
@@ -79,9 +77,8 @@ export function ThreadMessageLink(props: {
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`Open ${props.title}`}
-      // The card rows are 44 pt tall, so this reaches their full height.
-      hitSlop={LINK_HIT_SLOP}
-      className="min-w-0 shrink flex-row items-center gap-1"
+      // Its own 44 pt box, so the hit area matches the layout and never reaches a neighbour.
+      className="min-h-11 min-w-11 shrink flex-row items-center gap-1 self-stretch px-1"
       onPress={(event) => {
         event.stopPropagation();
         openThread({
