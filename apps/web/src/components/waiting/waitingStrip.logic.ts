@@ -40,21 +40,31 @@ export function waitingStripSummary(
   counts: WaitingCounts | undefined,
 ): WaitingStripSummary | null {
   if (counts === undefined) return null;
+  const live = (rows ?? []).filter((row) => isWaitingItemState(row.state));
+  // Counts stored before these numbers were kept lack them until the startup rebuild; the rows
+  // then stand in, as they did before the numbers existed.
+  const discussing = counts.discussing ?? live.filter((row) => row.state === "discussing").length;
   const total = waitingTotal(counts);
-  if (total === 0 && counts.discussing === 0) return null;
+  if (total === 0 && discussing === 0) return null;
   return {
     counts: WAITING_KINDS.flatMap((kind) =>
       counts[kind] > 0 ? [{ kind, count: counts[kind] }] : [],
     ),
-    discussing: counts.discussing,
+    discussing,
     total,
-    unlisted: Math.max(
-      0,
-      counts.live - (rows ?? []).filter((row) => isWaitingItemState(row.state)).length,
-    ),
-    hasQuestions: counts.liveQuestions > 0,
+    unlisted: counts.live === undefined ? 0 : Math.max(0, counts.live - live.length),
+    hasQuestions: hasLiveQuestions(rows, counts),
   };
 }
+
+/** Any question still waits on someone, from the exact count or, before it exists, the rows. */
+export const hasLiveQuestions = (
+  rows: ReadonlyArray<WaitingItemSummary> | undefined,
+  counts: WaitingCounts | undefined,
+): boolean =>
+  counts?.liveQuestions === undefined
+    ? (rows ?? []).some((row) => row.kind === "question" && isWaitingItemState(row.state))
+    : counts.liveQuestions > 0;
 
 /** The thread's still-waiting items by kind, in the strip's order; empty kinds are left out. */
 export function groupWaitingItems(

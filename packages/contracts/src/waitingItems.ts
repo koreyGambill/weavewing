@@ -1,4 +1,3 @@
-import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -52,13 +51,14 @@ export const WaitingCounts = Schema.Struct({
   question: NonNegativeInt,
   qa: NonNegativeInt,
   task: NonNegativeInt,
-  // A thread stored before these three were kept reads zero until the next rebuild, at startup.
+  // Absent on a thread stored before they were kept, until its startup rebuild; a client then
+  // derives them from the rows it has, so a missing number never reads as zero.
   /** Items the user is discussing, which wait on the agent. */
-  discussing: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  discussing: Schema.optional(NonNegativeInt),
   /** Questions still waiting on someone: open, sent, deferred or discussing. */
-  liveQuestions: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  liveQuestions: Schema.optional(NonNegativeInt),
   /** Every item still waiting on someone, of any kind; rows past the cap are this minus those listed. */
-  live: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  live: Schema.optional(NonNegativeInt),
 });
 export type WaitingCounts = typeof WaitingCounts.Type;
 

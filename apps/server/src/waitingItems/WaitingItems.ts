@@ -1,5 +1,6 @@
 import { CommandId, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
@@ -60,24 +61,27 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const mirroredThreads = orchestrator
-    .getShellSnapshot()
-    .pipe(
-      Effect.map((snapshot) =>
-        [...snapshot.threads, ...snapshot.archivedThreads]
-          .filter((thread) => (thread.waiting?.length ?? 0) > 0)
-          .map((thread) => thread.id),
-      ),
-    );
-
   const reconcile = Effect.gen(function* () {
-    const [stored, qa, mirrored] = yield* Effect.all(
-      [threadWorkspace.waitingThreads, evidence.waitingQaThreads(), mirroredThreads],
+    const [stored, qa, snapshot] = yield* Effect.all(
+      [
+        threadWorkspace.waitingThreads,
+        evidence.waitingQaThreads(),
+        orchestrator.getShellSnapshot(),
+      ],
       { concurrency: 3 },
     );
-    const threadIds = new Set<ThreadId>([...stored, ...qa, ...mirrored]);
+    const shells = [...snapshot.threads, ...snapshot.archivedThreads];
+    const mirrored = shells.filter((thread) => (thread.waiting?.length ?? 0) > 0);
+    const activity = new Map(
+      shells.map((thread) => [thread.id, DateTime.toEpochMillis(thread.updatedAt)] as const),
+    );
+    // The threads people are most likely looking at come first; each rebuild waits on file and
+    // database reads, so requests run between them.
+    const threadIds = [...new Set<ThreadId>([...stored, ...qa, ...mirrored.map((t) => t.id)])].sort(
+      (a, b) => (activity.get(b) ?? -1) - (activity.get(a) ?? -1),
+    );
     for (const threadId of threadIds) yield* rebuild(threadId);
-    return threadIds.size;
+    return threadIds.length;
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("Could not list threads to mirror waiting items for.", { cause }).pipe(

@@ -194,6 +194,7 @@ import {
   useCommandPaletteMount,
   useCommandPaletteStore,
 } from "../commandPaletteStore";
+import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
 import {
   PULL_REQUESTS_PANEL_REF,
@@ -1878,7 +1879,7 @@ function OpenCommandPaletteDialog(props: {
 
   if (
     activeThread !== null &&
-    (activeThread.waitingCounts?.liveQuestions ?? 0) > 0 &&
+    hasLiveQuestions(activeThread.waiting, activeThread.waitingCounts) &&
     waitingCardsEnvironmentIds.includes(activeThread.environmentId)
   ) {
     actionItems.push({

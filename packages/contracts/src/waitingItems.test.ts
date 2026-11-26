@@ -1,7 +1,9 @@
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   WAITING_ITEMS_LIMIT,
+  WaitingCounts,
   waitingDisplayRows,
   waitingMirror,
   type WaitingItemState,
@@ -66,6 +68,18 @@ describe("waitingMirror", () => {
       discussing: 1,
       liveQuestions: 3,
       live: WAITING_ITEMS_LIMIT + 8,
+    });
+  });
+});
+
+const decodeCounts = Schema.decodeUnknownSync(WaitingCounts);
+
+describe("WaitingCounts", () => {
+  it("reads counts stored before the exact numbers were kept as missing, not zero", () => {
+    expect(decodeCounts({ question: 1, qa: 0, task: 2 })).toEqual({
+      question: 1,
+      qa: 0,
+      task: 2,
     });
   });
 });

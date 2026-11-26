@@ -287,3 +287,25 @@ it.effect("rebuilds a thread whenever its questions, tasks or QA change", () =>
     expect(h.threads.get(threadId)?.waiting?.map((item) => item.ref)).toEqual(["Q1", "QA1", "T1"]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
+
+it.effect("rebuilds the most recently active threads first at startup", () =>
+  Effect.gen(function* () {
+    const ids = ["thread-old", "thread-new", "thread-mid"].map((id) => ThreadId.make(id));
+    const h = yield* harness(ids);
+    for (const [index, threadId] of ids.entries()) {
+      yield* h.workspace.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
+      h.threads.set(threadId, {
+        ...h.threads.get(threadId)!,
+        updatedAt: DateTime.makeUnsafe(
+          Date.parse("2026-11-20T00:00:00.000Z") + [0, 2, 1][index]! * 60_000,
+        ),
+      });
+    }
+    expect(yield* h.service.reconcile).toBe(3);
+    expect(h.syncs).toEqual([
+      ThreadId.make("thread-new"),
+      ThreadId.make("thread-mid"),
+      ThreadId.make("thread-old"),
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);

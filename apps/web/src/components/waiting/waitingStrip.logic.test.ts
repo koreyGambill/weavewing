@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   groupWaitingItems,
+  hasLiveQuestions,
   qaKeyParts,
   waitingChipLabel,
   waitingStripSummary,
@@ -70,6 +71,32 @@ describe("waitingStripSummary", () => {
       });
     },
   );
+});
+
+describe("counts stored before the exact numbers were kept", () => {
+  it("derives discussions, questions and the overflow from the rows until the rebuild", () => {
+    const rows = [
+      item("question", "Q1", "deferred"),
+      item("qa", "QA1", "discussing"),
+      ...Array.from({ length: 28 }, (_, index) => item("task", `T${index}`)),
+    ];
+    // As a thread stored before this change decodes: only the per-kind open counts.
+    const stored = { question: 0, qa: 0, task: 28 };
+    expect(waitingStripSummary(rows, stored)).toEqual({
+      counts: [{ kind: "task", count: 28 }],
+      discussing: 1,
+      total: 28,
+      unlisted: 0,
+      hasQuestions: true,
+    });
+    expect(hasLiveQuestions(rows, stored)).toBe(true);
+    // A discussion alone keeps the strip, as it did before the numbers existed.
+    expect(
+      waitingStripSummary([item("qa", "QA1", "discussing")], { question: 0, qa: 0, task: 0 }),
+    ).toMatchObject({ discussing: 1, total: 0 });
+    // Present numbers win over the rows, even when they are zero.
+    expect(hasLiveQuestions(rows, counts({ task: 28, live: 30 }))).toBe(false);
+  });
 });
 
 describe("groupWaitingItems", () => {
