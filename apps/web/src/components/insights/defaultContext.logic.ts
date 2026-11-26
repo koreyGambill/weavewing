@@ -126,8 +126,9 @@ export interface UsedContextSource {
 
 /**
  * Splits used context into itemized estimates and inferred remainders that add up to the provider's
- * count. A first-turn prompt splits off the conversation only while it lies between the itemized
- * total and current use. Estimates above the count cannot reconcile and are reported as such.
+ * count. The prompt of the conversation's first model request splits the starting context from the
+ * conversation only while it lies between the itemized total and current use. Estimates above the
+ * count cannot reconcile and are reported as such.
  */
 export function usedContextSources(preview: DefaultContextPreview, usedTokens: number) {
   if (preview.support === "unsupported") return null;
@@ -175,13 +176,13 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
     sources.push(
       {
         key: "harness",
-        label: "First turn: harness, tools and what it read",
+        label: "Starting context: harness and tools",
         tokens: baseline - known,
         items: [],
       },
       {
         key: "conversation",
-        label: "Conversation since the first turn",
+        label: "Conversation",
         tokens: used - baseline,
         items: [],
       },
@@ -191,6 +192,6 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
     reconciles: true as const,
     sources: sources.toSorted((a, b) => b.tokens - a.tokens),
     knownTokens: known,
-    firstTurnTokens: baseline,
+    startingTokens: baseline,
   };
 }

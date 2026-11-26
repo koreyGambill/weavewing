@@ -9,6 +9,9 @@ import {
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
   type ProviderInstanceId,
+  type ProviderTurnId,
+  type RunId,
+  type ThreadId,
   ThreadInsightsError,
 } from "@t3tools/contracts";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
@@ -23,6 +26,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
+import * as Stream from "effect/Stream";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import * as ServerConfig from "../config.ts";
@@ -30,6 +35,7 @@ import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { SCRATCH_FOLDER_CONTEXT } from "../orchestration-v2/ProviderTurnStartService.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { ProjectService } from "../project/ProjectService.ts";
@@ -100,12 +106,21 @@ const withText = (part: PreparedContextPart, text: string): PreparedContextPart 
 };
 const byteLength = (text: string) => Buffer.byteLength(text, "utf8");
 
+/** Drivers whose first usage report in a turn measures that turn's first model request. */
+const PER_REQUEST_USAGE_DRIVERS: ReadonlySet<string> = new Set([
+  "claudeAgent",
+  "codex",
+  "pi",
+  "muse",
+]);
+
 /**
- * The prompt the provider reported for the first turn of a conversation that began in this thread.
- * Null when that turn reported no input count, or when the conversation was forked, handed off or
- * imported, since its first local prompt then also holds earlier history.
+ * The first provider turn of a conversation that began in this thread, whose first model request
+ * shows what loaded before the conversation. Null when the conversation was forked, handed off or
+ * imported, since its first request then also holds earlier history, and when the driver reports
+ * usage only at the end of a turn, since that report already holds whatever the turn read.
  */
-export function firstTurnPrompt(input: {
+export function firstConversationTurn(input: {
   readonly thread: Pick<OrchestrationV2AppThread, "historyOrigin">;
   readonly firstRunRequestedAt: DateTime.Utc | undefined;
   readonly providerThread:
@@ -114,11 +129,13 @@ export function firstTurnPrompt(input: {
         "providerInstanceId" | "forkedFrom" | "handoffIds" | "createdAt"
       >
     | undefined;
-  readonly turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "ordinal" | "tokenUsage">>;
+  readonly turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "id" | "ordinal">>;
   readonly instanceId: ProviderInstanceId;
-}): DefaultContextPreview["firstTurn"] {
+  readonly driver: string;
+}): ProviderTurnId | null {
   const { providerThread } = input;
   if (
+    !PER_REQUEST_USAGE_DRIVERS.has(input.driver) ||
     providerThread === undefined ||
     providerThread.providerInstanceId !== input.instanceId ||
     providerThread.forkedFrom !== null ||
@@ -134,10 +151,7 @@ export function firstTurnPrompt(input: {
       earliest === undefined || turn.ordinal < earliest.ordinal ? turn : earliest,
     undefined,
   );
-  const usage = first?.tokenUsage;
-  return usage?.inputTokens === undefined
-    ? null
-    : { promptTokens: usage.inputTokens, reportedAt: usage.updatedAt };
+  return first?.id ?? null;
 }
 const failure = (message: string) => (cause: unknown) =>
   new ThreadInsightsError({ message, cause });
@@ -148,6 +162,7 @@ const schemaText = (schema: unknown) => JSON.stringify(schema ?? {}, null, 2);
 
 const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const eventStore = yield* OrchestrationEventStore;
   const footprints = yield* InstructionFootprints;
   const appContext = yield* McpAppModelContext.McpAppModelContext;
   const folders = yield* Effect.serviceOption(ManagedProjectFolders);
@@ -163,6 +178,51 @@ const make = Effect.gen(function* () {
 
   const serverConfig = yield* ServerConfig.ServerConfig;
   const isServerInternal = yield* makeIsServerInternalPath;
+
+  // A provider turn's projection keeps only its latest usage, so the first request's is read from
+  // the event log. Pruning keeps each run's running event and drops older events below a mark, so a
+  // first run above the mark proves every later report is still stored.
+  const firstRequestPrompt = Effect.fn("DefaultContext.firstRequestPrompt")(
+    function* (threadId: ThreadId, firstRunId: RunId, providerTurnId: ProviderTurnId) {
+      const runStarted = yield* Stream.runHead(
+        eventStore
+          .readAgentEvents({ threadId, eventType: "run.updated" })
+          .pipe(
+            Stream.filter(
+              ({ event }) =>
+                event.type === "run.updated" &&
+                event.payload.id === firstRunId &&
+                event.payload.status === "running",
+            ),
+          ),
+      );
+      if (Option.isNone(runStarted)) return null;
+      if (runStarted.value.sequence <= (yield* eventStore.prunedThroughSequence)) return null;
+      const report = yield* Stream.runHead(
+        eventStore
+          .readAgentEvents({
+            threadId,
+            eventType: "provider-turn.updated",
+            afterSequence: runStarted.value.sequence,
+          })
+          .pipe(
+            Stream.map(({ event }) =>
+              event.type === "provider-turn.updated" &&
+              event.payload.id === providerTurnId &&
+              event.payload.tokenUsage?.inputTokens !== undefined
+                ? {
+                    promptTokens: event.payload.tokenUsage.inputTokens,
+                    reportedAt: event.payload.tokenUsage.updatedAt,
+                  }
+                : undefined,
+            ),
+            Stream.filter(Predicate.isNotUndefined),
+          ),
+      );
+      return Option.getOrNull(report);
+    },
+    Effect.orElseSucceed(() => null),
+  );
 
   const resolve = Effect.fn("DefaultContext.resolve")(function* (input: DefaultContextGetInput) {
     const draft = input.draft;
@@ -446,10 +506,10 @@ const make = Effect.gen(function* () {
             })
             .pipe(Effect.orElseSucceed(() => undefined));
     const firstRun = records?.runs.toSorted((a, b) => a.ordinal - b.ordinal).at(0);
-    const firstTurn =
+    const firstTurnId =
       providerRecords === undefined || thread === undefined
         ? null
-        : firstTurnPrompt({
+        : firstConversationTurn({
             thread,
             firstRunRequestedAt: firstRun?.requestedAt,
             providerThread: providerRecords.providerThreads.find(
@@ -457,7 +517,12 @@ const make = Effect.gen(function* () {
             ),
             turns: providerRecords.providerTurns,
             instanceId,
+            driver,
           });
+    const firstTurn =
+      firstTurnId === null || firstRun === undefined
+        ? null
+        : yield* firstRequestPrompt(input.threadId, firstRun.id, firstTurnId);
     return {
       preview: {
         threadId: input.threadId,

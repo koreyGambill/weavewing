@@ -160,7 +160,7 @@ describe("usedContextSources", () => {
   const total = (result: ReturnType<typeof usedContextSources>) =>
     result?.reconciles ? result.sources.reduce((sum, source) => sum + source.tokens, 0) : null;
 
-  it("groups instruction files by the server's repository flag and splits off the first turn", () => {
+  it("groups instruction files by the server's repository flag and splits off the starting context", () => {
     const result = usedContextSources(withFirstTurn(70_000), 163_000);
     expect(rows(result)).toEqual([
       ["conversation", 93_000],
@@ -179,19 +179,19 @@ describe("usedContextSources", () => {
     expect(rows(result)).toContainEqual(["files", 18_200]);
   });
 
-  it("folds the conversation into one remainder without a first-turn report", () => {
+  it("folds the conversation into one remainder without a first-request report", () => {
     const result = usedContextSources(withFirstTurn(null), 70_000);
     expect(rows(result)?.at(0)).toEqual(["rest", 70_000 - known]);
     expect(total(result)).toBe(70_000);
   });
 
-  it("ignores a first-turn report larger than current use, as after compaction", () => {
+  it("ignores a first-request report larger than current use, as after compaction", () => {
     const result = usedContextSources(withFirstTurn(100_000), 30_000);
     expect(rows(result)).toContainEqual(["rest", 30_000 - known]);
     expect(total(result)).toBe(30_000);
   });
 
-  it("ignores a first-turn report smaller than the itemized estimates", () => {
+  it("ignores a first-request report smaller than the itemized estimates", () => {
     const result = usedContextSources(withFirstTurn(10_000), 30_000);
     expect(rows(result)?.some(([key]) => key === "harness")).toBe(false);
     expect(total(result)).toBe(30_000);

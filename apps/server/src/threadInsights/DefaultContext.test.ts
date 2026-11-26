@@ -18,6 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
@@ -27,13 +28,18 @@ import {
   makeClaudeQueryOptions,
 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { SkillSources } from "../agentContext/SkillSources.ts";
-import { DefaultContext, firstTurnPrompt, layer as defaultContextLayer } from "./DefaultContext.ts";
+import {
+  DefaultContext,
+  firstConversationTurn,
+  layer as defaultContextLayer,
+} from "./DefaultContext.ts";
 import { t3ContextParts } from "./defaultContextParts.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
 import {
@@ -499,6 +505,13 @@ const serviceLayer = (input: {
   readonly resolutions?: { count: number };
   readonly providerThreadId?: string;
   readonly recordFilters?: Array<unknown>;
+  readonly providerThreads?: ReadonlyArray<unknown>;
+  readonly providerTurns?: ReadonlyArray<unknown>;
+  /** Stored agent events as `[sequence, event]`, in commit order. */
+  readonly events?: ReadonlyArray<
+    readonly [number, { readonly type: string; readonly payload: unknown }]
+  >;
+  readonly prunedThrough?: number;
 }) =>
   defaultContextLayer.pipe(
     Layer.provide(
@@ -507,8 +520,8 @@ const serviceLayer = (input: {
           getThreadRecords: (_threadId, _fields, filter) => {
             input.recordFilters?.push(filter);
             return Effect.succeed({
-              providerThreads: [],
-              providerTurns: [],
+              providerThreads: input.providerThreads ?? [],
+              providerTurns: input.providerTurns ?? [],
               thread: {
                 activeProviderThreadId: input.providerThreadId ?? null,
                 deletedAt: null,
@@ -518,9 +531,22 @@ const serviceLayer = (input: {
                 worktreePath: input.home,
                 interactionMode: "default",
               },
-              runs: [{ id: runId, ordinal: 1 }],
+              runs: [{ id: runId, ordinal: 1, requestedAt: DateTime.makeUnsafe(1_000) }],
             } as never);
           },
+        }),
+        Layer.mock(OrchestrationEventStore)({
+          prunedThroughSequence: Effect.succeed(input.prunedThrough ?? 0),
+          readAgentEvents: (filter) =>
+            Stream.fromIterable(
+              (input.events ?? [])
+                .filter(
+                  ([sequence, event]) =>
+                    sequence > (filter?.afterSequence ?? 0) &&
+                    (filter?.eventType === undefined || event.type === filter.eventType),
+                )
+                .map(([sequence, event]) => ({ sequence, commandId: null, event }) as never),
+            ),
         }),
         Layer.mock(InstructionFootprints)({
           list: () => Effect.succeed(input.footprint === undefined ? [] : [input.footprint]),
@@ -650,7 +676,7 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it("takes the baseline only from the first turn of a conversation that began here", () => {
+it("picks the first turn of a conversation that began here, on a per-request driver", () => {
   const instance = ProviderInstanceId.make("claude");
   const runAt = DateTime.makeUnsafe(1_000);
   const fresh = {
@@ -659,49 +685,100 @@ it("takes the baseline only from the first turn of a conversation that began her
     handoffIds: [],
     createdAt: DateTime.makeUnsafe(2_000),
   };
-  const usage = (inputTokens: number | undefined, updatedAt: string) => ({
-    usedTokens: 1,
-    ...(inputTokens === undefined ? {} : { inputTokens }),
-    updatedAt,
-  });
-  const reported = [
-    { ordinal: 2, tokenUsage: usage(90_000, "b") },
-    { ordinal: 1, tokenUsage: usage(68_000, "a") },
+  const turns = [
+    { id: "turn-2" as never, ordinal: 2 },
+    { id: "turn-1" as never, ordinal: 1 },
   ];
-  const baseline = (overrides: Partial<Parameters<typeof firstTurnPrompt>[0]> = {}) =>
-    firstTurnPrompt({
+  const firstTurn = (overrides: Partial<Parameters<typeof firstConversationTurn>[0]> = {}) =>
+    firstConversationTurn({
       thread: {},
       firstRunRequestedAt: runAt,
       providerThread: fresh,
-      turns: reported,
+      turns,
       instanceId: instance,
+      driver: "claudeAgent",
       ...overrides,
     });
-  expect(baseline()).toEqual({ promptTokens: 68_000, reportedAt: "a" });
-  // A later turn never stands in for a first turn that reported no input.
+  expect(firstTurn()).toBe("turn-1");
+  expect(firstTurn({ turns: [] })).toBeNull();
+  // OpenCode reports usage once, at the end of a turn, so its first report already holds what the turn read.
+  expect(firstTurn({ driver: "opencode" })).toBeNull();
+  expect(firstTurn({ providerThread: undefined })).toBeNull();
+  expect(firstTurn({ instanceId: ProviderInstanceId.make("codex") })).toBeNull();
+  expect(firstTurn({ providerThread: { ...fresh, handoffIds: ["handoff" as never] } })).toBeNull();
   expect(
-    baseline({
-      turns: [
-        { ordinal: 1, tokenUsage: usage(undefined, "a") },
-        { ordinal: 2, tokenUsage: usage(68_000, "b") },
-      ],
-    }),
-  ).toBeNull();
-  expect(baseline({ turns: [] })).toBeNull();
-  expect(baseline({ providerThread: undefined })).toBeNull();
-  expect(baseline({ instanceId: ProviderInstanceId.make("codex") })).toBeNull();
-  expect(baseline({ providerThread: { ...fresh, handoffIds: ["handoff" as never] } })).toBeNull();
-  expect(
-    baseline({
+    firstTurn({
       providerThread: { ...fresh, forkedFrom: { providerThreadId: "parent" as never } },
     }),
   ).toBeNull();
   // Imported conversations carry history the first local prompt includes.
-  expect(baseline({ thread: { historyOrigin: "v1_import" } })).toBeNull();
+  expect(firstTurn({ thread: { historyOrigin: "v1_import" } })).toBeNull();
   expect(
-    baseline({ providerThread: { ...fresh, createdAt: DateTime.makeUnsafe(500) } }),
+    firstTurn({ providerThread: { ...fresh, createdAt: DateTime.makeUnsafe(500) } }),
   ).toBeNull();
 });
+
+it.effect("reports the first request's prompt as the starting size, not the turn's latest", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "default-ctx-" }));
+    const usage = (inputTokens: number, updatedAt: string) => ({
+      usedTokens: inputTokens,
+      inputTokens,
+      updatedAt,
+    });
+    const startingSize = (prunedThrough: number) =>
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          serviceLayer({
+            home,
+            providerThreadId: "provider-thread",
+            providerThreads: [
+              {
+                id: "provider-thread",
+                providerInstanceId: codex,
+                forkedFrom: null,
+                handoffIds: [],
+                createdAt: DateTime.makeUnsafe(2_000),
+              },
+            ],
+            // The projection keeps only the turn's latest report.
+            providerTurns: [{ id: "turn-1", ordinal: 1, tokenUsage: usage(76_000, "late") }],
+            events: [
+              [10, { type: "run.updated", payload: { id: runId, status: "running" } }],
+              [11, { type: "provider-turn.updated", payload: { id: "turn-1" } }],
+              [
+                12,
+                {
+                  type: "provider-turn.updated",
+                  payload: { id: "turn-1", tokenUsage: usage(32_700, "early") },
+                },
+              ],
+              [
+                13,
+                {
+                  type: "provider-turn.updated",
+                  payload: { id: "turn-1", tokenUsage: usage(76_000, "late") },
+                },
+              ],
+            ],
+            prunedThrough,
+          }),
+        ).pipe(
+          Effect.provideService(HostProcess.HomeDirectory, home),
+          Effect.provideService(HostProcess.Environment, {}),
+        );
+        const preview = yield* inHome(
+          home,
+          Context.get(context, DefaultContext).preview({ threadId }),
+        );
+        return preview.firstTurn;
+      });
+    expect(yield* startingSize(0)).toEqual({ promptTokens: 32_700, reportedAt: "early" });
+    // Once pruning reaches the first run, an earlier report may be gone, so no figure beats a wrong one.
+    expect(yield* startingSize(10)).toBeNull();
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect("previews a draft from its project folder and rejects folders outside it", () =>
   Effect.gen(function* () {

@@ -95,7 +95,7 @@ export function ComposerContextSources({
                     source={source}
                     home={home}
                     knownTokens={breakdown.knownTokens}
-                    firstTurnTokens={breakdown.firstTurnTokens}
+                    startingTokens={breakdown.startingTokens}
                     usedTokens={usedTokens}
                     notVisible={notVisible}
                   />
@@ -113,14 +113,14 @@ function SourceDetails({
   source,
   home,
   knownTokens,
-  firstTurnTokens,
+  startingTokens,
   usedTokens,
   notVisible,
 }: {
   readonly source: UsedContextSource;
   readonly home: string | null;
   readonly knownTokens: number;
-  readonly firstTurnTokens: number | null;
+  readonly startingTokens: number | null;
   readonly usedTokens: number;
   readonly notVisible: ReadonlyArray<string>;
 }) {
@@ -140,10 +140,10 @@ function SourceDetails({
     );
   const explanation =
     source.key === "conversation"
-      ? `Messages, tool calls and their output: the latest report (${formatContextWindowTokens(usedTokens)}) minus the first turn's prompt (${formatContextWindowTokens(firstTurnTokens)}). Compaction shrinks it.`
+      ? `Everything after the first model request, including what the first turn read: messages, tool calls and their output. The latest report (${formatContextWindowTokens(usedTokens)}) minus the starting context (${formatContextWindowTokens(startingTokens)}). Compaction shrinks it.`
       : source.key === "harness"
-        ? `The first turn's prompt as the provider reported it (${formatContextWindowTokens(firstTurnTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message and anything that turn read.`
-        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No first-turn report can separate them, because the thread was forked, handed off, imported or compacted, or the provider never sent one, so this includes the conversation.`;
+        ? `The prompt of the first model request as the provider reported it (${formatContextWindowTokens(startingTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message.`
+        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No report of the first model request can separate them, because the thread was forked, handed off, imported or compacted, its first request is too old to look up, or the provider reports usage only at the end of a turn, so this includes the conversation.`;
   return (
     <div className="text-muted-foreground">
       <p>{explanation}</p>
