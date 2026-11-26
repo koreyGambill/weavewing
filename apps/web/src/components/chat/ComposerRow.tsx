@@ -77,7 +77,11 @@ function labelTextWidth(label: HTMLElement, range: Range): number {
 }
 
 function measureItem(element: HTMLElement, range: Range): ComposerRowItemWidth | null {
-  const rendered = elementOuterWidth(element);
+  // An end-aligned item's auto margin is the row's free space, not part of the item.
+  const rendered =
+    element.dataset.composerRowEnd === undefined
+      ? elementOuterWidth(element)
+      : element.getBoundingClientRect().width;
   if (rendered <= 1) return null;
   let natural = rendered;
   let slack = 0;
@@ -232,6 +236,7 @@ export function ComposerRow({
             data-composer-row-item={item.id}
             data-composer-row-priority={item.priority ?? undefined}
             data-composer-row-shrinks={item.shrinks ? "" : undefined}
+            data-composer-row-end={item.endAligned ? "" : undefined}
             data-in-menu={inMenu ? "" : undefined}
             aria-hidden={inMenu || undefined}
             inert={inMenu}
