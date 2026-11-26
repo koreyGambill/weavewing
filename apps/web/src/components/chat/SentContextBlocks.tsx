@@ -186,15 +186,6 @@ function AnswerBlock({ block, messageId }: { block: SentContextBlock; messageId:
   const mode = threadQuestionReferenceMode(block.record);
   const questionId = record && mode !== null ? record.questionId : null;
   const marked = useQuestionReferenceMark(messageId, questionId ?? "");
-  const elementRef = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a revealed answer may mount after its row scrolled in, so it brings itself fully into view
-  useLayoutEffect(() => {
-    if (!marked || questionId === null) return;
-    elementRef.current?.scrollIntoView({
-      block: "nearest",
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-    });
-  }, [marked, questionId]);
   if (!record) return null;
   const threadRef = ctx.threadRef;
   const canShowQuestion =
@@ -204,7 +195,6 @@ function AnswerBlock({ block, messageId }: { block: SentContextBlock; messageId:
   const details = promptSection ? rest : block.sections;
   return (
     <div
-      ref={elementRef}
       id={questionId === null ? undefined : questionReferenceElementId(messageId, questionId)}
       data-question-reference={questionId ?? undefined}
       data-marked={marked ? "" : undefined}

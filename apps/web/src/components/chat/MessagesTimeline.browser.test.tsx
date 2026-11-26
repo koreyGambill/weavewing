@@ -16,6 +16,7 @@ import {
   RuntimeRequestId,
   TurnItemId,
   ScheduledTaskId,
+  THREAD_QUESTIONS_ARTIFACT_ID,
   ThreadId,
   type OrchestrationV2Subagent,
 } from "@t3tools/contracts";
@@ -60,7 +61,13 @@ import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   decodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
-import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import {
+  collectComposerContextReferences,
+  formatComposerContextReference,
+} from "@t3tools/shared/composerContextReferences";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { questionReferenceElementId } from "./questionReferences";
+import { revealQuestionReference } from "./questionReferenceReveal";
 
 const environmentQuery = vi.hoisted(() => ({
   error: "Pull request not found" as string | null,
@@ -1765,6 +1772,133 @@ describe("MessagesTimeline agent messages", () => {
     expect(range.getBoundingClientRect().bottom).toBeLessThanOrEqual(
       body.getBoundingClientRect().bottom,
     );
+  });
+});
+
+describe("MessagesTimeline sent references", () => {
+  const answer = {
+    version: 1 as const,
+    kind: "artifact-answer" as const,
+    contextId: ComposerContextId.make("answer_q1"),
+    label: "Q1: Pick a cache",
+    artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+    questionId: "Q1",
+    answerRevision: 0,
+    title: "Q1: Pick a cache",
+    artifactVersion: 1,
+    question: "Which cache should the build use?",
+    choice: "Shared cache",
+    note: "Keep the shared cache warm between runs",
+  };
+  const terminal = {
+    version: 1 as const,
+    kind: "terminal" as const,
+    contextId: ComposerContextId.make("terminal_t1"),
+    label: "Build output",
+    terminalId: "t1",
+    terminalLabel: "Terminal 1",
+    lineStart: 1,
+    lineEnd: 2,
+    text: "compiled 42 modules\nrollout done",
+  };
+  const element = {
+    version: 1 as const,
+    kind: "element" as const,
+    contextId: ComposerContextId.make("element_e1"),
+    label: "Save button",
+    pageUrl: "http://localhost:3000/settings",
+    pageTitle: "Settings",
+    tagName: "button",
+    selector: "#save",
+    htmlPreview: "<button id=save>Save</button>",
+    componentName: null,
+    source: null,
+    styles: "",
+  };
+  const records = [answer, terminal, element];
+  const sentMessage = (id = "message-1") =>
+    message(
+      `Here is my answer ${records.map(formatComposerContextReference).join(" ")}`,
+      { context: { version: 1, records } },
+      id,
+    );
+
+  it("shows answers in full and opens other references from the keyboard", async () => {
+    setup();
+    await using screen = await renderTimeline([sentMessage()]);
+    await expect.element(screen.getByText(answer.note)).toBeVisible();
+    await expect.element(screen.getByText(answer.question)).toBeVisible();
+    expect(screen.text()).not.toContain("rollout done");
+
+    const toggle = screen.getByRole("button", { name: "Show what Build output sent" });
+    (toggle.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+    const hide = screen.getByRole("button", { name: "Hide what Build output sent" });
+    await expect.element(hide).toHaveAttribute("aria-expanded", "true");
+    await expect.element(screen.getByText(/rollout done/)).toBeVisible();
+    expect(document.activeElement).toBe(hide.element());
+    expect(document.getElementById(hide.element().getAttribute("aria-controls")!)).not.toBeNull();
+    await userEvent.keyboard(" ");
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.text()).not.toContain("rollout done");
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    await expect.element(screen.getByText(/rollout done/)).toBeVisible();
+    await expect.element(screen.getByText("#save")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.text()).not.toContain("#save");
+  });
+
+  it("opens a collapsed reference that holds find's match", async () => {
+    setup();
+    await using screen = await renderTimeline([sentMessage()], {
+      findExpanded: true,
+      findQuery: "rollout done",
+      activeFindMatch: { entryId: "entry-message-1", runId: null, occurrence: 0 },
+    });
+    await expect
+      .element(screen.getByRole("button", { name: "Hide what Build output sent" }))
+      .toHaveAttribute("aria-expanded", "true");
+    const [match] = collectThreadFindRanges(screen.container, "rollout done");
+    expect(match?.range.getBoundingClientRect().height).toBeGreaterThan(0);
+  });
+
+  it("scrolls to and marks an answer whose message is outside the rendered window", async () => {
+    setup();
+    const threadKey = `environment-local:thread-reveal-${Math.random().toString(36).slice(2)}`;
+    const filler = Array.from({ length: 80 }, (_, index) =>
+      message(`Filler message ${index}\n\n${"More text. ".repeat(40)}`, {}, `filler-${index}`),
+    );
+    const props = { ...baseProps(), routeThreadKey: threadKey };
+    // Without motion the list jumps straight to the row instead of animating there.
+    const session = cdp();
+    await session.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    });
+    try {
+      await using _screen = await renderElement(
+        // The first and last rows always stay mounted, so the answer sits between fillers.
+        <MessagesTimeline
+          {...props}
+          timelineEntries={[...filler.slice(0, 20), sentMessage("answered"), ...filler.slice(20)]}
+        />,
+      );
+      const target = questionReferenceElementId("answered", "Q1");
+      const viewport = props.listRef.current!.getScrollableNode()!;
+      await vi.waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(document.getElementById(target)).toBeNull());
+      revealQuestionReference(parseScopedThreadKey(threadKey)!, "Q1", "answered");
+      await vi.waitFor(() => {
+        const block = document.getElementById(target);
+        expect(block?.hasAttribute("data-marked")).toBe(true);
+        const rect = block!.getBoundingClientRect();
+        const view = viewport.getBoundingClientRect();
+        expect(rect.top).toBeGreaterThanOrEqual(view.top);
+        expect(rect.bottom).toBeLessThanOrEqual(view.bottom);
+      });
+    } finally {
+      await session.send("Emulation.setEmulatedMedia", { features: [] });
+    }
   });
 });
 
