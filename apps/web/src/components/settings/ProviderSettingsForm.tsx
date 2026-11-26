@@ -750,19 +750,16 @@ function ProviderSettingsFieldRow({
     const disabled = managedReason !== undefined;
     if (variant === "settings") {
       return (
-        <SettingsRow
-          title={field.label}
-          description={field.description}
-          control={
+        <SettingsRow title={field.label} description={field.description} managed={managedReason}>
+          {/* Below the description, so the help text keeps the row's full width. */}
+          <div className="mt-2">
             <ProviderSettingsChecklistActions
               field={field}
               value={value}
               disabled={disabled}
               onChange={onChange}
             />
-          }
-          managed={managedReason}
-        >
+          </div>
           <ProviderSettingsChecklist
             field={field}
             value={value}
