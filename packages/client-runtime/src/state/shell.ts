@@ -636,6 +636,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           omitIdleSubagents: false,
           omitOlderSettled: false,
         };
+        // Only a server that advertises it may leave unchanged waiting rows out of updates.
+        const omitUnchangedWaiting = yield* session.initialConfig.pipe(
+          Effect.map((config) => config.shellWaitingUnchanged === true),
+          Effect.orElseSucceed(() => false),
+        );
         const early = yield* useEarlyLoad(
           Option.getOrNull(yield* SubscriptionRef.get(supervisor.prepared)),
           true,
@@ -685,6 +690,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         const omission = {
           ...(omitIdleSubagents ? { omitIdleSubagents: true as const } : {}),
           ...(omitOlderSettled ? { omitOlderSettled: true as const } : {}),
+          ...(omitUnchangedWaiting ? { omitUnchangedWaiting: true as const } : {}),
         };
         if (Option.isNone(current.snapshot) || !(resumingHeldRows || loaded?.kind === "snapshot")) {
           return { ...omission, requestCompletionMarker: true as const };

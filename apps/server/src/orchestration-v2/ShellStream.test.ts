@@ -5,7 +5,12 @@ import type {
   OrchestrationV2ShellStreamItem,
   OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type WaitingItemSummary,
+} from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -26,7 +31,9 @@ import {
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemsFromInitialSnapshot,
   shouldPublishShellApplicationEvent,
+  omitUnchangedWaitingRows,
   skipUnchangedThreadShells,
+  waitingRowsForSubscription,
 } from "./ShellStream.ts";
 
 const emptyShellSnapshot = {
@@ -624,44 +631,45 @@ describe("dedupeShellEnrichment", () => {
   );
 });
 
+const at = (ms: number) => DateTime.makeUnsafe(Date.parse("2026-10-01T00:00:00.000Z") + ms);
+const shell = (
+  id: string,
+  overrides: Partial<OrchestrationV2ThreadShell> = {},
+): OrchestrationV2ThreadShell => ({
+  id: ThreadId.make(id),
+  projectId: ProjectId.make("project-a"),
+  title: "Thread",
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  worktreePath: null,
+  activeProviderThreadId: null,
+  lineage: { rootThreadId: ThreadId.make(id), parentThreadId: null, relationshipToParent: null },
+  forkedFrom: null,
+  createdBy: "user",
+  creationSource: "web",
+  activeRunId: null,
+  latestVisibleMessage: null,
+  hasActionableProposedPlan: false,
+  itemCount: 1,
+  visibleItemCount: 1,
+  branch: null,
+  status: "running",
+  pendingRuntimeRequest: null,
+  pendingBackgroundTasks: [],
+  latestRunId: null,
+  latestUserMessageAt: null,
+  createdAt: at(0),
+  updatedAt: at(0),
+  archivedAt: null,
+  settledOverride: null,
+  settledAt: null,
+  deletedAt: null,
+  ...overrides,
+});
+
 describe("skipUnchangedThreadShells", () => {
-  const at = (ms: number) => DateTime.makeUnsafe(Date.parse("2026-10-01T00:00:00.000Z") + ms);
-  const shell = (
-    id: string,
-    overrides: Partial<OrchestrationV2ThreadShell> = {},
-  ): OrchestrationV2ThreadShell => ({
-    id: ThreadId.make(id),
-    projectId: ProjectId.make("project-a"),
-    title: "Thread",
-    providerInstanceId: ProviderInstanceId.make("codex"),
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    worktreePath: null,
-    activeProviderThreadId: null,
-    lineage: { rootThreadId: ThreadId.make(id), parentThreadId: null, relationshipToParent: null },
-    forkedFrom: null,
-    createdBy: "user",
-    creationSource: "web",
-    activeRunId: null,
-    latestVisibleMessage: null,
-    hasActionableProposedPlan: false,
-    itemCount: 1,
-    visibleItemCount: 1,
-    branch: null,
-    status: "running",
-    pendingRuntimeRequest: null,
-    pendingBackgroundTasks: [],
-    latestRunId: null,
-    latestUserMessageAt: null,
-    createdAt: at(0),
-    updatedAt: at(0),
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    ...overrides,
-  });
   type Step =
     | { readonly advanceMs: number }
     | Exclude<OrchestrationV2ShellStreamItem, { readonly kind: "snapshot" | "synchronized" }>;
@@ -692,6 +700,153 @@ describe("skipUnchangedThreadShells", () => {
         updated(3, shell("a")),
       ]);
       expect(sent).toEqual([1, 2, 3]);
+    }),
+  );
+});
+
+describe("omitUnchangedWaitingRows", () => {
+  const row = (ref: string, extra: Partial<WaitingItemSummary> = {}): WaitingItemSummary => ({
+    kind: "task",
+    ref,
+    key: ref,
+    title: `Task ${ref}`,
+    state: "open",
+    ...extra,
+  });
+  const rows = [row("T1"), row("T2")];
+  const counts = { question: 0, qa: 0, task: 2, discussing: 0, liveQuestions: 0, live: 2 };
+  const waitingShell = (
+    id: string,
+    waiting: ReadonlyArray<WaitingItemSummary>,
+    overrides: Partial<OrchestrationV2ThreadShell> = {},
+  ) => shell(id, { waiting, waitingCounts: counts, ...overrides });
+  const updated = (
+    sequence: number,
+    thread: OrchestrationV2ThreadShell,
+  ): OrchestrationV2ShellStreamItem => ({
+    kind: "thread.updated",
+    sequence,
+    location: "active",
+    thread,
+  });
+  const sent = (items: ReadonlyArray<OrchestrationV2ShellStreamItem>) =>
+    Stream.fromIterable(items).pipe(
+      omitUnchangedWaitingRows,
+      Stream.runCollect,
+      Effect.map((out) =>
+        Array.from(out, (item) =>
+          item.kind === "thread.updated"
+            ? {
+                sequence: item.sequence,
+                rows: item.thread.waiting?.length ?? null,
+                unchanged: item.waitingUnchanged === true,
+                counts: item.thread.waitingCounts !== undefined,
+              }
+            : { kind: item.kind },
+        ),
+      ),
+    );
+
+  it.effect("leaves out rows this subscription already has and keeps the counts", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* sent([
+          updated(1, waitingShell("a", rows)),
+          updated(2, waitingShell("a", rows, { status: "idle" })),
+        ]),
+      ).toEqual([
+        { sequence: 1, rows: 2, unchanged: false, counts: true },
+        { sequence: 2, rows: null, unchanged: true, counts: true },
+      ]);
+    }),
+  );
+
+  it.effect.each([
+    ["a state", [row("T1", { state: "discussing" }), row("T2")]],
+    ["a sent flag", [row("T1", { sent: true }), row("T2")]],
+    ["a title", [row("T1", { title: "Renamed" }), row("T2")]],
+    ["the order", [row("T2"), row("T1")]],
+    ["an added row", [...rows, row("T3")]],
+    ["a removed row", [row("T1")]],
+  ] as const)("sends full rows when %s changes", ([, next]) =>
+    Effect.gen(function* () {
+      const out = yield* sent([
+        updated(1, waitingShell("a", rows)),
+        updated(2, waitingShell("a", next, { status: "idle" })),
+      ]);
+      expect(out[1]).toMatchObject({ rows: next.length, unchanged: false });
+    }),
+  );
+
+  it.effect("sends full rows after a removal, a snapshot, and for a thread not seen yet", () =>
+    Effect.gen(function* () {
+      const out = yield* sent([
+        updated(1, waitingShell("a", rows)),
+        { kind: "thread.removed", sequence: 2, location: "active", threadId: ThreadId.make("a") },
+        updated(3, waitingShell("a", rows, { status: "idle" })),
+        { kind: "snapshot", snapshot: emptyShellSnapshot },
+        updated(4, waitingShell("a", rows, { status: "running" })),
+        updated(5, waitingShell("b", rows)),
+      ]);
+      expect(out.filter((item) => "rows" in item).map((item) => item.unchanged)).toEqual([
+        false,
+        false,
+        false,
+        false,
+      ]);
+    }),
+  );
+
+  it.effect("restates the rows when the unchanged shell is resent after its window", () =>
+    Effect.gen(function* () {
+      const out = yield* Stream.fromIterable([{ advanceMs: 0 }, { advanceMs: 6_000 }]).pipe(
+        Stream.mapEffect(({ advanceMs }) =>
+          TestClock.adjust(Duration.millis(advanceMs)).pipe(
+            Effect.as(updated(advanceMs === 0 ? 1 : 2, waitingShell("a", rows))),
+          ),
+        ),
+        skipUnchangedThreadShells,
+        omitUnchangedWaitingRows,
+        Stream.runCollect,
+      );
+      expect(
+        Array.from(out, (item) => item.kind === "thread.updated" && item.waitingUnchanged),
+      ).toEqual([undefined, undefined]);
+    }),
+  );
+
+  it.effect("judges each subscription by what it was sent, not what another was sent", () =>
+    Effect.gen(function* () {
+      const first = updated(1, waitingShell("a", rows));
+      const second = updated(2, waitingShell("a", rows, { status: "idle" }));
+      expect((yield* sent([first, second]))[1]).toMatchObject({ unchanged: true });
+      // A subscription that joined after the first update has never had these rows.
+      expect(yield* sent([second])).toEqual([
+        { sequence: 2, rows: 2, unchanged: false, counts: true },
+      ]);
+    }),
+  );
+
+  it.effect("never leaves rows out for a client that did not ask", () =>
+    Effect.gen(function* () {
+      const items = [
+        updated(1, waitingShell("a", rows)),
+        updated(2, waitingShell("a", rows, { status: "idle" })),
+      ];
+      const legacy = yield* Stream.fromIterable(items).pipe(
+        waitingRowsForSubscription({}),
+        Stream.runCollect,
+      );
+      expect(
+        Array.from(legacy, (item) => item.kind === "thread.updated" && item.thread.waiting?.length),
+      ).toEqual([2, 2]);
+      const optedIn = yield* Stream.fromIterable(items).pipe(
+        waitingRowsForSubscription({ omitUnchangedWaiting: true }),
+        Stream.runCollect,
+      );
+      expect(
+        Array.from(optedIn, (item) => item.kind === "thread.updated" && item.waitingUnchanged),
+      ).toEqual([undefined, true]);
     }),
   );
 });

@@ -2701,6 +2701,12 @@ export const OrchestrationV2ShellStreamItem = Schema.Union([
     sequence: NonNegativeInt,
     location: Schema.Literals(["active", "archive"]),
     thread: OrchestrationV2ThreadShell,
+    /**
+     * `thread.waiting` is left out because it equals the rows this subscription last received
+     * for the thread; keep those. Only sent to a subscription that asked with
+     * `omitUnchangedWaiting`.
+     */
+    waitingUnchanged: Schema.optionalKey(Schema.Literal(true)),
   }),
   Schema.Struct({
     kind: Schema.Literal("thread.removed"),
@@ -4401,6 +4407,12 @@ export const OrchestrationV2SubscribeShellInput = Schema.Struct({
    * `getOlderSettledThreads`. Send only to servers that advertise `shellOlderSettled`.
    */
   omitOlderSettled: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Thread updates leave out waiting rows equal to the ones this subscription last received for
+   * the thread, marked `waitingUnchanged`; the client keeps its rows. Send only to servers that
+   * advertise `shellWaitingUnchanged`.
+   */
+  omitUnchangedWaiting: Schema.optionalKey(Schema.Literal(true)),
 });
 export type OrchestrationV2SubscribeShellInput = typeof OrchestrationV2SubscribeShellInput.Type;
 

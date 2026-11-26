@@ -17,6 +17,7 @@ import {
   isOlderSettledThreadShell,
   OrchestrationProjectShell as ProjectShellSchema,
   OrchestrationV2ThreadShell as ThreadShellSchema,
+  sameWaitingItems,
 } from "@t3tools/contracts";
 import { turnItemCanChangeUserWait } from "@t3tools/shared/agentAwareness";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -787,6 +788,55 @@ export function skipUnchangedThreadShells<A extends OrchestrationV2ShellStreamIt
     );
   });
 }
+
+/**
+ * Leaves out a thread's waiting rows equal to the ones this subscription last received for it,
+ * marking the update `waitingUnchanged`. Runs after coalescing, so it compares with what the
+ * subscriber was sent; snapshots, first updates and periodic resends carry full rows.
+ */
+export function omitUnchangedWaitingRows<A extends OrchestrationV2ShellStreamItem, E, R>(
+  stream: Stream.Stream<A, E, R>,
+): Stream.Stream<A, E, R> {
+  return Stream.suspend(() => {
+    const received = new Map<OrchestrationV2ThreadShell["id"], OrchestrationV2ThreadShell>();
+    return stream.pipe(
+      Stream.map((item): A => {
+        switch (item.kind) {
+          case "snapshot":
+          case "snapshot-required":
+            // A snapshot may replace the client's rows wholesale, so every thread starts over.
+            received.clear();
+            return item;
+          case "thread.removed":
+            received.delete(item.threadId);
+            return item;
+          case "thread.updated": {
+            const previous = received.get(item.thread.id);
+            received.set(item.thread.id, item.thread);
+            if (
+              previous?.waiting === undefined ||
+              item.thread.waiting === undefined ||
+              !sameWaitingItems(previous.waiting, item.thread.waiting) ||
+              // The same shell again is the periodic resend, which restates everything.
+              sameThreadShell({ ...item.thread, updatedAt: previous.updatedAt }, previous)
+            )
+              return item;
+            const { waiting: _unchanged, ...thread } = item.thread;
+            return { ...item, thread, waitingUnchanged: true };
+          }
+          default:
+            return item;
+        }
+      }),
+    );
+  });
+}
+
+/** The waiting-row stage of a shell subscription: omission only for a client that asked for it. */
+export const waitingRowsForSubscription = (input: { readonly omitUnchangedWaiting?: true }) =>
+  input.omitUnchangedWaiting === true
+    ? omitUnchangedWaitingRows
+    : <A extends OrchestrationV2ShellStreamItem, E, R>(stream: Stream.Stream<A, E, R>) => stream;
 
 export function shellStreamItemFromThreadShell(input: {
   readonly stored: Extract<ShellApplicationEvent, { readonly event: unknown }>;

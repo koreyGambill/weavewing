@@ -9,6 +9,18 @@ import {
 import * as Schema from "effect/Schema";
 
 const sameThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
+
+/**
+ * The update's shell, with the waiting rows this client already holds for the same thread when
+ * the server left them out as unchanged.
+ */
+function withKeptWaiting(
+  previous: OrchestrationV2ThreadShell | undefined,
+  event: { readonly thread: OrchestrationV2ThreadShell; readonly waitingUnchanged?: true },
+): OrchestrationV2ThreadShell {
+  if (event.waitingUnchanged !== true || previous?.waiting === undefined) return event.thread;
+  return { ...event.thread, waiting: previous.waiting };
+}
 const sameProjectShell = Schema.toEquivalence(OrchestrationProjectShell);
 const sameLinks = Schema.toEquivalence(Schema.UndefinedOr(Schema.Array(ThreadPullRequestLink)));
 const sameRepositoryIdentity = Schema.toEquivalence(
@@ -160,7 +172,8 @@ export function applyShellStreamEvent(
         event.location === "active"
           ? snapshot.threads.find((thread) => thread.id === event.thread.id)
           : undefined;
-      if (existing !== undefined && sameThreadShell(existing, event.thread)) {
+      const thread = withKeptWaiting(existing, event);
+      if (existing !== undefined && sameThreadShell(existing, thread)) {
         return { ...snapshot, snapshotSequence: event.sequence };
       }
       const withoutThread = (threads: OrchestrationV2ShellSnapshot["threads"]) =>
@@ -169,7 +182,7 @@ export function applyShellStreamEvent(
         ...snapshot,
         threads:
           event.location === "active"
-            ? upsertById(snapshot.threads, event.thread)
+            ? upsertById(snapshot.threads, thread)
             : withoutThread(snapshot.threads),
         // The archive has its own bounded query/subscription. Older servers may
         // still send archive-located deltas here; remove them from the normal
@@ -243,8 +256,9 @@ export function applyShellStreamEvents(
         const id = event.thread.id;
         if (event.location === "active") {
           const previous = threads.get(id);
-          if (previous !== undefined && sameThreadShell(previous, event.thread)) break;
-          threads.set(event.thread);
+          const thread = withKeptWaiting(previous, event);
+          if (previous !== undefined && sameThreadShell(previous, thread)) break;
+          threads.set(thread);
         } else {
           threads.remove(id);
         }

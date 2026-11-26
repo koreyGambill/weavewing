@@ -430,3 +430,73 @@ describe("applyShellStreamEvents", () => {
     );
   });
 });
+
+describe("waiting rows a server left out as unchanged", () => {
+  const rows = [
+    {
+      kind: "task" as const,
+      ref: "T1",
+      key: "t1",
+      title: "Rotate the secret",
+      state: "open" as const,
+    },
+  ];
+  const counts = { question: 0, qa: 0, task: 1, discussing: 0, liveQuestions: 0, live: 1 };
+  const other = ThreadId.make("thread-other");
+  const snapshot = {
+    ...v2ShellSnapshot,
+    threads: [
+      { ...v2ThreadShell, waiting: rows, waitingCounts: counts },
+      { ...v2ThreadShell, id: other, waiting: [], waitingCounts: { ...counts, task: 0, live: 0 } },
+    ],
+  };
+  const { waiting: _rows, ...withoutRows } = { ...v2ThreadShell, status: "idle" as const };
+  const unchanged = (sequence: number, id = v2ThreadShell.id): ShellStreamEvent => ({
+    kind: "thread.updated",
+    sequence,
+    location: "active",
+    thread: { ...withoutRows, id, waitingCounts: counts },
+    waitingUnchanged: true,
+  });
+
+  it("keeps the thread's own rows and takes the rest of the update", () => {
+    for (const next of [
+      applyShellStreamEvent(snapshot, unchanged(1)),
+      applyShellStreamEvents(snapshot, [unchanged(1)]),
+    ]) {
+      const thread = next.threads.find((entry) => entry.id === v2ThreadShell.id);
+      expect(thread?.waiting).toEqual(rows);
+      expect(thread?.status).toBe("idle");
+    }
+  });
+
+  it("never gives one thread another thread's rows", () => {
+    for (const next of [
+      applyShellStreamEvent(snapshot, unchanged(1, other)),
+      applyShellStreamEvents(snapshot, [unchanged(1, other)]),
+    ])
+      expect(next.threads.find((entry) => entry.id === other)?.waiting).toEqual([]);
+  });
+
+  it("applies rows an older server always sends, as before", () => {
+    const fresh = [{ ...rows[0]!, title: "Renamed" }];
+    const update: ShellStreamEvent = {
+      kind: "thread.updated",
+      sequence: 1,
+      location: "active",
+      thread: { ...v2ThreadShell, waiting: fresh, waitingCounts: counts },
+    };
+    expect(
+      applyShellStreamEvent(snapshot, update).threads.find((entry) => entry.id === v2ThreadShell.id)
+        ?.waiting,
+    ).toEqual(fresh);
+  });
+
+  it("drops a removed thread's rows, so they cannot come back with a later update", () => {
+    const removed = applyShellStreamEvents(snapshot, [
+      { kind: "thread.removed", sequence: 1, location: "active", threadId: v2ThreadShell.id },
+      unchanged(2),
+    ]);
+    expect(removed.threads.find((entry) => entry.id === v2ThreadShell.id)?.waiting).toBeUndefined();
+  });
+});

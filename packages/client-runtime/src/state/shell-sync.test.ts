@@ -878,11 +878,14 @@ describe("environment shell synchronization", () => {
         SubscriptionRef.changes(shellState).pipe(Stream.filter(predicate), Stream.runHead);
 
       // Both transports must omit, or omitted children would come back through the socket.
-      expect(yield* Queue.take(subscribeInputs)).toMatchObject({
+      const firstInput = yield* Queue.take(subscribeInputs);
+      expect(firstInput).toMatchObject({
         afterSequence: 1,
         omitIdleSubagents: true,
         omitOlderSettled: true,
       });
+      // A server that does not advertise it is never asked to leave waiting rows out.
+      expect(firstInput).not.toHaveProperty("omitUnchangedWaiting");
       expect(yield* Ref.get(loadOptions)).toEqual([
         { omitIdleSubagents: true, omitOlderSettled: true },
       ]);
@@ -932,12 +935,14 @@ describe("environment shell synchronization", () => {
           initialConfig: familySession.initialConfig.pipe(
             Effect.map((config) => ({
               ...config,
+              shellWaitingUnchanged: true,
               environment: { ...config.environment, databaseMigration: 71 },
             })),
           ),
         }),
       );
-      yield* Queue.take(subscribeInputs);
+      // A server that advertises it is asked to leave unchanged waiting rows out.
+      expect(yield* Queue.take(subscribeInputs)).toMatchObject({ omitUnchangedWaiting: true });
       expect(yield* Ref.get(loadOptions)).toHaveLength(2);
     }),
   );
