@@ -6580,7 +6580,7 @@ describe("orchestration v2 provider switching", () => {
     const toolsThreadId = ThreadId.make("thread:tool-overrides");
     const wakeupAndConnectors: ThreadToolOverrides = {
       enabledBuiltinTools: ["ScheduleWakeup"],
-      claudeAiConnectors: true,
+      claudeAiConnectors: "on",
       omittedMcpServers: [],
     };
     const harness = (

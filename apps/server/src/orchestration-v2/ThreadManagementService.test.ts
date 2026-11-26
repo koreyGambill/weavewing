@@ -225,7 +225,7 @@ it.effect("gives each tool override change its own command id within one clock t
   return Effect.gen(function* () {
     const threads = yield* ThreadManagementService.ThreadManagementService;
     // The test clock stands still, so both calls land in the same millisecond.
-    for (const claudeAiConnectors of [true, false]) {
+    for (const claudeAiConnectors of ["on", "off"] as const) {
       yield* threads.setThreadToolOverrides({
         threadId,
         toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors, omittedMcpServers: [] },
@@ -264,7 +264,7 @@ it.effect("answers a tool change with a scheduled restart only when it detached 
       detached.push(withSession);
       return threads.setThreadToolOverrides({
         threadId,
-        toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors: true, omittedMcpServers: [] },
+        toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors: "on", omittedMcpServers: [] },
       });
     };
     expect(yield* set(false)).toEqual({ outcome: "stored" });

@@ -673,6 +673,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.deepEqual((options.settings as { env?: Record<string, string> }).env, {
       OTHER: "kept",
       ENABLE_TOOL_SEARCH: "true",
+      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
     });
   });
 
@@ -723,7 +724,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       settings: DEFAULT_CLAUDE_SETTINGS,
       toolOverrides: {
         enabledBuiltinTools: ["ScheduleWakeup", "Task"],
-        claudeAiConnectors: false,
+        claudeAiConnectors: "default",
         omittedMcpServers: [],
       },
     });
@@ -745,7 +746,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       settings: NO_OMITTED_TOOLS_CLAUDE_SETTINGS,
       toolOverrides: {
         enabledBuiltinTools: [],
-        claudeAiConnectors: true,
+        claudeAiConnectors: "on",
         omittedMcpServers: [
           "fixture-notes",
           "claude.ai Fixture Board",
@@ -761,11 +762,12 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 
   it.each([
-    ["inherit", undefined, undefined],
     ["off", undefined, "false"],
-    ["inherit", true, "true"],
-    ["off", true, "true"],
-    ["off", false, "false"],
+    ["on", undefined, "true"],
+    ["off", "default", "false"],
+    ["off", "on", "true"],
+    ["on", "default", "true"],
+    ["on", "off", "false"],
   ] as const)(
     "sets the claude.ai connectors env for provider %s and thread %s to %s",
     (provider, thread, expected) => {
@@ -5815,7 +5817,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             ...turnInput.appThread,
             toolOverrides: {
               enabledBuiltinTools: ["ScheduleWakeup"],
-              claudeAiConnectors: true,
+              claudeAiConnectors: "on",
               omittedMcpServers: [],
             },
           },
@@ -12300,7 +12302,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   "ReportFindings",
                 ],
                 allowDangerouslySkipPermissions: true,
-                settings: { showThinkingSummaries: true },
+                settings: {
+                  showThinkingSummaries: true,
+                  env: { ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+                },
                 sessionId: WAKE_NATIVE_SESSION,
               },
             },

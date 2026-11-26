@@ -133,7 +133,7 @@ it("opens, switches and closes by keyboard, sending nothing until Reload session
       threadId: idleThread.id,
       toolOverrides: {
         enabledBuiltinTools: ["Artifact"],
-        claudeAiConnectors: false,
+        claudeAiConnectors: "default",
         omittedMcpServers: [],
       },
     },
@@ -170,7 +170,7 @@ it("saves and closes, with no pending state, and reads all on when nothing is le
   setup();
   await using screen = await renderControl(idleThread, {
     omittedBuiltinTools: [],
-    claudeAiConnectors: "inherit",
+    claudeAiConnectors: "on",
   });
   using toast = vi.spyOn(toastManager, "add");
   await userEvent.click(screen.getByRole("button", { name: /Tools all on/ }));
@@ -191,7 +191,7 @@ it("reads all on when the thread switched everything on", async () => {
     ...idleThread,
     toolOverrides: {
       enabledBuiltinTools: [...provider.omittedBuiltinTools],
-      claudeAiConnectors: true,
+      claudeAiConnectors: "on",
       omittedMcpServers: [],
     },
   });
@@ -210,7 +210,7 @@ it.each([
     ...idleThread,
     toolOverrides: {
       enabledBuiltinTools: [],
-      claudeAiConnectors: true,
+      claudeAiConnectors: "on",
       omittedMcpServers: ["claude.ai Fixture Mail"],
     },
   });
@@ -222,20 +222,20 @@ it.each([
     .toBeVisible();
 });
 
-it("gives no token sum for an unplaced left-out server with connectors left to Claude Code", async () => {
+it("gives no token sum for an unplaced left-out server with the connectors off", async () => {
   setup(true, AsyncResult.success({ servers: [fixtureInventory.servers[0]] }));
   await using screen = await renderControl(
     {
       ...idleThread,
       toolOverrides: {
         enabledBuiltinTools: [],
-        claudeAiConnectors: false,
+        claudeAiConnectors: "default",
         omittedMcpServers: ["claude.ai Fixture Mail"],
       },
     },
-    { ...provider, claudeAiConnectors: "inherit" },
+    provider,
   );
-  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  await userEvent.click(screen.getByRole("button", { name: /Tools 9 off/ }));
   const dialog = dialogOf();
   await userEvent.click(dialog.getByRole("switch").first());
   await expect
@@ -302,29 +302,40 @@ it("lists MCP servers only once open, and picks one connector in a single step",
       threadId: idleThread.id,
       toolOverrides: {
         enabledBuiltinTools: [],
-        claudeAiConnectors: true,
+        claudeAiConnectors: "on",
         omittedMcpServers: ["claude.ai Fixture Mail"],
       },
     },
   });
 });
 
-it("never shows connectors left to Claude Code as off", async () => {
+it("follows an On default, turns the connectors off for the thread, and back clears it", async () => {
   setup();
-  await using screen = await renderControl(idleThread, {
-    ...provider,
-    claudeAiConnectors: "inherit",
-  });
-  await userEvent.click(screen.getByRole("button", { name: /Tools 7 off/ }));
+  await using screen = await renderControl(idleThread, { ...provider, claudeAiConnectors: "on" });
+  await userEvent.click(screen.getByRole("button", { name: /Tools 1 on · 7 off/ }));
   const dialog = dialogOf();
-  await expect.element(dialog.getByText("Left to Claude Code")).toBeVisible();
-  // Only the connector the live session loaded can be left out on its own.
+  const group = dialog.getByRole("switch", { name: /claude\.ai connectors/ });
+  await expect.element(group).toBeChecked();
+  await expect.element(dialog.getByText(/follows the provider default/)).toBeVisible();
   const connectors = page.getByRole("list", { name: "claude.ai connectors" });
-  await expect.element(connectors.getByRole("switch")).toBeChecked();
-  await expect.element(connectors.getByText(/not loaded in this session/)).toBeVisible();
-  await userEvent.click(dialog.getByRole("button", { name: "Turn on for this thread" }));
-  await expect.element(dialog.getByText(/On for this thread/)).toBeVisible();
-  await expect.element(dialog.getByRole("button", { name: "Leave to Claude Code" })).toBeVisible();
+  await expect.element(connectors.getByRole("switch").first()).toBeChecked();
+
+  await userEvent.click(group);
+  await expect.element(group).not.toBeChecked();
+  await expect.element(dialog.getByText(/set for this thread/)).toBeVisible();
+  await expect.element(connectors.getByRole("switch").first()).not.toBeChecked();
+  // Back to the default stores no setting of the thread's own, so nothing has changed.
+  await userEvent.click(group);
+  await expect.element(dialog.getByText("Nothing changed")).toBeVisible();
+  await userEvent.click(group);
+  await userEvent.click(dialog.getByRole("button", { name: "Reload session" }));
+  expect(state.run).toHaveBeenCalledWith({
+    environmentId,
+    input: {
+      threadId: idleThread.id,
+      toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors: "off", omittedMcpServers: [] },
+    },
+  });
 });
 
 it.each([

@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 /**
  * Claude Code built-in tools a user may leave out of the sessions T3 starts. ToolSearch and Skill
@@ -65,14 +66,32 @@ export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
 /** Estimated context the claude.ai connectors add as a whole; individual connectors are unmeasured. */
 export const CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS = 3_200;
 
+/** A thread's claude.ai connectors: the provider's default, or on or off for this thread. */
+export const ThreadClaudeAiConnectors = Schema.Literals(["default", "on", "off"]);
+export type ThreadClaudeAiConnectors = typeof ThreadClaudeAiConnectors.Type;
+
+// Earlier builds stored a boolean: true forced the connectors on, and false meant nothing was
+// forced, so it reads as the default. New writes are always one of the strings.
+const ThreadClaudeAiConnectorsField = Schema.Union([Schema.Boolean, ThreadClaudeAiConnectors]).pipe(
+  Schema.decodeTo(
+    ThreadClaudeAiConnectors,
+    SchemaTransformation.transform<ThreadClaudeAiConnectors, boolean | ThreadClaudeAiConnectors>({
+      decode: (value) => (value === true ? "on" : value === false ? "default" : value),
+      encode: (value) => value,
+    }),
+  ),
+  Schema.withDecodingDefault(Effect.succeed("default" as const)),
+);
+
 /**
- * What one Claude thread changes about its provider's tool defaults. `enabledBuiltinTools` and
- * `claudeAiConnectors` switch on what the provider leaves out; `omittedMcpServers` names MCP
- * servers left out of this thread only. An absent field on a thread means no override.
+ * What one Claude thread changes about its provider's tool defaults. `enabledBuiltinTools`
+ * switches on built-in tools the provider leaves out, `claudeAiConnectors` follows or overrides
+ * the provider's connectors default, and `omittedMcpServers` names MCP servers left out of this
+ * thread only. An absent field on a thread means no override.
  */
 export const ThreadToolOverrides = Schema.Struct({
   enabledBuiltinTools: Schema.Array(ClaudeRemovableBuiltinTool),
-  claudeAiConnectors: Schema.Boolean,
+  claudeAiConnectors: ThreadClaudeAiConnectorsField,
   omittedMcpServers: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -85,7 +104,7 @@ export const T3_MCP_SERVER_NAME = "t3-code";
 /** An MCP server a Claude thread's session can load, as Claude Code reports it. */
 export const ThreadMcpServer = Schema.Struct({
   name: Schema.String,
-  /** A claude.ai connector, switched on and off as a group by `claudeAiConnectors`. */
+  /** A claude.ai connector, switched on and off as a group by the thread's connectors setting. */
   connector: Schema.Boolean,
   /** Claude Code's connection status, such as connected, pending or needs-auth. */
   status: Schema.String,
@@ -106,11 +125,12 @@ export function threadToolOverridesNotice(overrides: ThreadToolOverrides): strin
     ...CLAUDE_REMOVABLE_BUILTIN_TOOLS.filter((tool) =>
       overrides.enabledBuiltinTools.includes(tool.value),
     ).map((tool) => tool.label),
-    ...(overrides.claudeAiConnectors ? ["claude.ai connectors"] : []),
+    ...(overrides.claudeAiConnectors === "on" ? ["claude.ai connectors"] : []),
   ];
   const omitted = overrides.omittedMcpServers.length;
   const changes = [
     ...(switchedOn.length === 0 ? [] : [`${listInProse(switchedOn)} on`]),
+    ...(overrides.claudeAiConnectors === "off" ? ["claude.ai connectors off"] : []),
     ...(omitted === 0 ? [] : [`${omitted} MCP ${omitted === 1 ? "server" : "servers"} off`]),
   ];
   const summary = changes.length === 0 ? "the provider's defaults" : changes.join(", ");

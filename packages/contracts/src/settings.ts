@@ -910,13 +910,25 @@ const InstanceIdleCompaction = Schema.Literals(
 const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
 
 const CLAUDE_AI_CONNECTOR_MODES = [
-  { value: "inherit", label: "Leave to Claude Code" },
   { value: "off", label: "Off" },
+  { value: "on", label: "On" },
 ] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
 export const ClaudeAiConnectorMode = Schema.Literals(
   CLAUDE_AI_CONNECTOR_MODES.map((mode) => mode.value),
 );
 export type ClaudeAiConnectorMode = typeof ClaudeAiConnectorMode.Type;
+
+// "inherit" left the connectors to Claude Code's own settings; Weavewing now always decides, and
+// that old default reads as the new one, Off.
+const ClaudeAiConnectorsSetting = Schema.Literals(["inherit", "off", "on"]).pipe(
+  Schema.decodeTo(
+    ClaudeAiConnectorMode,
+    SchemaTransformation.transform<ClaudeAiConnectorMode, "inherit" | ClaudeAiConnectorMode>({
+      decode: (mode) => (mode === "inherit" ? "off" : mode),
+      encode: (mode) => mode,
+    }),
+  ),
+);
 
 /** Left out when the setting was never saved: every removable tool. */
 const CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS = CLAUDE_REMOVABLE_BUILTIN_TOOLS.map(
@@ -1036,12 +1048,12 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         providerSettingsForm: { control: "switch", clearWhenEmpty: "omit" },
       }),
     ),
-    claudeAiConnectors: ClaudeAiConnectorMode.pipe(
-      Schema.withDecodingDefault(Effect.succeed("inherit" as const)),
+    claudeAiConnectors: ClaudeAiConnectorsSetting.pipe(
+      Schema.withDecodingDefault(Effect.succeed("off" as const)),
       Schema.annotateKey({
-        title: "claude.ai connectors",
+        title: "claude.ai connectors in new threads",
         description:
-          "Off keeps your Claude account's connectors out of every thread, saving about 3,200 tokens (an estimate); a thread can still switch them on. Applies when a thread's Claude process next starts.",
+          "Whether threads load the connectors on your Claude account, about 3,200 tokens of context (an estimate). Each thread can switch them on or off for itself; one that has not follows this default. Claude Code in a terminal is unaffected. Applies when a thread's Claude process next starts.",
         providerSettingsForm: {
           control: "select",
           options: CLAUDE_AI_CONNECTOR_MODES,

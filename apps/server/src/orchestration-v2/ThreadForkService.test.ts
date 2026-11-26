@@ -157,7 +157,7 @@ it.effect(
         tags: ["private"],
         toolOverrides: {
           enabledBuiltinTools: ["ScheduleWakeup"],
-          claudeAiConnectors: true,
+          claudeAiConnectors: "on",
           omittedMcpServers: ["fixture-server"],
         },
         developmentEnvironment: {

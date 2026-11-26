@@ -100,7 +100,7 @@ const rowItem = (id: string) => document.querySelector(`[data-composer-row-item=
 it("shows Tools after Agents in the row and requests nothing until it opens", async () => {
   setup();
   await using screen = await render(<ToolsRow />);
-  const trigger = screen.getByRole("button", { name: /^Tools 7 off\./ });
+  const trigger = screen.getByRole("button", { name: /^Tools 8 off\./ });
   await expect.element(trigger).toBeVisible();
   expect(rowItem("tools")?.hasAttribute("data-in-menu")).toBe(false);
   expect(rowItem("agents")?.nextElementSibling).toBe(rowItem("tools"));
@@ -120,7 +120,7 @@ it("leaves whole into the thread menu, which shows its value and opens the same 
   const menuButton = page.getByRole("button", { name: "Thread menu" });
   await userEvent.click(menuButton);
   const menuRow = page.getByRole("menuitem", { name: /Tools/ });
-  await expect.element(menuRow).toHaveTextContent("Tools7 off");
+  await expect.element(menuRow).toHaveTextContent("Tools8 off");
   expect(state.inventory).not.toHaveBeenCalled();
 
   await userEvent.click(menuRow);

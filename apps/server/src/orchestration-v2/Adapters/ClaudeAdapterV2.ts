@@ -2482,18 +2482,16 @@ export function makeClaudeQueryOptions(input: {
           [`ANTHROPIC_DEFAULT_${compiledSelection.pinnedAlias.toUpperCase()}_MODEL`]:
             compiledSelection.pinnedAlias,
         };
-  // Unset leaves the choice to Claude Code and the user's own settings.
-  const claudeAiConnectorsEnv = input.toolOverrides?.claudeAiConnectors
-    ? "true"
-    : input.settings?.claudeAiConnectors === "off"
-      ? "false"
-      : undefined;
+  // Always explicit, so the user's own Claude settings never decide this for a T3 thread.
+  const threadConnectors = input.toolOverrides?.claudeAiConnectors ?? "default";
+  const claudeAiConnectorsEnv =
+    (threadConnectors === "default"
+      ? (input.settings?.claudeAiConnectors ?? "off")
+      : threadConnectors) === "on"
+      ? "true"
+      : "false";
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
-    (input.toolSearchOverride === undefined &&
-      aliasOverrideEnv === undefined &&
-      autoCompactWindow === undefined &&
-      claudeAiConnectorsEnv === undefined) ||
     typeof compactQuerySettings === "string"
       ? compactQuerySettings
       : ({
@@ -2508,9 +2506,7 @@ export function makeClaudeQueryOptions(input: {
             ...(input.toolSearchOverride === undefined
               ? {}
               : { ENABLE_TOOL_SEARCH: input.toolSearchOverride }),
-            ...(claudeAiConnectorsEnv === undefined
-              ? {}
-              : { ENABLE_CLAUDEAI_MCP_SERVERS: claudeAiConnectorsEnv }),
+            ENABLE_CLAUDEAI_MCP_SERVERS: claudeAiConnectorsEnv,
           },
         } as ClaudeSdkSettings);
   const deviceInstructions = input.mcpServers !== undefined && input.deviceToolsAvailable === true;

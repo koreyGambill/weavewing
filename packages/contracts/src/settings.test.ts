@@ -661,9 +661,12 @@ describe("Claude omitted built-in tools", () => {
     }
   });
 
-  it("leaves the claude.ai connectors to Claude Code unless a mode is saved", () => {
-    expect(decodeClaudeSettings({}).claudeAiConnectors).toBe("inherit");
-    expect(decodeClaudeSettings({ claudeAiConnectors: "off" }).claudeAiConnectors).toBe("off");
+  it("defaults the claude.ai connectors to off and reads a stored inherit as off", () => {
+    expect(decodeClaudeSettings({}).claudeAiConnectors).toBe("off");
+    for (const old of ["inherit", "off"]) {
+      expect(decodeClaudeSettings({ claudeAiConnectors: old }).claudeAiConnectors).toBe("off");
+    }
+    expect(decodeClaudeSettings({ claudeAiConnectors: "on" }).claudeAiConnectors).toBe("on");
   });
 
   it("offers the seven measured tools and neither ToolSearch nor Skill", () => {

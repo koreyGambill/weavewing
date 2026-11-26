@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
+import { NodeId, RunAttemptId, ThreadToolOverrides, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
@@ -543,9 +543,23 @@ describe("thread tool overrides", () => {
       }).toolOverrides,
     ).toEqual({
       enabledBuiltinTools: ["ScheduleWakeup"],
-      claudeAiConnectors: true,
+      claudeAiConnectors: "on",
       omittedMcpServers: [],
     });
+  });
+
+  it("reads an earlier build's connectors boolean with its old meaning", () => {
+    const decode = Schema.decodeUnknownSync(ThreadToolOverrides);
+    const connectors = (stored: Record<string, unknown>) =>
+      decode({ enabledBuiltinTools: [], ...stored }).claudeAiConnectors;
+    // True forced the connectors on; false and an absent key meant nothing was forced.
+    expect(connectors({ claudeAiConnectors: true })).toBe("on");
+    expect(connectors({ claudeAiConnectors: false })).toBe("default");
+    expect(connectors({})).toBe("default");
+    for (const value of ["default", "on", "off"]) {
+      expect(connectors({ claudeAiConnectors: value })).toBe(value);
+    }
+    expect(() => connectors({ claudeAiConnectors: "inherit" })).toThrow();
   });
 
   it("refuses to switch on ToolSearch, Skill or an unknown tool", () => {

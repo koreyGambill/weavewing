@@ -34,7 +34,7 @@ import { COMPOSER_ROW_PRIORITY, type ComposerRowItem } from "./composerRowItems"
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   claudeSettingsForInstance,
-  connectorsMode,
+  connectorsOn,
   mcpServerSections,
   withConnectorsMaster,
   withMcpServerSwitched,
@@ -209,6 +209,7 @@ function ToolsPopoverContent({
   const servers = AsyncResult.isSuccess(inventory) ? inventory.value.servers : [];
   const rows = toolRows(provider);
   const footer = toolsFooterState({
+    provider,
     rows,
     saved,
     staged,
@@ -330,7 +331,7 @@ function McpServersSection({
             <McpServerSwitchRow
               key={row.name}
               row={row}
-              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on))}
+              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on, provider))}
             />
           ))}
         </ul>
@@ -349,14 +350,7 @@ function McpServersSection({
               row={row}
               nested
               onChange={(on) =>
-                onStage(
-                  withMcpServerSwitched(
-                    staged,
-                    row.name,
-                    on,
-                    connectorsMode(provider) === "switch" ? connectorNames : [],
-                  ),
-                )
+                onStage(withMcpServerSwitched(staged, row.name, on, provider, connectorNames))
               }
             />
           ))}
@@ -377,35 +371,20 @@ function ConnectorsMaster({
   onStage: (value: ThreadToolOverrides) => void;
   connectorNames: ReadonlyArray<string>;
 }) {
-  const setOn = (on: boolean) => onStage(withConnectorsMaster(staged, on, connectorNames));
-  if (connectorsMode(provider) === "switch") {
-    return (
-      <div className="border-t">
-        <ToolSwitchRow
-          label="claude.ai connectors"
-          description="Every connector on your Claude account"
-          estimatedTokens={CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS}
-          on={staged.claudeAiConnectors}
-          onChange={setOn}
-          asListItem={false}
-        />
-      </div>
-    );
-  }
-  // Claude Code decides here, so the unforced state is never shown as off.
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-2.5 border-t px-3 py-2">
-      <span className="min-w-0">
-        <span className="block font-medium text-sm">claude.ai connectors</span>
-        <span className="block text-muted-foreground text-xs">
-          {staged.claudeAiConnectors
-            ? `On for this thread, about ${formatTokenEstimate(CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS)} tokens (estimate)`
-            : "Left to Claude Code"}
-        </span>
-      </span>
-      <Button size="xs" variant="outline" onClick={() => setOn(!staged.claudeAiConnectors)}>
-        {staged.claudeAiConnectors ? "Leave to Claude Code" : "Turn on for this thread"}
-      </Button>
+    <div className="border-t">
+      <ToolSwitchRow
+        label="claude.ai connectors"
+        description={
+          staged.claudeAiConnectors === "default"
+            ? "Every connector on your Claude account; follows the provider default"
+            : "Every connector on your Claude account; set for this thread"
+        }
+        estimatedTokens={CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS}
+        on={connectorsOn(provider, staged)}
+        onChange={(on) => onStage(withConnectorsMaster(staged, on, provider, connectorNames))}
+        asListItem={false}
+      />
     </div>
   );
 }
@@ -428,13 +407,6 @@ function McpServerSwitchRow({
     </span>
   );
   const padding = nested ? "pl-9" : "pl-3";
-  if (!row.switchable) {
-    return (
-      <li className={cn("grid grid-cols-[1fr] py-1.5 pr-3 text-muted-foreground", padding)}>
-        {name}
-      </li>
-    );
-  }
   return (
     <li>
       <label

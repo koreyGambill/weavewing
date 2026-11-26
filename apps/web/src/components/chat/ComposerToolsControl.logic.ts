@@ -70,21 +70,40 @@ export interface ToolsLabel {
   readonly value: string;
 }
 
+type ConnectorsProvider = Pick<ClaudeSettings, "claudeAiConnectors">;
+
+/** Whether the thread has the claude.ai connectors: its own setting, else the provider default. */
+export function connectorsOn(
+  provider: ConnectorsProvider,
+  overrides: ThreadToolOverrides | undefined,
+): boolean {
+  const thread = overrides?.claudeAiConnectors ?? "default";
+  return thread === "default" ? provider.claudeAiConnectors === "on" : thread === "on";
+}
+
+// Choosing the provider's default clears the thread's setting, so a later default still reaches it.
+function withConnectorsGroup(
+  provider: ConnectorsProvider,
+  staged: ThreadToolOverrides,
+  on: boolean,
+): ThreadToolOverrides {
+  const followsDefault = on === (provider.claudeAiConnectors === "on");
+  return { ...staged, claudeAiConnectors: followsDefault ? "default" : on ? "on" : "off" };
+}
+
 /**
- * Counts left-out built-ins, the connectors where the provider keeps them out or the thread
- * forces them on, and each MCP server the thread leaves out. Hidden only off Claude.
+ * Counts left-out built-ins, the claude.ai connectors as one item, and each MCP server the thread
+ * leaves out. Hidden only off Claude.
  */
 export function toolsLabel(
-  provider: Pick<ClaudeSettings, "omittedBuiltinTools" | "claudeAiConnectors"> | null,
+  provider: (Pick<ClaudeSettings, "omittedBuiltinTools"> & ConnectorsProvider) | null,
   overrides: ThreadToolOverrides | undefined,
 ): ToolsLabel {
   if (provider === null) return { hidden: true, onCount: 0, offCount: 0, text: "", value: "" };
   const rows = toolRows(provider);
-  const connectorsForced = overrides?.claudeAiConnectors === true;
-  const connectorsCount = provider.claudeAiConnectors === "off" || connectorsForced;
-  const onCount = rows.filter((row) => isRowOn(row, overrides)).length + (connectorsForced ? 1 : 0);
-  const offCount =
-    rows.length + (connectorsCount ? 1 : 0) - onCount + (overrides?.omittedMcpServers.length ?? 0);
+  const connectors = connectorsOn(provider, overrides);
+  const onCount = rows.filter((row) => isRowOn(row, overrides)).length + (connectors ? 1 : 0);
+  const offCount = rows.length + 1 - onCount + (overrides?.omittedMcpServers.length ?? 0);
   const value =
     offCount === 0
       ? "all on"
@@ -111,7 +130,7 @@ export function withRowSwitched(
 
 export const EMPTY_TOOL_OVERRIDES: ThreadToolOverrides = {
   enabledBuiltinTools: [],
-  claudeAiConnectors: false,
+  claudeAiConnectors: "default",
   omittedMcpServers: [],
 };
 
@@ -138,6 +157,7 @@ export type ToolsFooterState =
     };
 
 export function toolsFooterState(input: {
+  readonly provider: ConnectorsProvider;
   readonly rows: ReadonlyArray<ToolRow>;
   readonly saved: ThreadToolOverrides;
   readonly staged: ThreadToolOverrides;
@@ -150,7 +170,7 @@ export function toolsFooterState(input: {
   if (input.backgroundWork) return { kind: "background" };
   if (sameToolOverrides(input.saved, input.staged)) return { kind: "unchanged" };
   const on = input.rows.filter((row) => isRowOn(row, input.staged));
-  const connectorsOn = input.staged.claudeAiConnectors;
+  const connectors = connectorsOn(input.provider, input.staged);
   // A left-out server the inventory cannot place might be a connector, which no estimate covers
   // on its own, so a sum is honest only when every left-out server is known to be ordinary.
   const unknownLeftOut = input.staged.omittedMcpServers.some(
@@ -158,11 +178,11 @@ export function toolsFooterState(input: {
   );
   return {
     kind: "changed",
-    onCount: on.length + (connectorsOn ? 1 : 0),
+    onCount: on.length + (connectors ? 1 : 0),
     estimatedTokens: unknownLeftOut
       ? undefined
       : on.reduce((sum, row) => sum + row.estimatedTokens, 0) +
-        (connectorsOn ? CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS : 0),
+        (connectors ? CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS : 0),
     serversLeftOut: input.staged.omittedMcpServers.length,
   };
 }
@@ -178,24 +198,10 @@ export function formatTokenEstimate(tokens: number): string {
   return tokens.toLocaleString("en-US");
 }
 
-/**
- * `switch`: the provider keeps connectors out, so the thread's switch decides. `inherit`: Claude
- * Code decides unless the thread forces them on, so not forcing them never reads as off.
- */
-export type ConnectorsMode = "switch" | "inherit";
-
-export function connectorsMode(
-  provider: Pick<ClaudeSettings, "claudeAiConnectors">,
-): ConnectorsMode {
-  return provider.claudeAiConnectors === "off" ? "switch" : "inherit";
-}
-
 export interface McpServerRow {
   readonly name: string;
   /** Loaded by the live session; false when only a probe found it. */
   readonly active: boolean;
-  /** Whether the row offers a switch; a connector gets one only where connectors load. */
-  readonly switchable: boolean;
   readonly on: boolean;
 }
 
@@ -206,26 +212,16 @@ export interface McpServerSections {
 
 export function mcpServerSections(input: {
   readonly inventory: ReadonlyArray<ThreadMcpServer>;
-  readonly provider: Pick<ClaudeSettings, "claudeAiConnectors">;
+  readonly provider: ConnectorsProvider;
   readonly staged: ThreadToolOverrides;
 }): McpServerSections {
-  const mode = connectorsMode(input.provider);
-  const row = (server: ThreadMcpServer): McpServerRow => {
-    // With the provider keeping connectors out, picking one turns the group on for it; left to
-    // Claude Code, only connectors that load (forced on, or loaded now) can be left out.
-    const switchable =
-      !server.connector || mode === "switch" || input.staged.claudeAiConnectors || server.active;
-    return {
-      name: server.name,
-      active: server.active,
-      switchable,
-      // Under the provider's Off, a connector is in the thread only with the group on.
-      on:
-        switchable &&
-        !input.staged.omittedMcpServers.includes(server.name) &&
-        (!server.connector || mode === "inherit" || input.staged.claudeAiConnectors),
-    };
-  };
+  const groupOn = connectorsOn(input.provider, input.staged);
+  const row = (server: ThreadMcpServer): McpServerRow => ({
+    name: server.name,
+    active: server.active,
+    // A connector is in the thread only while the group is on.
+    on: !input.staged.omittedMcpServers.includes(server.name) && (!server.connector || groupOn),
+  });
   return {
     servers: input.inventory.filter((server) => !server.connector).map(row),
     connectors: input.inventory.filter((server) => server.connector).map(row),
@@ -233,22 +229,22 @@ export function mcpServerSections(input: {
 }
 
 /**
- * `groupConnectors` lists the connectors when the provider keeps them out: switching one on while
- * the group is off turns the group on and leaves the other connectors out.
+ * Switching one of `connectorNames` on while the group is off turns the group on for it alone,
+ * leaving the other connectors out.
  */
 export function withMcpServerSwitched(
   staged: ThreadToolOverrides,
   server: string,
   on: boolean,
-  groupConnectors: ReadonlyArray<string> = [],
+  provider: ConnectorsProvider,
+  connectorNames: ReadonlyArray<string> = [],
 ): ThreadToolOverrides {
-  if (on && !staged.claudeAiConnectors && groupConnectors.includes(server)) {
+  if (on && connectorNames.includes(server) && !connectorsOn(provider, staged)) {
     return {
-      ...staged,
-      claudeAiConnectors: true,
+      ...withConnectorsGroup(provider, staged, true),
       omittedMcpServers: [
-        ...staged.omittedMcpServers.filter((name) => !groupConnectors.includes(name)),
-        ...groupConnectors.filter((name) => name !== server),
+        ...staged.omittedMcpServers.filter((name) => !connectorNames.includes(name)),
+        ...connectorNames.filter((name) => name !== server),
       ],
     };
   }
@@ -256,19 +252,18 @@ export function withMcpServerSwitched(
   return { ...staged, omittedMcpServers: on ? rest : [...rest, server] };
 }
 
-/** The master switch; turning it off forgets which connectors were left out one by one. */
+/** The group switch; turning it off forgets which connectors were left out one by one. */
 export function withConnectorsMaster(
   staged: ThreadToolOverrides,
   on: boolean,
+  provider: ConnectorsProvider,
   connectorNames: ReadonlyArray<string>,
 ): ThreadToolOverrides {
+  const next = withConnectorsGroup(provider, staged, on);
   return on
-    ? { ...staged, claudeAiConnectors: true }
+    ? next
     : {
-        ...staged,
-        claudeAiConnectors: false,
-        omittedMcpServers: staged.omittedMcpServers.filter(
-          (name) => !connectorNames.includes(name),
-        ),
+        ...next,
+        omittedMcpServers: next.omittedMcpServers.filter((name) => !connectorNames.includes(name)),
       };
 }
