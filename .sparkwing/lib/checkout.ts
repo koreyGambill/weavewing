@@ -306,4 +306,23 @@ export function packageTestNames(root: string): string[] {
     .map((pkg) => pkg.name);
 }
 
+/**
+ * Workspace packages that define a typecheck script or name typecheck in their vite.config tasks.
+ * A config that names it without defining the task fails `vp run` loudly, never silently.
+ */
+export function typecheckPackageNames(root: string): string[] {
+  const named = /\btypecheck\b/;
+  return ciChanges(root)
+    .readWorkspace()
+    .filter((pkg) => {
+      const dir = NodePath.join(root, pkg.dir);
+      const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(dir, "package.json"), "utf8"));
+      if (typeof manifest.scripts?.typecheck === "string") return true;
+      return NodeFS.readdirSync(dir)
+        .filter((file) => /^vite\.config\.[cm]?[jt]s$/.test(file))
+        .some((file) => named.test(NodeFS.readFileSync(NodePath.join(dir, file), "utf8")));
+    })
+    .map((pkg) => pkg.name);
+}
+
 export const CODE = /\.(?:[cm]?[jt]sx?|astro)$/;
