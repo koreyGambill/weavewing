@@ -12,8 +12,25 @@ import {
   type WorkspaceListHeaderProps,
 } from "./WorkspaceListHeader.types";
 import { APP_BASE_NAME } from "../../../lib/mobileBranding";
+import {
+  InboxAppBarButton,
+  InboxSheetOutsideWorkspaceBar,
+} from "../../inbox/InboxAppBarButton.android";
+import { useInboxHeader } from "../../inbox/useInboxHeader";
 
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
+  const inbox = useInboxHeader();
+  return (
+    <>
+      <WorkspaceListAppBar {...props} inbox={inbox} />
+      <InboxSheetOutsideWorkspaceBar>{inbox.sheet}</InboxSheetOutsideWorkspaceBar>
+    </>
+  );
+}
+
+function WorkspaceListAppBar(
+  props: WorkspaceListHeaderProps & { readonly inbox: ReturnType<typeof useInboxHeader> },
+) {
   const navigation = useNavigation();
   const workspace = useWorkspaceTabs();
   const isTabActive = workspace?.isTabActive;
@@ -85,6 +102,9 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
               },
             ]
           : undefined
+      }
+      trailing={
+        connectionState.hasConnections ? <InboxAppBarButton inbox={props.inbox} /> : undefined
       }
     />
   );

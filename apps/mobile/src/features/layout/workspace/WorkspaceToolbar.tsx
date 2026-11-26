@@ -20,6 +20,8 @@ import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { shouldRestoreNativeSearch } from "./workspace-tabs-state";
 import { useFloatingWorkspaceTabs, useSidebarWorkspaceTabs } from "./useSystemWorkspaceTabBar";
 import { WorkspaceTabToolbarButtons } from "./WorkspaceSectionToolbar";
+import { useInboxHeader } from "../../inbox/useInboxHeader";
+import { useWorkspaceConnectionState } from "../../../state/workspace";
 
 const SEARCH_LABELS = {
   threads: "Search threads",
@@ -50,6 +52,8 @@ export function WorkspaceToolbar(props: {
   const { panes } = useWorkspacePaneState();
   const searchRef = useRef<SearchBarCommands>(null);
   const settingsMenu = useSettingsEnvironmentMenu();
+  const inbox = useInboxHeader();
+  const { hasConnections } = useWorkspaceConnectionState();
   // The Settings list takes the selected tab's place, so search follows it.
   const selectedTab = workspace.settingsOpen ? "settings" : workspace.state.selectedTab;
   const tab = workspace.state.tabs[selectedTab];
@@ -215,12 +219,22 @@ export function WorkspaceToolbar(props: {
               onPress={focusSearch}
             />
           )}
+          {/* Innermost, so the other buttons keep their places as it shows and hides. */}
+          {selectedTab === "threads" && hasConnections ? (
+            <Toolbar.Button
+              identifier="workspace-inbox"
+              accessibilityLabel={inbox.accessibilityLabel}
+              icon={inbox.badge === null ? "bell" : "bell.badge"}
+              onPress={inbox.open}
+            />
+          ) : null}
         </Toolbar>
       )}
       <Toolbar placement="bottom">
         {sidebarTabs === "toolbar" ? <WorkspaceTabToolbarButtons /> : null}
         {bottomSearch && searchVisible ? <Toolbar.SearchBarSlot /> : null}
       </Toolbar>
+      {inbox.sheet}
     </>
   );
 }

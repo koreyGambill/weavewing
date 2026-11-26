@@ -14,7 +14,7 @@ export function Sheet(props: SheetProps) {
   const [isOpen, setIsOpen] = useState(true);
   return (
     <FormSheet
-      isOpen={isOpen}
+      isOpen={isOpen && props.open !== false}
       detents={[0.5, 0.9]}
       prefersGrabberVisible={false}
       preventNativeDismiss={props.dismissDisabled}

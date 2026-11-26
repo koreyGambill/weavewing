@@ -23,7 +23,7 @@ export function Sheet(props: SheetProps) {
 
   return (
     <FormSheet
-      isOpen={isOpen}
+      isOpen={isOpen && props.open !== false}
       detents={formSheetDetents(0.5, 0.9)}
       prefersGrabberVisible
       preventNativeDismiss={props.dismissDisabled}

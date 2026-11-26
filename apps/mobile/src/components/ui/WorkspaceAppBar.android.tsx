@@ -42,6 +42,8 @@ export interface WorkspaceAppBarProps {
     readonly actions: MenuAction[];
     readonly onSelect: (id: string) => void;
   };
+  /** One extra 48dp button before search, drawn by React Native over the bar's end. */
+  readonly trailing?: ReactNode;
 }
 
 function createWorkspaceAppBarStore() {
@@ -172,7 +174,12 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
         <NativeAppBar
           title={
             <RNHostView matchContents={{ vertical: true }}>
-              <View collapsable={false} className="justify-center" style={{ height: ACTION_SIZE }}>
+              <View
+                collapsable={false}
+                className="justify-center"
+                // Keeps the title clear of the trailing button drawn over the bar.
+                style={{ height: ACTION_SIZE, paddingRight: props.trailing ? ACTION_SIZE : 0 }}
+              >
                 {props.titleContent ?? (
                   <AppText textRole="title" numberOfLines={1} className="text-header-foreground">
                     {props.title}
@@ -209,6 +216,14 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
             style={{ right: ACTION_END_INSET, top: (height - ACTION_SIZE) / 2 }}
           >
             {filterMenu}
+          </View>
+        ) : null}
+        {props.trailing ? (
+          <View
+            className="absolute"
+            style={{ right: ACTION_END_INSET + 2 * ACTION_SIZE, top: (height - ACTION_SIZE) / 2 }}
+          >
+            {props.trailing}
           </View>
         ) : null}
       </View>

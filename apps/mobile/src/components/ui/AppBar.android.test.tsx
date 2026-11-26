@@ -16,9 +16,10 @@ vi.mock("@react-navigation/native", () => ({
 vi.mock("./AndroidScreenHeader.android", () => ({
   AndroidScreenHeader: (props: { readonly title: string }) => <h1>{props.title}</h1>,
 }));
+const workspaceBar = vi.hoisted(() => ({ present: false }));
 vi.mock("./WorkspaceAppBar.android", () => ({
-  useHasWorkspaceAppBar: () => false,
-  WorkspaceAppBar: () => null,
+  useHasWorkspaceAppBar: () => workspaceBar.present,
+  WorkspaceAppBar: (props: { readonly trailing?: ReactNode }) => <nav>{props.trailing}</nav>,
 }));
 vi.mock("./Menu", () => ({ Menu: (props: { readonly children?: ReactNode }) => props.children }));
 vi.mock("./ScreenHeaderButton.android", () => ({ ScreenHeaderButton: () => null }));
@@ -43,6 +44,7 @@ const roots: Root[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
   document.body.innerHTML = "";
+  workspaceBar.present = false;
 });
 
 it("renders a sheet bar without search outside a navigation container", () => {
@@ -55,4 +57,19 @@ it("renders a sheet bar without search outside a navigation container", () => {
   act(() => root.render(<AppBar sheet title="Arrange threads" />));
 
   expect(container.textContent).toBe("Arrange threads");
+});
+
+it("hands its trailing content to the workspace bar it projects into", () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  workspaceBar.present = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.push(root);
+
+  act(() =>
+    root.render(<AppBar title="Threads" trailing={<button type="button">Inbox</button>} />),
+  );
+
+  expect(container.querySelector("nav button")?.textContent).toBe("Inbox");
 });
