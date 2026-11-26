@@ -2468,7 +2468,9 @@ export function buildThreadFeed(
     if (
       item.type === "todo_list" ||
       item.type === "checkpoint" ||
-      turnItemIsReactionOnlyAssistantMessage(item)
+      (item.type === "assistant_message" &&
+        !item.attachments?.length &&
+        turnItemIsReactionOnlyAssistantMessage(item))
     )
       continue;
     if (
