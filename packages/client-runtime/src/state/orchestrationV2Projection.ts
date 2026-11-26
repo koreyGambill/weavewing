@@ -1,7 +1,12 @@
 import { applyThreadPullRequestLinkUpdate } from "../threadPullRequests.ts";
-import { applyOrchestrationV2ThreadVisit, canActivateProviderThread } from "@t3tools/contracts";
+import {
+  applyOrchestrationV2ThreadVisit,
+  canActivateProviderThread,
+  mergeProviderTurnTokenUsage,
+} from "@t3tools/contracts";
 import type {
   OrchestrationV2DomainEvent,
+  OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
@@ -394,18 +399,7 @@ export function applyOrchestrationV2ProjectionEvent(
     case "provider-turn.updated":
       return {
         ...base,
-        providerTurns: upsertEntity(base.providerTurns, {
-          ...event.payload,
-          ...((event.payload.tokenUsage ??
-            base.providerTurns.find((turn) => turn.id === event.payload.id)?.tokenUsage) ===
-          undefined
-            ? {}
-            : {
-                tokenUsage:
-                  event.payload.tokenUsage ??
-                  base.providerTurns.find((turn) => turn.id === event.payload.id)?.tokenUsage,
-              }),
-        }),
+        providerTurns: upsertEntity(base.providerTurns, withMergedTokenUsage(base, event.payload)),
       };
     case "runtime-request.updated":
       return { ...base, runtimeRequests: upsertEntity(base.runtimeRequests, event.payload) };
@@ -461,4 +455,16 @@ export function applyOrchestrationV2ProjectionEvent(
     case "context-transfer.updated":
       return { ...base, contextTransfers: upsertEntity(base.contextTransfers, event.payload) };
   }
+}
+
+function withMergedTokenUsage(
+  base: { readonly providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn> },
+  next: OrchestrationV2ProviderTurn,
+): OrchestrationV2ProviderTurn {
+  const { tokenUsage: _reported, ...rest } = next;
+  const tokenUsage = mergeProviderTurnTokenUsage(
+    base.providerTurns.find((turn) => turn.id === next.id)?.tokenUsage,
+    next.tokenUsage,
+  );
+  return tokenUsage === undefined ? rest : { ...rest, tokenUsage };
 }

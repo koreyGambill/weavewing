@@ -140,10 +140,10 @@ function SourceDetails({
     );
   const explanation =
     source.key === "conversation"
-      ? `Everything after the first model request, including what the first turn read: messages, tool calls and their output. The latest report (${formatContextWindowTokens(usedTokens)}) minus the starting context (${formatContextWindowTokens(startingTokens)}). Compaction shrinks it.`
+      ? `Estimated: the latest report (${formatContextWindowTokens(usedTokens)}) minus the starting context (${formatContextWindowTokens(startingTokens)}). It covers messages, tool calls and their output, including what the first turn read. After compaction it is only the net growth since the start, so it can understate the conversation.`
       : source.key === "harness"
-        ? `The prompt of the first model request as the provider reported it (${formatContextWindowTokens(startingTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message.`
-        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No report of the first model request can separate them, because the thread was forked, handed off, imported or compacted, its first request is too old to look up, or the provider reports usage only at the end of a turn, so this includes the conversation.`;
+        ? `Estimated: the first model request's prompt as the provider reported it (${formatContextWindowTokens(startingTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message.`
+        : `Estimated: the latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No measured starting size is available to split off the conversation, so this includes it.`;
   return (
     <div className="text-muted-foreground">
       <p>{explanation}</p>

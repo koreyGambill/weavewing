@@ -18,7 +18,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Stream from "effect/Stream";
 
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
@@ -28,18 +27,13 @@ import {
   makeClaudeQueryOptions,
 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
-import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { SkillSources } from "../agentContext/SkillSources.ts";
-import {
-  DefaultContext,
-  firstConversationTurn,
-  layer as defaultContextLayer,
-} from "./DefaultContext.ts";
+import { DefaultContext, layer as defaultContextLayer, startingPrompt } from "./DefaultContext.ts";
 import { t3ContextParts } from "./defaultContextParts.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
 import {
@@ -507,11 +501,6 @@ const serviceLayer = (input: {
   readonly recordFilters?: Array<unknown>;
   readonly providerThreads?: ReadonlyArray<unknown>;
   readonly providerTurns?: ReadonlyArray<unknown>;
-  /** Stored agent events as `[sequence, event]`, in commit order. */
-  readonly events?: ReadonlyArray<
-    readonly [number, { readonly type: string; readonly payload: unknown }]
-  >;
-  readonly prunedThrough?: number;
 }) =>
   defaultContextLayer.pipe(
     Layer.provide(
@@ -534,19 +523,6 @@ const serviceLayer = (input: {
               runs: [{ id: runId, ordinal: 1, requestedAt: DateTime.makeUnsafe(1_000) }],
             } as never);
           },
-        }),
-        Layer.mock(OrchestrationEventStore)({
-          prunedThroughSequence: Effect.succeed(input.prunedThrough ?? 0),
-          readAgentEvents: (filter) =>
-            Stream.fromIterable(
-              (input.events ?? [])
-                .filter(
-                  ([sequence, event]) =>
-                    sequence > (filter?.afterSequence ?? 0) &&
-                    (filter?.eventType === undefined || event.type === filter.eventType),
-                )
-                .map(([sequence, event]) => ({ sequence, commandId: null, event }) as never),
-            ),
         }),
         Layer.mock(InstructionFootprints)({
           list: () => Effect.succeed(input.footprint === undefined ? [] : [input.footprint]),
@@ -676,45 +652,62 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it("picks the first turn of a conversation that began here, on a per-request driver", () => {
+it("takes the starting size only from the first turn of a conversation that began here", () => {
   const instance = ProviderInstanceId.make("claude");
   const runAt = DateTime.makeUnsafe(1_000);
+  const startedAt = DateTime.makeUnsafe(3_000);
   const fresh = {
+    id: "claude-thread" as never,
     providerInstanceId: instance,
     forkedFrom: null,
     handoffIds: [],
     createdAt: DateTime.makeUnsafe(2_000),
   };
-  const turns = [
-    { id: "turn-2" as never, ordinal: 2 },
-    { id: "turn-1" as never, ordinal: 1 },
-  ];
-  const firstTurn = (overrides: Partial<Parameters<typeof firstConversationTurn>[0]> = {}) =>
-    firstConversationTurn({
+  const turn = (ordinal: number, firstInputTokens?: number, providerThreadId = fresh.id) => ({
+    providerThreadId,
+    ordinal,
+    startedAt,
+    tokenUsage: {
+      usedTokens: 90_000,
+      inputTokens: 90_000,
+      ...(firstInputTokens === undefined ? {} : { firstInputTokens }),
+      updatedAt: "late",
+    },
+  });
+  const starting = (overrides: Partial<Parameters<typeof startingPrompt>[0]> = {}) =>
+    startingPrompt({
       thread: {},
       firstRunRequestedAt: runAt,
       providerThread: fresh,
-      turns,
+      turns: [turn(2, 50_000), turn(1, 32_700)],
       instanceId: instance,
       driver: "claudeAgent",
       ...overrides,
     });
-  expect(firstTurn()).toBe("turn-1");
-  expect(firstTurn({ turns: [] })).toBeNull();
-  // OpenCode reports usage once, at the end of a turn, so its first report already holds what the turn read.
-  expect(firstTurn({ driver: "opencode" })).toBeNull();
-  expect(firstTurn({ providerThread: undefined })).toBeNull();
-  expect(firstTurn({ instanceId: ProviderInstanceId.make("codex") })).toBeNull();
-  expect(firstTurn({ providerThread: { ...fresh, handoffIds: ["handoff" as never] } })).toBeNull();
+  expect(starting()).toEqual({ promptTokens: 32_700, reportedAt: DateTime.formatIso(startedAt) });
+  // A first turn without a recorded first input, from before it was recorded or because its
+  // first report carried none, never borrows a later turn's.
+  expect(starting({ turns: [turn(1), turn(2, 50_000)] })).toBeNull();
+  // After a switch from Codex, a turn of the earlier provider thread never stands in.
+  expect(starting({ turns: [turn(1, 20_000, "codex-thread" as never), turn(2, 30_000)] })).toEqual({
+    promptTokens: 30_000,
+    reportedAt: DateTime.formatIso(startedAt),
+  });
+  expect(starting({ turns: [] })).toBeNull();
+  // These drivers' first report can describe a later request than the first.
+  for (const driver of ["pi", "muse", "opencode"]) expect(starting({ driver })).toBeNull();
+  expect(starting({ providerThread: undefined })).toBeNull();
+  expect(starting({ instanceId: ProviderInstanceId.make("codex") })).toBeNull();
+  expect(starting({ providerThread: { ...fresh, handoffIds: ["handoff" as never] } })).toBeNull();
   expect(
-    firstTurn({
+    starting({
       providerThread: { ...fresh, forkedFrom: { providerThreadId: "parent" as never } },
     }),
   ).toBeNull();
   // Imported conversations carry history the first local prompt includes.
-  expect(firstTurn({ thread: { historyOrigin: "v1_import" } })).toBeNull();
+  expect(starting({ thread: { historyOrigin: "v1_import" } })).toBeNull();
   expect(
-    firstTurn({ providerThread: { ...fresh, createdAt: DateTime.makeUnsafe(500) } }),
+    starting({ providerThread: { ...fresh, createdAt: DateTime.makeUnsafe(500) } }),
   ).toBeNull();
 });
 
@@ -722,12 +715,8 @@ it.effect("reports the first request's prompt as the starting size, not the turn
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const home = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "default-ctx-" }));
-    const usage = (inputTokens: number, updatedAt: string) => ({
-      usedTokens: inputTokens,
-      inputTokens,
-      updatedAt,
-    });
-    const startingSize = (prunedThrough: number) =>
+    const startedAt = DateTime.makeUnsafe(3_000);
+    const startingSize = (firstInputTokens: number | undefined) =>
       Effect.gen(function* () {
         const context = yield* Layer.build(
           serviceLayer({
@@ -742,27 +731,20 @@ it.effect("reports the first request's prompt as the starting size, not the turn
                 createdAt: DateTime.makeUnsafe(2_000),
               },
             ],
-            // The projection keeps only the turn's latest report.
-            providerTurns: [{ id: "turn-1", ordinal: 1, tokenUsage: usage(76_000, "late") }],
-            events: [
-              [10, { type: "run.updated", payload: { id: runId, status: "running" } }],
-              [11, { type: "provider-turn.updated", payload: { id: "turn-1" } }],
-              [
-                12,
-                {
-                  type: "provider-turn.updated",
-                  payload: { id: "turn-1", tokenUsage: usage(32_700, "early") },
+            providerTurns: [
+              {
+                id: "turn-1",
+                providerThreadId: "provider-thread",
+                ordinal: 1,
+                startedAt,
+                tokenUsage: {
+                  usedTokens: 76_000,
+                  inputTokens: 76_000,
+                  ...(firstInputTokens === undefined ? {} : { firstInputTokens }),
+                  updatedAt: "late",
                 },
-              ],
-              [
-                13,
-                {
-                  type: "provider-turn.updated",
-                  payload: { id: "turn-1", tokenUsage: usage(76_000, "late") },
-                },
-              ],
+              },
             ],
-            prunedThrough,
           }),
         ).pipe(
           Effect.provideService(HostProcess.HomeDirectory, home),
@@ -774,9 +756,12 @@ it.effect("reports the first request's prompt as the starting size, not the turn
         );
         return preview.firstTurn;
       });
-    expect(yield* startingSize(0)).toEqual({ promptTokens: 32_700, reportedAt: "early" });
-    // Once pruning reaches the first run, an earlier report may be gone, so no figure beats a wrong one.
-    expect(yield* startingSize(10)).toBeNull();
+    expect(yield* startingSize(32_700)).toEqual({
+      promptTokens: 32_700,
+      reportedAt: DateTime.formatIso(startedAt),
+    });
+    // A turn stored before the first input was recorded gets no starting size.
+    expect(yield* startingSize(undefined)).toBeNull();
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

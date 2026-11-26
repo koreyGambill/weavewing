@@ -193,8 +193,8 @@ export const DefaultContextPreview = Schema.Struct({
   ),
   /**
    * The prompt size the provider reported for the first model request on the thread's current
-   * provider thread: what loaded before the conversation, plus the first message. Null when no such
-   * report can be told apart from later requests.
+   * provider thread: what loaded before the conversation, plus the first message. `reportedAt` is
+   * when that request's turn started. Null when no recorded count is known to be that request's.
    */
   firstTurn: Schema.optional(
     Schema.NullOr(Schema.Struct({ promptTokens: NonNegativeInt, reportedAt: Schema.String })),

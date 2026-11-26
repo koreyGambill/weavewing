@@ -325,10 +325,30 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
   promptCacheTtlMs: Schema.optional(PositiveInt),
   autoCompactThreshold: Schema.optional(PositiveInt),
   promptCacheExpiresAt: Schema.optional(Schema.String),
+  /** The input count of the turn's first usage report, kept when later reports replace the rest. */
+  firstInputTokens: Schema.optional(PositiveInt),
   updatedAt: Schema.String,
 });
 export type OrchestrationV2ProviderTurnTokenUsage =
   typeof OrchestrationV2ProviderTurnTokenUsage.Type;
+
+/**
+ * Applies a usage report to a provider turn's stored usage. Only the turn's first report sets
+ * `firstInputTokens`, so a turn whose first report carried no input count never gets one.
+ */
+export function mergeProviderTurnTokenUsage(
+  current: OrchestrationV2ProviderTurnTokenUsage | undefined,
+  next: OrchestrationV2ProviderTurnTokenUsage | undefined,
+): OrchestrationV2ProviderTurnTokenUsage | undefined {
+  if (next === undefined) return current;
+  const { firstInputTokens: reportedFirst, ...reported } = next;
+  const firstInputTokens =
+    current !== undefined
+      ? current.firstInputTokens
+      : (reportedFirst ??
+        (next.inputTokens !== undefined && next.inputTokens > 0 ? next.inputTokens : undefined));
+  return firstInputTokens === undefined ? reported : { ...reported, firstInputTokens };
+}
 
 export const OrchestrationV2ForkHistoryPolicy = Schema.Literals(["automatic", "require_native"]);
 export type OrchestrationV2ForkHistoryPolicy = typeof OrchestrationV2ForkHistoryPolicy.Type;

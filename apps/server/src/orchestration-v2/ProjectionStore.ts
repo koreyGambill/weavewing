@@ -3,6 +3,7 @@ import { isReactionOnlyAssistantText } from "@t3tools/shared/messageReactions";
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import {
   applyOrchestrationV2ThreadVisit,
+  mergeProviderTurnTokenUsage,
   pendingGuestMessageCount,
   ScheduledTaskId,
 } from "@t3tools/contracts";
@@ -955,13 +956,12 @@ function upsertProviderTurn(
   turns: ReadonlyArray<OrchestrationV2ProviderTurn>,
   next: OrchestrationV2ProviderTurn,
 ): Array<OrchestrationV2ProviderTurn> {
-  const current = turns.find((turn) => turn.id === next.id);
-  return upsertById(turns, {
-    ...next,
-    ...((next.tokenUsage ?? current?.tokenUsage) === undefined
-      ? {}
-      : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
-  });
+  const { tokenUsage: _reported, ...rest } = next;
+  const tokenUsage = mergeProviderTurnTokenUsage(
+    turns.find((turn) => turn.id === next.id)?.tokenUsage,
+    next.tokenUsage,
+  );
+  return upsertById(turns, tokenUsage === undefined ? rest : { ...rest, tokenUsage });
 }
 
 function preserveRunRecordedFields(
@@ -3054,23 +3054,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               break;
             }
             case "provider-turn.updated": {
-              const existingRows =
-                event.payload.tokenUsage === undefined
-                  ? yield* sql<PayloadRow>`
-                    SELECT payload_json
-                    FROM orchestration_v2_projection_provider_turns
-                    WHERE provider_turn_id = ${event.payload.id}
-                    LIMIT 1
-                  `
-                  : [];
+              const existingRows = yield* sql<PayloadRow>`
+                SELECT payload_json
+                FROM orchestration_v2_projection_provider_turns
+                WHERE provider_turn_id = ${event.payload.id}
+                LIMIT 1
+              `;
               const existing = existingRows[0];
-              const providerTurn =
+              const providerTurn = upsertProviderTurn(
                 existing === undefined
-                  ? event.payload
-                  : upsertProviderTurn(
-                      [yield* decodeProviderTurnPayload(existing.payload_json)],
-                      event.payload,
-                    )[0]!;
+                  ? []
+                  : [yield* decodeProviderTurnPayload(existing.payload_json)],
+                event.payload,
+              )[0]!;
               const payloadJson = yield* encodeProviderTurnPayload(providerTurn);
               const payload = parseEncodedPayload(payloadJson);
               yield* sql`

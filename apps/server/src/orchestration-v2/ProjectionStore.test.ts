@@ -3972,7 +3972,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     "command reads skip finished leaf nodes of finished runs",
     () => commandReadsSkipSettledLeafNodes,
   );
-  it.effect("preserves stored provider usage when a terminal update omits it", () =>
+  it.effect("keeps the first report's input count and the latest usage across updates", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const now = yield* DateTime.now;
@@ -4056,7 +4056,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       });
 
       const reloaded = yield* projectionStore.getThreadProjection(threadId);
-      assert.deepEqual(reloaded.providerTurns[0]?.tokenUsage, initialUsage);
+      assert.deepEqual(reloaded.providerTurns[0]?.tokenUsage, {
+        ...initialUsage,
+        firstInputTokens: 11_000,
+      });
       assert.strictEqual(reloaded.providerTurns[0]?.status, "completed");
 
       yield* projectionStore.apply({
@@ -4075,7 +4078,36 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       });
 
       const replaced = yield* projectionStore.getThreadProjection(threadId);
-      assert.deepEqual(replaced.providerTurns[0]?.tokenUsage, replacementUsage);
+      assert.deepEqual(replaced.providerTurns[0]?.tokenUsage, {
+        ...replacementUsage,
+        firstInputTokens: 11_000,
+      });
+
+      // A turn whose first report carried no input count never takes a later report's.
+      const unmeasuredTurn = {
+        ...providerTurn,
+        id: ProviderTurnId.make("provider-turn:provider-usage-reload:unmeasured"),
+        ordinal: 2,
+      };
+      for (const [index, tokenUsage] of [
+        { usedTokens: 5_000, updatedAt: "2026-08-29T12:00:02.000Z" },
+        replacementUsage,
+      ].entries()) {
+        yield* projectionStore.apply({
+          id: EventId.make(`event:provider-usage-reload:unmeasured:${index}`),
+          type: "provider-turn.updated",
+          threadId,
+          nodeId,
+          driver,
+          occurredAt: now,
+          payload: { ...unmeasuredTurn, tokenUsage },
+        });
+      }
+      const unmeasured = yield* projectionStore.getThreadProjection(threadId);
+      assert.deepEqual(
+        unmeasured.providerTurns.find((turn) => turn.id === unmeasuredTurn.id)?.tokenUsage,
+        replacementUsage,
+      );
     }),
   );
 
