@@ -107,7 +107,13 @@ const questionContextLine = (
     case "deferred":
       return [{ ...line, state: item.state }];
     case "discussing":
-      return [{ ...line, state: "open" as const, discussing: true as const }];
+      return [
+        {
+          ...line,
+          state: item.deferred === true ? ("deferred" as const) : ("open" as const),
+          discussing: true as const,
+        },
+      ];
     case "dismissed":
       return [{ ...line, state: "withdrawn" as const }];
     default:

@@ -36,6 +36,8 @@ export const WaitingItemSummary = Schema.Struct({
   settledBy: Schema.optional(Schema.Literals(["user", "agent"])),
   /** A user message carries its answer and its turn has not finished, so it waits on nobody. */
   sent: Schema.optional(Schema.Literal(true)),
+  /** Question only: discussed after the user deferred it, so the agent hears both. */
+  deferred: Schema.optional(Schema.Literal(true)),
   /** When the user last deferred, dismissed or reopened it. */
   userChangedAt: Schema.optional(IsoDateTime),
 });
@@ -118,6 +120,7 @@ const sameItem = (a: WaitingItemSummary, b: WaitingItemSummary) =>
   a.state === b.state &&
   a.settledBy === b.settledBy &&
   a.sent === b.sent &&
+  a.deferred === b.deferred &&
   a.userChangedAt === b.userChangedAt;
 
 export const sameWaitingItems = (

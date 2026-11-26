@@ -170,6 +170,9 @@ const questionWaitingItems = (
           ...common,
           state: question.discussedInMessageId ? "discussing" : question.state,
           ...(question.sentInMessageId ? { sent: true as const } : {}),
+          ...(question.discussedInMessageId && question.state === "deferred"
+            ? { deferred: true as const }
+            : {}),
         },
       ];
     return question.state === "withdrawn" && question.userChangedAt
@@ -191,14 +194,22 @@ const taskWaitingItems = (workspace: Pick<Workspace, "items">): ReadonlyArray<Wa
         ]
       : [],
   );
-/** Numbers the user's tasks T1, T2, ... in list order after the highest number given out. */
-const withTaskRefs = (items: ReadonlyArray<ListItem>): ReadonlyArray<ListItem> => {
-  if (!items.some((item) => isUserTask(item) && item.ref === undefined)) return items;
-  let next =
-    Math.max(0, ...items.map((item) => Number(/^T(\d+)$/.exec(item.ref ?? "")?.[1] ?? 0))) + 1;
-  return items.map((item) =>
-    isUserTask(item) && item.ref === undefined ? { ...item, ref: `T${next++}` } : item,
+/**
+ * Numbers the user's tasks T1, T2, ... in list order after the highest number ever given out,
+ * and records that number; the same workspace when nothing changes.
+ */
+const withTaskRefs = <W extends Pick<Workspace, "items" | "lastTaskRef">>(workspace: W): W => {
+  const highest = Math.max(
+    workspace.lastTaskRef ?? 0,
+    ...workspace.items.map((item) => Number(/^T(\d+)$/.exec(item.ref ?? "")?.[1] ?? 0)),
   );
+  const unnumbered = workspace.items.some((item) => isUserTask(item) && item.ref === undefined);
+  if (!unnumbered && highest === (workspace.lastTaskRef ?? 0)) return workspace;
+  let next = highest;
+  const items = workspace.items.map((item) =>
+    isUserTask(item) && item.ref === undefined ? { ...item, ref: `T${++next}` } : item,
+  );
+  return { ...workspace, items, lastTaskRef: next };
 };
 const storage = (cause: unknown) =>
   new ThreadWorkspaceError({
@@ -564,7 +575,10 @@ const make = Effect.gen(function* () {
       ...next,
       revision: current.revision + 1,
       updatedAt: now,
-      items: withTaskRefs(next.items.map(({ linkStates: _, ...item }) => item)),
+      ...withTaskRefs({
+        items: next.items.map(({ linkStates: _, ...item }) => item),
+        lastTaskRef: next.lastTaskRef,
+      }),
     });
   });
   const apply = (current: Workspace, changes: ThreadListUpdateInput["changes"], now: string) => {
@@ -738,11 +752,15 @@ const make = Effect.gen(function* () {
         )
       )
         return yield* invalid("Rewrite cannot change finished or handed-off history.");
+      // A task kept by id keeps its number.
       const replacements = apply(
         { ...current, items: [] },
         input.items,
         DateTime.formatIso(yield* DateTime.now),
-      );
+      ).map((item) => {
+        const ref = current.items.find((entry) => entry.id === item.id)?.ref;
+        return ref === undefined || item.ref !== undefined ? item : { ...item, ref };
+      });
       const survivingIds = new Set([...retained, ...replacements].map((item) => item.id));
       const history = retained.map((item) => {
         let parentId = item.parentId;
@@ -1129,9 +1147,8 @@ const make = Effect.gen(function* () {
     waitingItems: Effect.fn("ThreadWorkspace.waitingItems")(
       function* (threadId) {
         const workspace = yield* read(threadId, "drafts");
-        const items = withTaskRefs(workspace.items);
-        const numbered =
-          items === workspace.items ? workspace : yield* write({ ...workspace, items });
+        const refs = withTaskRefs(workspace);
+        const numbered = refs === workspace ? workspace : yield* write(refs);
         return [...questionWaitingItems(numbered), ...taskWaitingItems(numbered)];
       },
       lock.withPermit,

@@ -119,6 +119,8 @@ export const ThreadWorkspace = Schema.Struct({
   summaryNotes: Schema.String,
   childPreamble: Schema.String,
   updatedAt: Schema.NullOr(IsoDateTime),
+  /** The highest task number given out, so a task removed from the list never lends its number. */
+  lastTaskRef: Schema.optional(Revision),
 });
 export type ThreadWorkspace = typeof ThreadWorkspace.Type;
 export const ThreadWorkspaceGetInput = Schema.Struct({ threadId: ThreadId });

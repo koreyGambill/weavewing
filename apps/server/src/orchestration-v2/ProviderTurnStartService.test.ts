@@ -2388,12 +2388,21 @@ effectIt.effect("marks a question the user is discussing in the open questions l
       questionTools: true,
       waiting: [
         { kind: "question", ref: "Q1", key: "Q1", title: "Which database?", state: "discussing" },
+        {
+          kind: "question",
+          ref: "Q2",
+          key: "Q2",
+          title: "Flag name?",
+          state: "discussing",
+          deferred: true,
+        },
       ],
     });
     yield* harness.start;
+    // A deferred question the user is discussing keeps its deferred note beside the reminder.
     expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
       withInlineContext(
-        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database? (discussing; once you have replied, ask it again with replaces while the decision is still open)",
+        "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q2 Flag name? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)",
         "My own prompt",
       ),
     );

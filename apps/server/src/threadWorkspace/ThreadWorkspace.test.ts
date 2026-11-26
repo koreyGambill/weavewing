@@ -1012,6 +1012,46 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("shows a deferred question the user discusses as discussing and still deferred", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [{ prompt: "Database?", options: [choice("pg", "Postgres")] }],
+    });
+    yield* h.service.questionUpdate({ threadId, id: "Q1", state: "deferred" }, "user");
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "Would it survive two writers?" } },
+    });
+    expect(drafted.questions[0]?.state).toBe("deferred");
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(
+      userMessage("m1", [
+        answerRecord(
+          "Q1",
+          revision,
+          "",
+          "Would it survive two writers?",
+          THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
+        ),
+      ]),
+    );
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    expect(yield* h.mirrored()).toEqual([
+      {
+        kind: "question",
+        ref: "Q1",
+        key: "Q1",
+        title: "Database?",
+        state: "discussing",
+        deferred: true,
+        userChangedAt: expect.any(String),
+      },
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("keeps a question waiting and counted when a message only discusses it", () =>
   Effect.gen(function* () {
     const h = yield* harness();
@@ -1498,6 +1538,36 @@ it.effect("numbers the user's tasks once and lists them with questions as waitin
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("never gives a dropped task's number to a new one", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const created = yield* h.service.update({
+      threadId,
+      expectedRevision: 0,
+      changes: [
+        { text: "Rotate the staging webhook secret", owner: "you" },
+        { text: "Approve the vendor account", owner: "you" },
+      ],
+    });
+    expect(created.items.map((item) => item.ref)).toEqual(["T1", "T2"]);
+    // A rewrite replaces every open item, so T2, the highest number, leaves the list.
+    const rewritten = yield* h.service.rewrite({
+      threadId,
+      expectedRevision: created.revision,
+      items: [
+        { id: created.items[0]!.id, text: "Rotate the staging webhook secret", owner: "you" },
+      ],
+    });
+    expect(rewritten.items.map((item) => item.ref)).toEqual(["T1"]);
+    const added = yield* h.service.update({
+      threadId,
+      expectedRevision: rewritten.revision,
+      changes: [{ text: "Renew the signing certificate", owner: "you" }],
+    });
+    expect(added.items.map((item) => item.ref)).toEqual(["T1", "T3"]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("numbers tasks saved before task numbers existed when their thread is next read", () =>
   Effect.gen(function* () {
     const h = yield* harness();
@@ -1513,6 +1583,7 @@ it.effect("numbers tasks saved before task numbers existed when their thread is 
     );
     const stored = JSON.parse(yield* h.fs.readFileString(file));
     delete stored.workspace.items[0].ref;
+    delete stored.workspace.lastTaskRef;
     yield* h.fs.writeFileString(file, JSON.stringify(stored));
     expect(yield* h.service.waitingItems(threadId)).toEqual([
       {
