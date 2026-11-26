@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useContext, useMemo, useState } from "react";
 import { getFiletypeFromFileName } from "@pierre/diffs/utils/getFiletypeFromFileName";
 import { ScrollView, StyleSheet, Text as NativeText, View, type ColorValue } from "react-native";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
@@ -21,6 +21,11 @@ import { buildReviewParsedDiff } from "./reviewModel";
 import { REVIEW_MONO_FONT_FAMILY } from "./reviewDiffRendering";
 import type { ReviewInlineComment } from "./reviewCommentSelection";
 import { useMarkdownCodeHighlight } from "../threads/markdownCodeHighlightState";
+import {
+  loadPendingRemoteMedia,
+  RemoteMediaEnvironmentContext,
+  useRemoteMediaImageSource,
+} from "../threads/remoteMediaConsent";
 
 export interface ReviewCommentColors {
   readonly background: ColorValue;
@@ -50,6 +55,7 @@ export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
 }) {
   const { codeSurface, nativeReviewDiffStyle } = useAppearanceCodeSurface();
   const markdownStyles = useMarkdownPreviewStyles();
+  const resolveImageSource = useRemoteMediaImageSource(useContext(RemoteMediaEnvironmentContext));
   const { themeAppearance: appearanceScheme, themeId } = useAppearancePreferences();
   const appTheme = useUniwindTheme();
   const [NativeReviewDiffView] = useState(() => resolveNativeReviewDiffView());
@@ -168,6 +174,8 @@ export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
           <SelectableMarkdownText
             markdown={props.comment.text}
             textStyle={markdownStyles.nativeTextStyle}
+            resolveImageSource={resolveImageSource}
+            onImagePress={loadPendingRemoteMedia}
           />
         </View>
       ) : null}

@@ -422,6 +422,21 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                   />
                 </SettingsSection>
+                <SettingsSection title="Privacy">
+                  <SettingsSwitchRow
+                    icon="photo"
+                    label="Load remote media automatically"
+                    subtitle={managedSubtitle(
+                      "autoLoadRemoteMedia",
+                      projectSelected
+                        ? "Environment-wide setting. Select All projects to change it."
+                        : "Images and video that agents link from other sites load without a tap, and those sites see your address and the full link. Off: each one waits for a tap.",
+                    )}
+                    value={uniform("autoLoadRemoteMedia")}
+                    disabled={disabledFor("autoLoadRemoteMedia")}
+                    onValueChange={(value) => write({ autoLoadRemoteMedia: value })}
+                  />
+                </SettingsSection>
                 <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
               </>
             ) : null}

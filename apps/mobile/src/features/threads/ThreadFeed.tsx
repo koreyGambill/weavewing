@@ -282,6 +282,8 @@ import {
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
+import { RemoteMediaGate } from "./RemoteMediaGate";
+import { loadPendingRemoteMedia, useRemoteMediaImageSource } from "./remoteMediaConsent";
 import { ZoomableImagePressable } from "./ZoomableImagePressable";
 import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
@@ -3095,11 +3097,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       void openPullRequest(presentation.href);
     }
   };
-  const resolveImageSource = useMarkdownImageSource({
-    environmentId: props.environmentId,
-    threadId: props.threadId,
-    workspaceRoot: props.workspaceRoot ?? null,
-  });
+  const resolveImageSource = useRemoteMediaImageSource(
+    props.environmentId,
+    useMarkdownImageSource({
+      environmentId: props.environmentId,
+      threadId: props.threadId,
+      workspaceRoot: props.workspaceRoot ?? null,
+    }),
+  );
   const markdownLinkHandlers: MarkdownLinkHandlers = {
     fileEmbedLabel: (href, standalone) =>
       markdownFileEmbedLabel(
@@ -3113,7 +3118,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       ),
     onLinkPress: (href, reply) => onMarkdownLinkPress(href, false, reply),
     linkCustomization: enrichedThreadLinkCustomization,
-    onImagePress: (href, withGallery) => onMarkdownLinkPress(href, true, undefined, withGallery),
+    onImagePress: (href, withGallery) =>
+      loadPendingRemoteMedia(href) || onMarkdownLinkPress(href, true, undefined, withGallery),
     resolveImageSource,
     fileContextMenu: (href) => {
       const skill = enrichedSkillReference(href, props.skills);
@@ -3191,11 +3197,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     });
     if (media?.kind === "video") {
       return (
-        <ThreadMarkdownVideo
+        <RemoteMediaGate
           key={image.href}
-          source={{ ...media.source, name: image.alt ?? media.source.name }}
-          onPlaybackStart={onInlinePlaybackStart}
-        />
+          environmentId={props.environmentId}
+          uri={"uri" in media.source ? media.source.uri : null}
+          kind="video"
+        >
+          <ThreadMarkdownVideo
+            source={{ ...media.source, name: image.alt ?? media.source.name }}
+            onPlaybackStart={onInlinePlaybackStart}
+          />
+        </RemoteMediaGate>
       );
     }
     if (media?.kind === "audio") {
@@ -3232,20 +3244,22 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     const imageSource = classifyMarkdownImageSource(image.href, props.workspaceRoot ?? null);
     if (imageSource._tag === "Direct") {
       return (
-        <ThreadMarkdownImageView
-          uri={normalizeNativeMarkdownUrl(imageSource.uri)}
-          sourceKey={imageSource.uri}
-          format={
-            /\.svg(?:[?#]|$)/i.test(imageSource.uri) ||
-            imageSource.uri.startsWith("data:image/svg+xml")
-              ? "svg"
-              : undefined
-          }
-          unavailable={false}
-          alt={image.alt}
-          actionsSource={media?.source.actionsSource}
-          onPressPreview={onPressPreview}
-        />
+        <RemoteMediaGate environmentId={props.environmentId} uri={imageSource.uri} kind="image">
+          <ThreadMarkdownImageView
+            uri={normalizeNativeMarkdownUrl(imageSource.uri)}
+            sourceKey={imageSource.uri}
+            format={
+              /\.svg(?:[?#]|$)/i.test(imageSource.uri) ||
+              imageSource.uri.startsWith("data:image/svg+xml")
+                ? "svg"
+                : undefined
+            }
+            unavailable={false}
+            alt={image.alt}
+            actionsSource={media?.source.actionsSource}
+            onPressPreview={onPressPreview}
+          />
+        </RemoteMediaGate>
       );
     }
     if (imageSource._tag === "Blocked") {

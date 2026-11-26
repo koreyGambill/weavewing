@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import {
   pullRequestMediaSource,
   pullRequestImageSource,
@@ -15,6 +15,8 @@ import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/ui/VideoPreviewModal";
 import { ThreadMarkdownImageView } from "../threads/ThreadMarkdownImage";
+import { RemoteMediaGate } from "../threads/RemoteMediaGate";
+import { RemoteMediaEnvironmentContext } from "../threads/remoteMediaConsent";
 import {
   FilePreviewModal,
   type FilePreviewSource,
@@ -40,7 +42,33 @@ export function usePullRequestMediaUrl(url: string) {
   };
 }
 
-export function PullRequestMedia(props: {
+/** Holds media the server does not proxy until the user allows its site. */
+function PullRequestRemoteMediaGate(props: {
+  readonly url: string;
+  readonly kind: "image" | "video";
+  readonly children: ReactNode;
+}) {
+  const source = pullRequestMediaSource(props.url, useContext(PullRequestMediaContext));
+  return (
+    <RemoteMediaGate
+      environmentId={useContext(RemoteMediaEnvironmentContext)}
+      uri={"uri" in source ? (source.uri ?? null) : null}
+      kind={props.kind}
+    >
+      {props.children}
+    </RemoteMediaGate>
+  );
+}
+
+export function PullRequestMedia(props: Parameters<typeof PullRequestMediaContent>[0]) {
+  return (
+    <PullRequestRemoteMediaGate url={props.url} kind={props.kind === "image" ? "image" : "video"}>
+      <PullRequestMediaContent {...props} />
+    </PullRequestRemoteMediaGate>
+  );
+}
+
+function PullRequestMediaContent(props: {
   readonly url: string;
   readonly kind: "image" | "video" | "unknown";
   readonly caption?: string;
@@ -110,7 +138,17 @@ export function PullRequestMedia(props: {
   );
 }
 
-export function PullRequestImageAttachment(props: {
+export function PullRequestImageAttachment(
+  props: Parameters<typeof PullRequestImageAttachmentContent>[0],
+) {
+  return (
+    <PullRequestRemoteMediaGate url={props.url} kind="image">
+      <PullRequestImageAttachmentContent {...props} />
+    </PullRequestRemoteMediaGate>
+  );
+}
+
+function PullRequestImageAttachmentContent(props: {
   readonly url: string;
   readonly caption: string;
   readonly source: FilePreviewItem;

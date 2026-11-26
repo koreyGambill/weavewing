@@ -25,6 +25,7 @@ import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
+import { loadPendingRemoteMedia, useRemoteMediaImageSource } from "./remoteMediaConsent";
 import {
   fileRoutePathSegments,
   resolveFileLinkPath,
@@ -87,6 +88,7 @@ export function QuestionText(props: {
   const markdown = useLiveThreadLinkLabels(props.markdown, props.environmentId);
   const navigation = useNavigation();
   const openPullRequest = useOpenPullRequest();
+  const resolveImageSource = useRemoteMediaImageSource(props.environmentId);
   const openLink = (href: string) => {
     const link = resolveMarkdownLinkPresentation(href);
     if (link.kind !== "file") {
@@ -114,6 +116,8 @@ export function QuestionText(props: {
         Platform.OS === "android" ? undefined : props.setDirection === "rtl" ? "right" : "left"
       }
       onLinkPress={openLink}
+      resolveImageSource={resolveImageSource}
+      onImagePress={(href) => loadPendingRemoteMedia(href) || openLink(href)}
       preserveSoftBreaks={props.preserveSoftBreaks}
     />
   );

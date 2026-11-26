@@ -5,11 +5,20 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
 
 import type { PendingUserInput } from "../../lib/threadActivity";
+import type { SelectableMarkdownTextProps } from "../../native/SelectableMarkdownText.types";
 
 const harness = vi.hoisted(() => ({
   navigate: [] as Array<[string, object | undefined]>,
   openedUrls: [] as string[],
+  markdown: {} as Pick<SelectableMarkdownTextProps, "resolveImageSource" | "onImagePress">,
 }));
+const atoms = vi.hoisted(async () => {
+  const { Atom, AtomRegistry } = await import("effect/reactivity");
+  return {
+    registry: AtomRegistry.make(),
+    configValueAtom: Atom.family((_environmentId: string) => Atom.make(null)),
+  };
+});
 
 type Children = { children?: ReactNode };
 
@@ -42,16 +51,23 @@ vi.mock("./QuestionAttachments", () => ({ QuestionAttachments: () => null }));
 vi.mock("../files/FileMarkdownPreview", () => ({
   useMarkdownPreviewStyles: () => ({ nativeTextStyle: {} }),
 }));
+vi.mock("../../state/atom-registry", async () => ({ appAtomRegistry: (await atoms).registry }));
+vi.mock("../../state/server", async () => ({
+  serverEnvironment: { configValueAtom: (await atoms).configValueAtom },
+}));
 vi.mock("../../native/SelectableMarkdownText", () => ({
-  SelectableMarkdownText: (props: { markdown: string; onLinkPress?: (href: string) => void }) => (
-    <p>
-      {[...props.markdown.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map(([, label, href]) => (
-        <button key={href} type="button" onClick={() => props.onLinkPress?.(href!)}>
-          {label}
-        </button>
-      ))}
-    </p>
-  ),
+  SelectableMarkdownText: (props: SelectableMarkdownTextProps) => {
+    harness.markdown = props;
+    return (
+      <p>
+        {[...props.markdown.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map(([, label, href]) => (
+          <button key={href} type="button" onClick={() => props.onLinkPress?.(href!)}>
+            {label}
+          </button>
+        ))}
+      </p>
+    );
+  },
 }));
 vi.mock("../../state/entities", () => ({
   useLiveThreadLinkLabels: (markdown: string) => markdown,
@@ -139,4 +155,22 @@ it("opens a workspace file link in a question in the thread's file viewer", asyn
       { environmentId: "env-1", threadId: "thread-1", path: ["docs", "probe.md"], line: "12" },
     ],
   ]);
+});
+
+it("holds a remote image in a question until the user taps it", async () => {
+  using _screen = setup("Look: ![pixel](https://tracker.example.com/p.gif)");
+  const resolve = harness.markdown.resolveImageSource!;
+  const request = (href: string) => Promise.resolve(resolve({ href, alt: null, title: null }));
+
+  await expect(request("docs/local.png")).resolves.toBeNull();
+  let loaded = false;
+  void request("https://tracker.example.com/p.gif").then(() => {
+    loaded = true;
+  });
+  await act(async () => {});
+  expect(loaded).toBe(false);
+
+  await act(async () => harness.markdown.onImagePress!("https://tracker.example.com/p.gif"));
+  expect(loaded).toBe(true);
+  expect(harness.openedUrls).toEqual([]);
 });

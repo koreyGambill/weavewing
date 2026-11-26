@@ -18,6 +18,8 @@ import {
   ThreadMarkdownImageUnavailable,
 } from "../threads/ThreadMarkdownImage";
 import { ThreadMarkdownVideo } from "../threads/ThreadMarkdownVideo";
+import { RemoteMediaGate } from "../threads/RemoteMediaGate";
+import { loadPendingRemoteMedia, useRemoteMediaImageSource } from "../threads/remoteMediaConsent";
 import { markdownFileEmbedLabel, resolveMarkdownMediaPreview } from "../../lib/markdownMedia";
 import {
   normalizeNativeMarkdownUrl,
@@ -135,28 +137,32 @@ export function FileMarkdownPreview(props: {
     if (media?.access === "direct") {
       if (media.kind === "video") {
         return (
-          <ThreadMarkdownVideo
-            source={{
-              type: "media",
-              name: media.name,
-              mimeType: media.mimeType,
-              uri: normalizeNativeMarkdownUrl(media.uri),
-              actionsSource: preview?.source.actionsSource,
-            }}
-            thumbnailVisible
-          />
+          <RemoteMediaGate environmentId={props.environmentId} uri={media.uri} kind="video">
+            <ThreadMarkdownVideo
+              source={{
+                type: "media",
+                name: media.name,
+                mimeType: media.mimeType,
+                uri: normalizeNativeMarkdownUrl(media.uri),
+                actionsSource: preview?.source.actionsSource,
+              }}
+              thumbnailVisible
+            />
+          </RemoteMediaGate>
         );
       }
       return (
-        <ThreadMarkdownImageView
-          uri={normalizeNativeMarkdownUrl(media.uri)}
-          sourceKey={media.uri}
-          unavailable={false}
-          alt={image.alt}
-          format={media.mimeType === "image/svg+xml" ? "svg" : undefined}
-          actionsSource={preview?.source.actionsSource}
-          onPressPreview={setExpandedFile}
-        />
+        <RemoteMediaGate environmentId={props.environmentId} uri={media.uri} kind="image">
+          <ThreadMarkdownImageView
+            uri={normalizeNativeMarkdownUrl(media.uri)}
+            sourceKey={media.uri}
+            unavailable={false}
+            alt={image.alt}
+            format={media.mimeType === "image/svg+xml" ? "svg" : undefined}
+            actionsSource={preview?.source.actionsSource}
+            onPressPreview={setExpandedFile}
+          />
+        </RemoteMediaGate>
       );
     }
     if (props.captured || media === null || media.access === "unavailable") {
@@ -181,12 +187,15 @@ export function FileMarkdownPreview(props: {
     );
   };
   const styles = useMarkdownPreviewStyles();
-  const resolveImageSource = useMarkdownImageSource({
-    environmentId: props.environmentId,
-    threadId: props.threadId,
-    workspaceRoot: markdownDirectory,
-    captured: props.captured,
-  });
+  const resolveImageSource = useRemoteMediaImageSource(
+    props.environmentId,
+    useMarkdownImageSource({
+      environmentId: props.environmentId,
+      threadId: props.threadId,
+      workspaceRoot: markdownDirectory,
+      captured: props.captured,
+    }),
+  );
   const openMedia = (href: string, imageEmbed = false) => {
     const media = resolveMarkdownMediaPreview(href, {
       environmentId: props.environmentId,
@@ -215,7 +224,7 @@ export function FileMarkdownPreview(props: {
     return true;
   };
   const onImagePress = (href: string) => {
-    openMedia(href, true);
+    if (!loadPendingRemoteMedia(href)) openMedia(href, true);
   };
   const onLinkPress = (href: string) => {
     if (!openMedia(href)) void tryOpenExternalUrl(href, "markdown-link");

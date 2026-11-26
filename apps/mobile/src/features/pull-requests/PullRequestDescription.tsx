@@ -17,6 +17,10 @@ import type { FilePreviewItem } from "../../components/ui/FilePreviewModal";
 import { isBotBadgeImage } from "./botBadgeImages";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { pullRequestDescriptionContent } from "./pullRequestDescriptionContent";
+import {
+  allowedRemoteMediaItems,
+  RemoteMediaEnvironmentContext,
+} from "../threads/remoteMediaConsent";
 
 const COLLAPSED_HEIGHT = 240;
 
@@ -31,6 +35,7 @@ export function PullRequestDescription(props: {
   const { expanded, onExpandedChange } = props;
   const [bodyHeight, setBodyHeight] = useState(0);
   const mediaContext = useContext(PullRequestMediaContext);
+  const environmentId = useContext(RemoteMediaEnvironmentContext);
   const { themeVariables: colors } = useAppearancePreferences();
   const fadeColor = colors[Platform.OS === "android" ? "--color-sheet-solid" : "--color-screen"];
   const content = useMemo(() => {
@@ -171,7 +176,7 @@ export function PullRequestDescription(props: {
                         .indexOf(attachment)
                     ]!
                   }
-                  gallery={gallery}
+                  gallery={allowedRemoteMediaItems(environmentId, gallery)}
                 />
               ),
             )}

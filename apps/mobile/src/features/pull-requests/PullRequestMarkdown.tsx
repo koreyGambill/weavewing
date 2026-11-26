@@ -36,6 +36,13 @@ import {
   type FilePreviewItem,
 } from "../../components/ui/FilePreviewModal";
 import { ThreadMarkdownImageView } from "../threads/ThreadMarkdownImage";
+import { RemoteMediaGate } from "../threads/RemoteMediaGate";
+import {
+  allowedRemoteMediaItems,
+  loadPendingRemoteMedia,
+  RemoteMediaEnvironmentContext,
+  useRemoteMediaImageSource,
+} from "../threads/remoteMediaConsent";
 import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText";
 import type { SelectableMarkdownTextProps } from "../../native/SelectableMarkdownText.types";
 
@@ -71,7 +78,11 @@ export function PullRequestMarkdownRepository(props: {
     <AutolinksContext value={autolinks}>
       <LineBreaksContext value={lineBreaks}>
         <ChangeRequestUrlContext value={url ?? null}>
-          <PullRequestMediaContext value={media}>{props.children}</PullRequestMediaContext>
+          <PullRequestMediaContext value={media}>
+            <RemoteMediaEnvironmentContext value={target.environmentId}>
+              {props.children}
+            </RemoteMediaEnvironmentContext>
+          </PullRequestMediaContext>
         </ChangeRequestUrlContext>
       </LineBreaksContext>
     </AutolinksContext>
@@ -87,22 +98,28 @@ function MarkdownImage(props: {
   const context = useContext(PullRequestMediaContext);
   const withGallery = useFilePreviewGallery();
   return (
-    <ThreadMarkdownImageView
-      uri={media.uri}
-      sourceKey={props.href}
-      cacheKey={media.cacheKey}
-      unavailable={media.unavailable || !/^https?:\/\//i.test(props.href)}
-      alt={props.alt}
-      onPressPreview={(source) =>
-        props.onPreview(
-          withGallery({
-            ...pullRequestImageSource(props.href, context),
-            name: source.name,
-            sourceIdentifier: source.sourceIdentifier,
-          }),
-        )
-      }
-    />
+    <RemoteMediaGate
+      environmentId={useContext(RemoteMediaEnvironmentContext)}
+      uri={"uri" in media.source ? (media.source.uri ?? null) : null}
+      kind="image"
+    >
+      <ThreadMarkdownImageView
+        uri={media.uri}
+        sourceKey={props.href}
+        cacheKey={media.cacheKey}
+        unavailable={media.unavailable || !/^https?:\/\//i.test(props.href)}
+        alt={props.alt}
+        onPressPreview={(source) =>
+          props.onPreview(
+            withGallery({
+              ...pullRequestImageSource(props.href, context),
+              name: source.name,
+              sourceIdentifier: source.sourceIdentifier,
+            }),
+          )
+        }
+      />
+    </RemoteMediaGate>
   );
 }
 
@@ -121,6 +138,7 @@ export function PullRequestMarkdown(props: {
 }) {
   const mediaContext = useContext(PullRequestMediaContext);
   const changeRequestUrl = useContext(ChangeRequestUrlContext);
+  const environmentId = useContext(RemoteMediaEnvironmentContext);
   const segments = useMemo(() => splitPullRequestBody(props.markdown), [props.markdown]);
   const [undoneTicks, setUndoneTicks] = useState(0);
   const gallery: FilePreviewItem[] = markdownImageSources(
@@ -134,7 +152,7 @@ export function PullRequestMarkdown(props: {
     )
     .map((uri) => pullRequestImageSource(uri, mediaContext));
   const segmentProps = {
-    gallery,
+    gallery: allowedRemoteMediaItems(environmentId, gallery),
     lineBreaks: props.lineBreaks,
     undoneTicks,
     onTaskListChange: props.onTaskListChange,
@@ -229,6 +247,7 @@ function PullRequestMarkdownContent(props: {
     void openPullRequest(href);
   };
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
+  const resolveImageSource = useRemoteMediaImageSource(useContext(RemoteMediaEnvironmentContext));
   const renderImage: MarkdownImageRenderer = (image) => (
     <MarkdownImage href={resolveMediaUrl(image.href)} alt={image.alt} onPreview={setPreview} />
   );
@@ -241,7 +260,9 @@ function PullRequestMarkdownContent(props: {
         textStyle={styles.nativeTextStyle}
         onLinkPress={openLink}
         renderImage={renderImage}
+        resolveImageSource={resolveImageSource}
         onImagePress={(href) =>
+          loadPendingRemoteMedia(href) ||
           setPreview(pullRequestImageSource(resolveMediaUrl(href), mediaContext))
         }
         onTaskListItemPress={props.onTaskListItemPress}
