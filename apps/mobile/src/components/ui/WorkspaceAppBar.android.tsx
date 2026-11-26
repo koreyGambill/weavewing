@@ -16,6 +16,7 @@ import { AndroidAnchoredMenu } from "./AndroidAnchoredMenu.android";
 import { AndroidHeaderIconButton } from "./AndroidScreenHeader.android";
 import { AppText } from "./AppText";
 import { NativeAppBar } from "./NativeAppBar.android";
+import { useAndroidControlSizing } from "./useAndroidControlSizing";
 import { useControlTheme } from "./useControlTheme";
 import { useToolbarLayout } from "./useToolbarLayout";
 
@@ -135,6 +136,8 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
   const { colors } = useControlTheme();
   const tint = colors["--color-header-foreground"];
   const { height, paddingTop, paddingBottom } = useToolbarLayout();
+  // Trailing buttons are React Native icon buttons, which grow with the text size setting.
+  const trailingButtonSize = useAndroidControlSizing().buttonSize;
   const trailingCount = Children.toArray(props.trailing).length;
   const filterMenu = filter ? (
     <AndroidAnchoredMenu
@@ -180,7 +183,7 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
                 collapsable={false}
                 className="justify-center"
                 // Keeps the title clear of the trailing buttons drawn over the bar.
-                style={{ height: ACTION_SIZE, paddingRight: trailingCount * ACTION_SIZE }}
+                style={{ height: ACTION_SIZE, paddingRight: trailingCount * trailingButtonSize }}
               >
                 {props.titleContent ?? (
                   <AppText textRole="title" numberOfLines={1} className="text-header-foreground">
@@ -223,7 +226,10 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
         {trailingCount > 0 ? (
           <View
             className="absolute flex-row"
-            style={{ right: ACTION_END_INSET + 2 * ACTION_SIZE, top: (height - ACTION_SIZE) / 2 }}
+            style={{
+              right: ACTION_END_INSET + 2 * ACTION_SIZE,
+              top: (height - trailingButtonSize) / 2,
+            }}
           >
             {props.trailing}
           </View>
