@@ -218,6 +218,7 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as XwingEnvironments from "./xwing/XwingEnvironments.ts";
 import * as DevelopmentEnvironments from "./developmentEnvironments/DevelopmentEnvironments.ts";
+import * as WorktreeMcpService from "./mcp/WorktreeMcpService.ts";
 import * as DevelopmentEnvironmentLifecycle from "./developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1519,6 +1520,7 @@ export const layerWsRpc = (
       const deviceService = yield* DeviceService.DeviceService;
       const xwingEnvironments = yield* XwingEnvironments.XwingEnvironments;
       const developmentEnvironments = yield* DevelopmentEnvironments.DevelopmentEnvironments;
+      const worktreeHandoff = yield* WorktreeMcpService.WorktreeMcpService;
       const environmentLifecycle =
         yield* DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
       const deviceHostContext =
@@ -3090,6 +3092,8 @@ export const layerWsRpc = (
             ),
         [WS_METHODS.projectsCreateFromThread]: () => UpstreamClientCompat.createProjectFromThread,
         [WS_METHODS.threadsChangeFolder]: (input) => developmentEnvironments.changeFolder(input),
+        [WS_METHODS.threadsHandoffToWorktree]: ({ threadId, ...handoff }) =>
+          worktreeHandoff.handoffThread(threadId, handoff),
         [WS_METHODS.projectCloneCancel]: (input) =>
           projectCloneTracker.cancel(input.projectId).pipe(Effect.map((applied) => ({ applied }))),
         [WS_METHODS.projectCloneRetry]: (input) =>

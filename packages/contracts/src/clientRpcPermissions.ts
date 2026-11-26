@@ -82,6 +82,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Writing a guide runs a model on this environment's providers, which reading one does not.
   [WS_METHODS.pullRequestsGenerateReviewGuide]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadsChangeFolder]: AuthOrchestrationOperateScope,
+  // Makes a worktree and a branch, as creating a worktree does, then moves the thread there.
+  // Callers also need orchestration:operate; see clientRpcRequiredScopes.
+  [WS_METHODS.threadsHandoffToWorktree]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlCloneRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlPublishRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlStar]: AuthSourceControlWriteScope,
@@ -148,6 +151,9 @@ export function clientRpcRequiredScopes(
 ): readonly AuthEnvironmentScope[] {
   if (method === ORCHESTRATION_V2_WS_METHODS.prepareSummaryHandoff) {
     return [AuthOrchestrationOperateScope, AuthOrchestrationReadScope];
+  }
+  if (method === WS_METHODS.threadsHandoffToWorktree) {
+    return [AuthSourceControlWriteScope, AuthOrchestrationOperateScope];
   }
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);

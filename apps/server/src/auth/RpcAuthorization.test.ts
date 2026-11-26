@@ -202,6 +202,14 @@ it("serves automation summaries to readers and guards them on the client too", (
   ]);
 });
 
+it("requires source control and thread operation to hand a thread off to a worktree", () => {
+  const input = { threadId: "thread-1", branch: "feature/handoff" };
+  expect(clientRpcRequiredScopes(WS_METHODS.threadsHandoffToWorktree, input)).toEqual([
+    AuthSourceControlWriteScope,
+    AuthOrchestrationOperateScope,
+  ]);
+});
+
 it("requires operate permission for host retry while preserving read-only listing", () => {
   expect(requiredScopeForDeviceList({})).toBe(AuthOrchestrationReadScope);
   expect(requiredScopeForDeviceList({ retryHostId: "remote-host" })).toBe(
@@ -559,6 +567,41 @@ it.effect("requires task permission before attaching a prepared worktree to a th
         reference: "42",
         mode: "worktree",
         threadId: ThreadId.make("thread"),
+      }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
+    expect(handled).toBe(false);
+  }),
+);
+
+it.effect("refuses a worktree handoff to a connection that cannot move threads", () =>
+  Effect.gen(function* () {
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (
+          tag,
+        ): tag is Exclude<
+          keyof typeof RPC_REQUIRED_SCOPES,
+          typeof WS_METHODS.threadsHandoffToWorktree
+        > => tag !== WS_METHODS.threadsHandoffToWorktree,
+      ),
+    );
+    let handled = false;
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.threadsHandoffToWorktree, () =>
+            Effect.sync(() => {
+              handled = true;
+            }).pipe(Effect.andThen(Effect.never)),
+          ),
+          RpcAuthorization.layer([AuthSourceControlWriteScope]),
+        ),
+      ),
+    );
+    expect(
+      yield* client[WS_METHODS.threadsHandoffToWorktree]({
+        threadId: ThreadId.make("thread"),
+        branch: "feature/handoff",
       }).pipe(Effect.flip),
     ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
     expect(handled).toBe(false);

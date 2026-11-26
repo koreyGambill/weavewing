@@ -1278,6 +1278,40 @@ it("hides the branch's pull request while the branch picker shows another ref", 
   await expect.element(chip).toBeVisible();
 });
 
+it("hands a thread off to a new worktree from the location menu", async () => {
+  const handoffs: unknown[] = [];
+  using _handoff = answerRpc(WS_METHODS.threadsHandoffToWorktree, (input: unknown) => {
+    handoffs.push(input);
+    return Effect.succeed({
+      worktreePath: "/worktrees/render/feature/handoff",
+      branch: "feature/handoff",
+      baseRef: "main",
+      startedFromOrigin: false,
+      setupScript: { status: "no-script" },
+      continuation: { status: "skipped" },
+      note: "Handoff recorded.",
+    });
+  });
+  await using _row = await renderRowAtWidth("row-handoff", null, 1280);
+  const location = page.getByRole("button", { name: /^Location:/ });
+  await expect.element(location).toBeVisible();
+  (await location.element()).focus();
+  await userEvent.keyboard("{Enter}");
+  await page.getByRole("menuitem", { name: /Hand off to a worktree/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Hand off to a worktree" });
+  await expect.element(dialog).toBeVisible();
+  await dialog.getByRole("textbox", { name: "New branch" }).fill("feature/handoff");
+  await dialog.getByRole("button", { name: "Hand off" }).click();
+  await expect.element(dialog).not.toBeInTheDocument();
+  expect(handoffs).toEqual([
+    expect.objectContaining({
+      threadId: "row-handoff",
+      branch: "feature/handoff",
+      runSetupScript: true,
+    }),
+  ]);
+});
+
 it("opens the location menu from the keyboard and returns focus on Escape", async () => {
   await using _row = await renderRowAtWidth("row-location", "/w/render", 1280);
   const location = page.getByRole("button", { name: /^Location:/ });

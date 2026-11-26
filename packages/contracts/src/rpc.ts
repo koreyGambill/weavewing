@@ -1,4 +1,9 @@
 import { XwingRestoreResult } from "./xwingOperations.ts";
+import {
+  ThreadWorktreeHandoffInput,
+  WorktreeMcpFailure,
+  WorktreeMcpHandoffResult,
+} from "./worktreeMcp.ts";
 import { ThreadChangeFolderInput, ThreadChangeFolderError } from "./developmentEnvironments.ts";
 import {
   NotificationError,
@@ -605,6 +610,7 @@ export const WS_METHODS = {
   projectsCreateNew: "projects.createNew",
   projectsCreateFromThread: "projects.createFromThread",
   threadsChangeFolder: "threads.changeFolder",
+  threadsHandoffToWorktree: "threads.handoffToWorktree",
 
   shellOpenInEditor: "shell.openInEditor",
 
@@ -1723,6 +1729,12 @@ const WsThreadsChangeFolderRpc = Rpc.make(WS_METHODS.threadsChangeFolder, {
   payload: ThreadChangeFolderInput,
   success: DevelopmentEnvironmentSelectCheckoutResult,
   error: Schema.Union([ThreadChangeFolderError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadsHandoffToWorktreeRpc = Rpc.make(WS_METHODS.threadsHandoffToWorktree, {
+  payload: ThreadWorktreeHandoffInput,
+  success: WorktreeMcpHandoffResult,
+  error: Schema.Union([WorktreeMcpFailure, EnvironmentAuthorizationError]),
 });
 
 const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -3022,6 +3034,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsCreateNewRpc,
   WsProjectsCreateFromThreadRpc,
   WsThreadsChangeFolderRpc,
+  WsThreadsHandoffToWorktreeRpc,
   WsProjectsWriteFileRpc,
   WsProjectsAllowOutsideEditsRpc,
   WsProjectsRevokeOutsideEditsRpc,

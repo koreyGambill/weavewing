@@ -125,6 +125,33 @@ describe("command permissions", () => {
     }),
   );
 
+  it.effect("requires source control and thread grants to hand a thread off to a worktree", () =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const handoff = createCommandPermissions(runtime, WS_METHODS.threadsHandoffToWorktree);
+      const input = { threadId: ThreadId.make("thread-1"), branch: "feature/handoff" };
+      const withScopes = (scopes: AuthSessionState["scopes"]) =>
+        AsyncResult.success({ ...grant(false), scopes, permissions: scopes });
+      // Operate alone moves threads but cannot make the worktree and branch.
+      registry.set(sessions(env), withScopes([AuthOrchestrationOperateScope]));
+      expect(registry.get(handoff.permissionAtom(env, input))).toBe(false);
+      expect((yield* handoff.authorize(registry, env, input).pipe(Effect.flip))._tag).toBe(
+        "EnvironmentAuthorizationError",
+      );
+      registry.set(sessions(env), withScopes([AuthSourceControlWriteScope]));
+      expect(registry.get(handoff.permissionAtom(env, input))).toBe(false);
+      registry.set(
+        sessions(env),
+        withScopes([AuthSourceControlWriteScope, AuthOrchestrationOperateScope]),
+      );
+      expect(registry.get(handoff.permissionAtom(env, input))).toBe(true);
+      yield* handoff.authorize(registry, env, input);
+      // The grant is checked against the destination environment, not any connected one.
+      registry.set(sessions(other), withScopes([AuthOrchestrationOperateScope]));
+      expect(registry.get(handoff.permissionAtom(other, input))).toBe(false);
+    }),
+  );
+
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.gen(function* () {
       const registry = yield* setup;

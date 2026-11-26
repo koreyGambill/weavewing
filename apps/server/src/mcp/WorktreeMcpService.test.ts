@@ -693,6 +693,57 @@ describe("t3_worktree_handoff", () => {
     }),
   );
 
+  it.effect("moves a thread for a person through the same steps the agent tool takes", () =>
+    Effect.gen(function* () {
+      const agent = makeHarness();
+      const person = makeHarness();
+      const agentResult = yield* runHandoff(agent, { branch: "feature/same-steps" });
+      const personResult = yield* WorktreeMcpService.WorktreeMcpService.pipe(
+        Effect.flatMap((service) =>
+          service.handoffThread(person.scope.thread!.threadId, { branch: "feature/same-steps" }),
+        ),
+        Effect.provide(person.layer),
+      );
+      expect(personResult).toEqual(agentResult);
+      expect(person.createWorktree.mock.calls).toEqual(agent.createWorktree.mock.calls);
+      const binding = (call: unknown) => {
+        const {
+          commandId: _commandId,
+          workspaceChange,
+          ...rest
+        } = call as {
+          commandId: string;
+          workspaceChange?: string;
+        };
+        return { rest, workspaceChange };
+      };
+      const agentBinding = binding(agent.dispatch.mock.calls[0]![0]);
+      const personBinding = binding(person.dispatch.mock.calls[0]![0]);
+      expect(personBinding.rest).toEqual(agentBinding.rest);
+      // Only the agent, handing off from its own turn, may move a thread that is still running.
+      expect(agentBinding.workspaceChange).toBe("agent-handoff");
+      expect(personBinding.workspaceChange).toBeUndefined();
+    }),
+  );
+
+  it.effect("shares one in-flight guard between a person's and the agent's handoff", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const harness = makeHarness({ createWorktreeGate: Deferred.await(gate) });
+      const service = yield* resolveService(harness);
+      const agent = yield* Effect.forkChild(
+        Effect.exit(service.handoff(harness.scope, { branch: "feature/guard-agent" })),
+      );
+      yield* Effect.yieldNow;
+      const person = yield* Effect.exit(
+        service.handoffThread(harness.scope.thread!.threadId, { branch: "feature/guard-person" }),
+      );
+      expectTypedFailure(person, { _tag: "WorktreeMcpFailure", code: "handoff_in_progress" });
+      yield* Deferred.succeed(gate, undefined);
+      expect(Exit.isSuccess(yield* Fiber.join(agent))).toBe(true);
+    }),
+  );
+
   it.effect("reports a setup script defect without failing the handoff", () => {
     const harness = makeHarness({ setupScript: "dies" });
     return Effect.gen(function* () {

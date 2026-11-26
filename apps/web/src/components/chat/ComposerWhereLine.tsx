@@ -3,7 +3,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { projectPickerPathLabel } from "@t3tools/client-runtime/project-picker";
 import { useAtomValue } from "@effect/atom-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { Boxes, FolderIcon, MapPinIcon, PlusIcon } from "lucide-react";
+import { Boxes, FolderGit2Icon, FolderIcon, MapPinIcon, PlusIcon } from "lucide-react";
 
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import type { DraftId } from "~/composerDraftStore";
@@ -226,7 +226,7 @@ function ComposerLocationMenu(props: {
   const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
   // Set when an item hands focus to another popup, so the menu does not take it back.
   const [focusHandedOff, setFocusHandedOff] = useState(false);
-  const { chooseXwingEnvironment, newEnvironment } = actions;
+  const { chooseXwingEnvironment, newEnvironment, handoffWorktree } = actions;
   return (
     <Menu
       onOpenChange={(open) => {
@@ -277,6 +277,12 @@ function ComposerLocationMenu(props: {
           <MenuItem onClick={newEnvironment}>
             <PlusIcon />
             New environment…
+          </MenuItem>
+        ) : null}
+        {handoffWorktree ? (
+          <MenuItem onClick={handoffWorktree}>
+            <FolderGit2Icon />
+            Hand off to a worktree…
           </MenuItem>
         ) : null}
       </MenuPopup>

@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /** Uses the managed worktree folder; handoff detaches the provider, ending this turn and resuming there next run. */
 export const WorktreeMcpHandoffInput = Schema.Struct({
@@ -28,6 +28,19 @@ export const WorktreeMcpHandoffInput = Schema.Struct({
   ),
 });
 export type WorktreeMcpHandoffInput = typeof WorktreeMcpHandoffInput.Type;
+
+const { continuationPrompt: _continuationPrompt, ...handoffFields } =
+  WorktreeMcpHandoffInput.fields;
+
+/**
+ * A person's request to move a stopped thread into a new worktree on a new branch, through the
+ * same steps as the `t3_worktree_handoff` agent tool. The thread waits for its next message.
+ */
+export const ThreadWorktreeHandoffInput = Schema.Struct({
+  threadId: ThreadId,
+  ...handoffFields,
+});
+export type ThreadWorktreeHandoffInput = typeof ThreadWorktreeHandoffInput.Type;
 
 export const WorktreeMcpSetupScriptStatus = Schema.Union([
   Schema.Struct({

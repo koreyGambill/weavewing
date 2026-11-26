@@ -62,6 +62,12 @@ export const changeThreadFolder = createEnvironmentRpcCommand(connectionAtomRunt
   tag: WS_METHODS.threadsChangeFolder,
 });
 
+/** Moves a stopped thread into a new worktree on a new branch, as the agent handoff tool does. */
+export const handoffThreadToWorktree = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "threads:handoff-to-worktree",
+  tag: WS_METHODS.threadsHandoffToWorktree,
+});
+
 export const unlinkThreadEnvironment = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "development-environments:unlink",
   tag: WS_METHODS.developmentEnvironmentsUnlink,

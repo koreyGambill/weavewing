@@ -55,11 +55,13 @@ import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
 import { useAtomValue } from "@effect/atom-react";
 import { createDevelopmentEnvironment } from "../state/developmentEnvironmentLifecycle";
+import { handoffThreadToWorktree } from "../state/xwingEnvironments";
 import {
   XwingCheckoutChooser,
   type XwingCheckoutChooserHandle,
 } from "./xwing/XwingCheckoutChooser";
 import { ComposerLocationActionsContext } from "./chat/composerLocationActions";
+import { openHandoffWorktree } from "./chat/handoffWorktreeDialogState";
 import { useEnvironmentScope } from "../state/session";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
@@ -527,6 +529,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   const canCreateEnvironment = useAtomValue(
     createDevelopmentEnvironment.permissionAtom(environmentId),
   );
+  const canHandoffWorktree = useAtomValue(handoffThreadToWorktree.permissionAtom(environmentId));
   const threadRef = scopeThreadRef(environmentId, threadId);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const draftXwingEnvironment = useComposerDraftStore(
@@ -695,6 +698,15 @@ export const BranchToolbar = memo(function BranchToolbar({
     newEnvironment:
       xwingChooserOffered && canCreateEnvironment
         ? () => setCreateEnvironmentOpen(true)
+        : undefined,
+    // The server makes T3 worktrees only, and a thread already in one cannot move again.
+    handoffWorktree:
+      isServerThread &&
+      showGitControls &&
+      activeWorktreePath === null &&
+      worktreeProvider === "t3" &&
+      canHandoffWorktree
+        ? () => openHandoffWorktree(threadRef)
         : undefined,
   };
   const items: ReadonlyArray<ComposerRowItem> = [

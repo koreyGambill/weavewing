@@ -86,6 +86,7 @@ import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceR
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as WorktreeMcpService from "./mcp/WorktreeMcpService.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as ThreadReplies from "./orchestration-v2/ThreadReplies.ts";
@@ -647,6 +648,8 @@ const layerDevelopmentEnvironmentHolds = DevelopmentEnvironmentHolds.layer.pipe(
 const layerOrchestrationApplication = Layer.mergeAll(
   CheckpointDiffQuery.layer,
   NativeChildWorkQuery.layer,
+  // The same layer the MCP worktree toolkit provides, so both share one per-thread handoff guard.
+  WorktreeMcpService.layer,
   DevelopmentEnvironments.layer.pipe(
     Layer.provide(
       Layer.mergeAll(

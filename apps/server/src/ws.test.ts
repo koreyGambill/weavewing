@@ -108,6 +108,7 @@ import * as CodexInstallation from "./provider/CodexInstallation.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as XwingEnvironments from "./xwing/XwingEnvironments.ts";
 import * as DevelopmentEnvironments from "./developmentEnvironments/DevelopmentEnvironments.ts";
+import * as WorktreeMcpService from "./mcp/WorktreeMcpService.ts";
 import * as DevelopmentEnvironmentLifecycle from "./developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
@@ -959,6 +960,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(XwingEnvironments.XwingEnvironments)({}),
   Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
   Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+  Layer.mock(WorktreeMcpService.WorktreeMcpService)({}),
 );
 
 const layerConfigSources = Layer.mergeAll(
