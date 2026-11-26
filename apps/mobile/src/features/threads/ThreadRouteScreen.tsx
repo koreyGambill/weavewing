@@ -463,6 +463,8 @@ function ThreadRouteContent(
   const sideChatParentId = isSideChat ? selectedThread.lineage.parentThreadId : null;
   const rewindContext = useAtomCommand(threadEnvironment.rewindContext, { reportFailure: false });
   const [rewindingContext, setRewindingContext] = useState(false);
+  // Keyed by thread, so moving to another thread never opens its sheet.
+  const [waitingSheetFor, setWaitingSheetFor] = useState<string | null>(null);
   const rewindRun =
     selectedThread &&
     !isSideChat &&
@@ -1079,6 +1081,7 @@ function ThreadRouteContent(
   }
 
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  const waitingThreadKey = scopedThreadKey(selectedThread.environmentId, selectedThread.id);
   const renderThreadRouteBody = () => (
     <>
       <GitActionProgressOverlay
@@ -1099,12 +1102,18 @@ function ThreadRouteContent(
                 inspectorMode={inspectorMode}
                 onOpenFilesInspector={handleOpenFilesInspector}
                 onReturnToThread={props.onReturnToThread}
+                // The sheet reads the thread's detail, which a thread being created lacks.
+                {...(selectedThreadDetailRef === null
+                  ? {}
+                  : { onOpenWaiting: () => setWaitingSheetFor(waitingThreadKey) })}
               />
             )
           }
           canOperateThread={canOperateThread}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
           selectedThreadDetailRef={selectedThreadDetailRef}
+          waitingSheetOpen={waitingSheetFor === waitingThreadKey}
+          onWaitingSheetOpenChange={(open) => setWaitingSheetFor(open ? waitingThreadKey : null)}
           contentPresentation={contentPresentation}
           screenTone={connectionTone(
             routeConnectionState,

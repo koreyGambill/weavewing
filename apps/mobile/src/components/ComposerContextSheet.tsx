@@ -3,6 +3,7 @@ import * as Dialog from "./ui/Dialog";
 import { useOpenPullRequest } from "../native/useOpenPullRequest";
 import { SourceFileSurface } from "../features/files/SourceFileSurface";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
+import { sentContextSections } from "@t3tools/shared/sentContext";
 import type {
   ComposerContextRecord,
   ElementContextSource,
@@ -327,6 +328,28 @@ export function ComposerContextSheet(props: {
             {record.kind === "environment" ? (
               <ContextField label="Machine" value={record.label} />
             ) : null}
+            {record.kind === "waiting-item"
+              ? sentContextSections(record).map((section, index) =>
+                  section.label === null ? (
+                    <Text
+                      // oxlint-disable-next-line react/no-array-index-key -- The sections are a fixed list derived from one record.
+                      key={index}
+                      selectable
+                      className="text-base text-foreground"
+                    >
+                      {section.text}
+                    </Text>
+                  ) : (
+                    <ContextField
+                      // oxlint-disable-next-line react/no-array-index-key -- The sections are a fixed list derived from one record.
+                      key={index}
+                      label={section.label}
+                      value={section.text}
+                      code={section.preformatted}
+                    />
+                  ),
+                )
+              : null}
             {record.kind === "skill" ? (
               <View className="gap-3">
                 <ContextField label="Skill" value={record.name} />

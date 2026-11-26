@@ -173,8 +173,11 @@ import type { DraftComposerAttachment } from "../lib/composerImages";
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
+  projectComposerContextForProvider,
   threadContextRecord,
+  toKindScopedComposerContextId,
 } from "@t3tools/shared/composerContextReferences";
+import { addQaDiscuss, removeQaDiscuss } from "../features/threads/waiting/qaDiscuss";
 import { appAtomRegistry } from "./atom-registry";
 import { startComposerDraftOperation } from "./composerDraftOperations";
 import { threadOutboxManager } from "./thread-outbox";
@@ -1040,6 +1043,35 @@ describe("mobile composer drafts", () => {
     expect(restored[draftKey]?.context?.records).toEqual([record]);
     expect(clearComposerDraftContentState(restored, draftKey)[draftKey]?.context).toBeUndefined();
     setComposerDraftText(draftKey, "Fix next");
+    expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
+  });
+
+  it("sends a QA Discuss reference as the line the agent reads, and takes it out again", () => {
+    const draftKey = "discuss-environment:discuss-thread";
+    const record = {
+      version: 1 as const,
+      kind: "waiting-item" as const,
+      contextId: toKindScopedComposerContextId("waiting-item", "landing-1/change-a"),
+      label: "QA3 · discuss · Compact strip",
+      itemKind: "qa" as const,
+      key: "landing-1/change-a",
+      ref: "QA3",
+      title: "Compact strip",
+      sha: "0123456789abcdef",
+    };
+    setComposerDraftText(draftKey, "Looks off");
+    expect(addQaDiscuss(draftKey, record)).toBe(true);
+    const draft = getComposerDraftSnapshot(draftKey);
+    expect(draft.context?.records).toEqual([record]);
+    // The send path hands the draft's text and context to the outbox unchanged.
+    expect(composerContextSendBlockReason(draft.context)).toBeNull();
+    expect(
+      projectComposerContextForProvider({
+        text: draft.text,
+        records: draft.context!.records,
+      }).trimEnd(),
+    ).toBe("About QA3 (landing 0123456789abcdef, change change-a): Compact strip\n\nLooks off");
+    removeQaDiscuss(draftKey, record);
     expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
   });
 

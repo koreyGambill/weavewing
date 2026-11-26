@@ -311,6 +311,8 @@ export function threadListV2RowAccessibilityLabel(input: {
   readonly providerNameLabel: string | null;
   readonly hasQueuedMessages: boolean;
   readonly regeneratingTitle: boolean;
+  /** What the row's waiting badge says, such as "2 waiting on you: 2 tasks". */
+  readonly waitingLabel?: string | null;
 }): string {
   // Mirrors the row's meta line: a card shows Woke, else its status, else the time.
   const meta =
@@ -322,6 +324,7 @@ export function threadListV2RowAccessibilityLabel(input: {
   return [
     input.title,
     meta,
+    input.waitingLabel ?? null,
     input.providerNameLabel,
     input.hasQueuedMessages ? "messages queued to send" : null,
     input.regeneratingTitle ? "regenerating title" : null,

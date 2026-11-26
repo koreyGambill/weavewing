@@ -86,6 +86,8 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { ThreadWaitingBadge } from "./waiting/ThreadWaitingBadge";
+import { waitingBadgeLabel } from "./waiting/waitingStrip.logic";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
@@ -796,6 +798,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     providerNameLabel,
     hasQueuedMessages: props.hasQueuedMessages === true,
     regeneratingTitle: isRegeneratingTitle,
+    waitingLabel: waitingBadgeLabel(thread.waitingCounts),
   });
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
@@ -1211,6 +1214,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         </Text>
         <View className="flex-row items-center gap-1.5" style={{ minHeight: titleLineHeight }}>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+          <ThreadWaitingBadge
+            counts={thread.waitingCounts}
+            {...(selected
+              ? {
+                  foregroundClassName: selectedThreadRowColors.foregroundClassName,
+                  iconTintClassName: selectedThreadRowColors.iconTintClassName,
+                }
+              : {})}
+          />
           {pinnedRow ? (
             <SymbolView
               name="pin"
@@ -1543,6 +1555,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             ) : null}
           </View>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+          <ThreadWaitingBadge
+            counts={thread.waitingCounts}
+            {...(selected
+              ? {
+                  foregroundClassName: selectedThreadRowColors.foregroundClassName,
+                  iconTintClassName: selectedThreadRowColors.iconTintClassName,
+                }
+              : {})}
+          />
           <Text
             className={cn(
               "text-sm tabular-nums",

@@ -215,6 +215,7 @@ import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
 import { ThreadSideChatsRow } from "./ThreadSideChatsRow";
+import { ThreadWaitingStrip } from "./waiting/ThreadWaitingStrip";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-scroll-position";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
@@ -241,6 +242,9 @@ export interface ThreadDetailScreenProps {
   readonly selectedThread: EnvironmentThreadShell;
   /** Use this for detail reads; it stays null until queued creation reaches the server. */
   readonly selectedThreadDetailRef: ScopedThreadRef | null;
+  /** The thread's "Waiting and history" sheet, opened from the strip or the header. */
+  readonly waitingSheetOpen?: boolean;
+  readonly onWaitingSheetOpenChange?: (open: boolean) => void;
   readonly contentPresentation: ThreadContentPresentation;
   readonly screenTone: StatusTone;
   readonly connectionError: string | null;
@@ -1714,6 +1718,17 @@ function ThreadDetailBody(
                       threadRef={props.selectedThreadDetailRef}
                       canOperateThread={props.canOperateThread}
                     />
+                    {props.draftMode || props.selectedThreadDetailRef === null ? null : (
+                      <ThreadWaitingStrip
+                        threadRef={props.selectedThreadDetailRef}
+                        draftKey={props.composerDraftKey}
+                        evidenceSupported={
+                          props.serverConfig?.environment.capabilities.evidence === true
+                        }
+                        open={props.waitingSheetOpen === true}
+                        onOpenChange={(open) => props.onWaitingSheetOpenChange?.(open)}
+                      />
+                    )}
                     {props.draftMode ? null : (
                       <ThreadSideChatsRow
                         environmentId={props.environmentId}

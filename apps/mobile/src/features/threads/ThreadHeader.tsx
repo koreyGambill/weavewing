@@ -21,6 +21,8 @@ export function ThreadHeader(props: {
   readonly hasThreadCwd: boolean;
   readonly inspectorMode: ThreadInspectorMode | null;
   readonly onOpenFilesInspector: () => void;
+  /** Opens the thread's "Waiting and history" sheet; absent where the thread has none. */
+  readonly onOpenWaiting?: () => void;
 }) {
   const goBack = useWorkspaceBackNavigation();
   const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
@@ -28,7 +30,18 @@ export function ThreadHeader(props: {
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
   const terminalMenu = threadTerminalMenu(props.gitControls);
   const filesVisible = props.inspectorMode === "files" && panes.auxiliaryPaneVisible;
-  const actions: AppBarAction[] = props.hasThreadCwd
+  const waitingAction: AppBarAction[] = props.onOpenWaiting
+    ? [
+        {
+          accessibilityLabel: "Waiting and history",
+          icon: "person.badge.clock",
+          separateBackground: false,
+          overflowOnly: true,
+          onPress: props.onOpenWaiting,
+        },
+      ]
+    : [];
+  const fileActions: AppBarAction[] = props.hasThreadCwd
     ? [
         {
           accessibilityLabel: filesVisible ? "Close files" : "Open files",
@@ -40,6 +53,7 @@ export function ThreadHeader(props: {
         },
       ]
     : [];
+  const actions = [...fileActions, ...waitingAction];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
 
   return (
