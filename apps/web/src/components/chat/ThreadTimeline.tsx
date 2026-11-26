@@ -10,7 +10,13 @@ import {
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
 import { useThreadEvidence } from "../../state/evidence";
-import { completionChild, withChildLandingCards } from "../evidence/qaCard.logic";
+import { useThreadHasSubagents } from "../../state/entities";
+import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
+import {
+  placedLandingIds,
+  timelineMayHoldQa,
+  withChildLandingCards,
+} from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
@@ -62,12 +68,10 @@ export function ThreadTimeline({
   const plainEntries =
     draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals, historyComplete);
   // QA cards read the thread's landings only when the timeline has somewhere to put them.
+  const hasSubagents = useThreadHasSubagents(threadDetailRef);
   const evidence = useThreadEvidence(
-    plainEntries.some(
-      (entry) => entry.kind === "thread-evidence" || completionChild(entry) !== undefined,
-    )
-      ? threadDetailRef
-      : null,
+    timelineMayHoldQa(plainEntries, hasSubagents) ? threadDetailRef : null,
+    placedLandingIds(plainEntries),
   );
   const entries =
     evidence.data === null || threadDetailRef === null
@@ -88,5 +92,9 @@ export function ThreadTimeline({
     }
     rememberReadyThreadTimeline({ threadKey: cacheKey, entries });
   }, [cacheKey, detailLoading, entries]);
-  return <MessagesTimeline {...timelineProps} timelineEntries={displayedEntries} />;
+  return (
+    <ThreadEvidenceContext value={evidence}>
+      <MessagesTimeline {...timelineProps} timelineEntries={displayedEntries} />
+    </ThreadEvidenceContext>
+  );
 }

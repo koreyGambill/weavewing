@@ -783,6 +783,13 @@ function WaivedNote({
     close();
     reloadEvidence();
   };
+  // The agent's record stays its own; Reopen is how the user changes it.
+  if (change.qa.by === "agent")
+    return change.qa.note.trim() ? (
+      <p className="min-w-0 break-words text-muted-foreground">
+        Dismissed by the agent: {change.qa.note}
+      </p>
+    ) : null;
   if (!editing)
     return (
       <div className="min-w-0 space-y-0.5 text-muted-foreground">

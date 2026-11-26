@@ -101,13 +101,25 @@ export function useEvidenceEnvironment(threadRef: ScopedThreadRef | null) {
   return supported ? environmentId : null;
 }
 
-/** The landings a thread shows QA for; null `threadRef` reads nothing. */
-export function useThreadEvidence(threadRef: ScopedThreadRef | null) {
+/**
+ * The landings a thread shows QA for, with `landingIds` read even when older than the newest page;
+ * null `threadRef` reads nothing.
+ */
+export function useThreadEvidence(
+  threadRef: ScopedThreadRef | null,
+  landingIds: ReadonlyArray<string> = [],
+) {
   const environmentId = useEvidenceEnvironment(threadRef);
   const query = useEnvironmentQuery(
     threadRef === null || environmentId === null
       ? null
-      : evidenceThread({ environmentId, input: { threadId: threadRef.threadId } }),
+      : evidenceThread({
+          environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            ...(landingIds.length === 0 ? {} : { landingIds: [...landingIds] }),
+          },
+        }),
   );
   return { ...query, supported: environmentId !== null };
 }

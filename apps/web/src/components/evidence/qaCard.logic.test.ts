@@ -6,7 +6,9 @@ import {
   qaCardOutcome,
   qaCardStatus,
   qaCardTitle,
+  placedLandingIds,
   qaPresence,
+  timelineMayHoldQa,
   withChildLandingCards,
 } from "./qaCard.logic";
 
@@ -139,6 +141,37 @@ describe("withChildLandingCards", () => {
     ]);
     const late = landing("l2", "2026-11-25T11:00:00Z");
     expect(ids(withChildLandingCards(lead, entries, [late as never])).at(-1)).toBe("cards:l2");
+  });
+
+  it("reads and places a child's landing in a lead whose timeline names no child or landing", () => {
+    // Ordinary turns only: no evidence_record call and no completion message from the child.
+    const entries = [
+      work("ask", "2026-11-25T10:00:00Z", "run-1"),
+      work("next-start", "2026-11-25T10:20:00Z", "run-2"),
+      work("next-end", "2026-11-25T10:25:00Z", "run-2"),
+    ];
+    expect(timelineMayHoldQa(entries, false)).toBe(false);
+    expect(timelineMayHoldQa(entries, true)).toBe(true);
+    expect(
+      ids(withChildLandingCards(lead, entries, [landing("l1", "2026-11-25T10:10:00Z") as never])),
+    ).toEqual(["ask", "next-start", "next-end", "cards:l1"]);
+  });
+
+  it("asks for every landing the timeline places at its own calls, once each", () => {
+    const placed = (id: string, landingIds: ReadonlyArray<string>): TimelineEntry => ({
+      id,
+      kind: "thread-evidence",
+      createdAt: "2026-11-25T10:00:00Z",
+      runId: null,
+      landingIds,
+    });
+    expect(
+      placedLandingIds([
+        placed("b", ["landing-b"]),
+        work("w", "2026-11-25T10:01:00Z", "run-1"),
+        placed("a", ["landing-a", "landing-b"]),
+      ]),
+    ).toEqual(["landing-a", "landing-b"]);
   });
 
   it("leaves the lead's own landings and other threads' landings to their own rows", () => {

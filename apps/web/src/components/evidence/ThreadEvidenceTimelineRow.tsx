@@ -1,10 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpRightIcon, CheckIcon } from "lucide-react";
+import { use } from "react";
 
 import { useThreadEvidence } from "../../state/evidence";
 import { Button } from "../ui/button";
 import { qaCardTitle, qaPresence } from "./qaCard.logic";
+import { ThreadEvidenceContext } from "./ThreadEvidenceContext";
 import { ThreadQaCard } from "./ThreadQaCard";
 
 const landedOn = (landing: EvidenceLanding) =>
@@ -65,7 +67,10 @@ export function ThreadEvidenceTimelineRow({
   readonly threadRef: ScopedThreadRef;
   readonly landingIds: ReadonlyArray<string>;
 }) {
-  const { data, error, supported } = useThreadEvidence(threadRef);
+  // The thread's timeline reads its landings once for every row; a timeline shown elsewhere reads here.
+  const shared = use(ThreadEvidenceContext);
+  const own = useThreadEvidence(shared === null ? threadRef : null, landingIds);
+  const { data, error, supported } = shared ?? own;
   return (
     <div className="flex min-w-0 flex-col gap-2 px-1 py-0.5">
       {landingIds.map((landingId) => {

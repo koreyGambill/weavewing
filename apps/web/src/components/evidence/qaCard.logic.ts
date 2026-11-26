@@ -73,7 +73,7 @@ function runOf(entry: TimelineEntry): string | null {
 }
 
 /** The delegated child a completion entry reports on, if any. */
-export function completionChild(entry: TimelineEntry): string | undefined {
+function completionChild(entry: TimelineEntry): string | undefined {
   if (entry.kind === "message" && entry.message.origin?.kind === "subagent")
     return entry.message.origin.threadId;
   const item = entry.kind === "work" ? entry.entry.structuredPayload : undefined;
@@ -142,4 +142,28 @@ export function withChildLandingCards(
   });
   if (atEnd.length > 0) cards(undefined, atEnd);
   return result;
+}
+
+/**
+ * Whether the open thread reads its landings: it has a card spot of its own, a completion from a
+ * child, or delegated children that may have recorded a landing for it.
+ */
+export function timelineMayHoldQa(
+  entries: ReadonlyArray<TimelineEntry>,
+  hasSubagents: boolean,
+): boolean {
+  return (
+    hasSubagents ||
+    entries.some(
+      (entry) => entry.kind === "thread-evidence" || completionChild(entry) !== undefined,
+    )
+  );
+}
+
+/** The landings the loaded timeline places at its own `evidence_record` calls, sorted. */
+export function placedLandingIds(entries: ReadonlyArray<TimelineEntry>): ReadonlyArray<string> {
+  const ids = new Set(
+    entries.flatMap((entry) => (entry.kind === "thread-evidence" ? entry.landingIds : [])),
+  );
+  return [...ids].toSorted();
 }

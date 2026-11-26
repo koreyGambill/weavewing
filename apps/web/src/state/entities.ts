@@ -252,6 +252,16 @@ export function useQuietThreadProjection(
   );
 }
 
+const NO_THREAD_STRUCTURE_ATOM = Atom.make<EnvironmentThreadStructure | null>(null);
+
+/** Whether the thread has delegated work to child threads, from the structure it already holds. */
+export function useThreadHasSubagents(ref: ScopedThreadRef | null): boolean {
+  return useAtomValue(
+    ref === null ? NO_THREAD_STRUCTURE_ATOM : environmentThreadDetails.quietThreadAtom(ref),
+    (thread) => (thread?.projection.subagents.length ?? 0) > 0,
+  );
+}
+
 /** The detail's live visit mark, which the thread structure leaves out. */
 export function useThreadLastVisitedAt(ref: ScopedThreadRef | null): DateTime.Utc | null {
   return useAtomValue(
