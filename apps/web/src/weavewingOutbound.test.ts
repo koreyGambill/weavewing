@@ -45,7 +45,6 @@ const REVIEWED_MEDIA_SINKS = {
   "apps/web/src/components/contextChipParts.tsx": "attachment previews",
   "apps/web/src/components/device/DeviceStreamView.tsx": "local device stream",
   "apps/web/src/components/evidence/CaptureTile.tsx": "signed asset route",
-  "apps/web/src/components/evidence/EvidenceView.tsx": "signed asset route",
   "apps/web/src/components/files/AttachmentFilePreview.tsx": "signed asset route",
   "apps/web/src/components/files/AudioPreview.tsx": "signed asset route",
   "apps/web/src/components/files/extendedDocumentPreview.ts": "markup for sandboxed DocumentPages",
