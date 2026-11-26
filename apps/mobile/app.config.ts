@@ -601,10 +601,12 @@ function requireAccountsAtPrebuild(missing: readonly string[], exempt: boolean) 
   };
 }
 
-export default withDangerousMod(
-  withDangerousMod(config, [
-    "ios",
-    requireAccountsAtPrebuild(missingIosSettings, isIosPersonalTeamBuild),
-  ]),
-  ["android", requireAccountsAtPrebuild(missingExpoSettings, false)],
-);
+// Expo caches this module and adds mods to the config it loads, so each load starts from a fresh copy.
+export default () =>
+  withDangerousMod(
+    withDangerousMod({ ...config }, [
+      "ios",
+      requireAccountsAtPrebuild(missingIosSettings, isIosPersonalTeamBuild),
+    ]),
+    ["android", requireAccountsAtPrebuild(missingExpoSettings, false)],
+  );

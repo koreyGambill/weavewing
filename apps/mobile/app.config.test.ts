@@ -39,7 +39,7 @@ afterEach(() => {
 async function loadConfig(variant: string | undefined, env: Record<string, string> = {}) {
   vi.resetModules();
   testEnv.current = variant === undefined ? env : { APP_VARIANT: variant, ...env };
-  return (await import("./app.config.ts")).default;
+  return (await import("./app.config.ts")).default();
 }
 
 // Applies the config's plugins the way prebuild does and returns the iOS files they would write.
