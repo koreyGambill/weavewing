@@ -37,6 +37,7 @@ import { repositoryPathFromRemoteUrl } from "@t3tools/source-control-core/server
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import { withoutClaudeInstructionNotice } from "../orchestration-v2/Adapters/ClaudeInstructionUpdates.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -309,14 +310,16 @@ function isTextContentBlock(block: typeof TranscriptContentBlock.Type): boolean 
   return block.type === "text" || block.type === "input_text" || block.type === "output_text";
 }
 
+// T3 puts its instruction-update notice ahead of a resumed Claude session's prompt. The provider
+// keeps it as user text, but the user never wrote it, so import leaves it out.
 function extractText(
   content: string | ReadonlyArray<typeof TranscriptContentBlock.Type> | undefined,
 ): string {
-  if (typeof content === "string") return content.trim();
+  if (typeof content === "string") return withoutClaudeInstructionNotice(content).trim();
   if (content === undefined) return "";
   return content
     .filter(isTextContentBlock)
-    .map((block) => block.text?.trim() ?? "")
+    .map((block) => withoutClaudeInstructionNotice(block.text ?? "").trim())
     .filter((text) => text.length > 0)
     .join("\n");
 }
@@ -702,12 +705,7 @@ function shouldRetainDecodedRecord(
     if (isHiddenClaudeRecord(record) || (record.type !== "user" && record.type !== "assistant")) {
       return false;
     }
-    const content = record.message?.content;
-    return typeof content === "string"
-      ? content.trim().length > 0
-      : (content?.some(
-          (block) => isTextContentBlock(block) && (block.text?.trim().length ?? 0) > 0,
-        ) ?? false);
+    return extractText(record.message?.content).length > 0;
   }
   if (extractDecodedCwd(record) !== null) return true;
   return (

@@ -36,6 +36,11 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
+import {
+  CLAUDE_INSTRUCTION_NOTICE_MARKER,
+  claudeAppendSections,
+  claudeInstructionUpdate,
+} from "../orchestration-v2/Adapters/ClaudeInstructionUpdates.ts";
 
 const makeProjectShell = (workspaceRoot: string): OrchestrationProjectShell => ({
   id: ProjectId.make("project-1"),
@@ -3827,6 +3832,54 @@ describe("parseAgentSessionTranscript", () => {
 
     expect(thread?.title).toBe("Fix the import titles");
     expect(thread?.messages.map((message) => message.text)).toEqual([prompt]);
+  });
+
+  describe("T3's instruction-update notice", () => {
+    const instructions = "## T3 Code QA\n\n- Record the user's QA.";
+    const notice = claudeInstructionUpdate({
+      record: undefined,
+      sections: claudeAppendSections(instructions, instructions),
+      cut: false,
+    }).notice!;
+    // The shape Claude Code stores for a prompt that carries the notice.
+    const userRecord = (content: ReadonlyArray<string>, timestamp: string) =>
+      JSON.stringify({
+        type: "user",
+        userType: "external",
+        isSidechain: false,
+        sessionId: "claude-session",
+        timestamp,
+        message: { role: "user", content: content.map((text) => ({ type: "text", text })) },
+      });
+    const parse = (...records: ReadonlyArray<string>) =>
+      AgentSessionScanner.parseAgentSessionTranscript({
+        contents: records.join("\n"),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "fallback",
+        lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
+      });
+
+    it("leaves the notice out of a prompt and keeps the user's text", () => {
+      const thread = parse(userRecord([notice, "Fix the retry toast"], "2026-08-25T08:00:00.000Z"));
+      expect(thread?.title).toBe("Fix the retry toast");
+      expect(thread?.messages).toMatchObject([{ role: "user", text: "Fix the retry toast" }]);
+    });
+
+    it("skips a message that is only the notice", () => {
+      const thread = parse(
+        userRecord([notice], "2026-08-25T08:00:00.000Z"),
+        userRecord(["Fix the retry toast"], "2026-08-25T08:01:00.000Z"),
+      );
+      expect(thread?.title).toBe("Fix the retry toast");
+      expect(JSON.stringify(thread?.messages)).not.toContain(CLAUDE_INSTRUCTION_NOTICE_MARKER);
+    });
+
+    it("keeps user text that only mentions the notice's marker", () => {
+      const text = `Why do my logs show ${CLAUDE_INSTRUCTION_NOTICE_MARKER} lines?`;
+      const thread = parse(userRecord([text], "2026-08-25T08:00:00.000Z"));
+      expect(thread?.title).toBe(text);
+    });
   });
 
   it("titles a Claude session after the prompt inside a wake envelope", () => {
