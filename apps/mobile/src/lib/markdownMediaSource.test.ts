@@ -16,7 +16,7 @@ describe("mobile Markdown draft media", () => {
         resource: {
           _tag: "draft-workspace-file",
           cwd: "/project/docs",
-          path: `/project/docs/./${name}`,
+          path: `/project/docs/${name}`,
         },
       });
     }

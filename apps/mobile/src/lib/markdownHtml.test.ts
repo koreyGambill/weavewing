@@ -323,7 +323,7 @@ describe("file embeds in native thread and file Markdown", () => {
       { type: "link", url: "./sound.mp3", children: [{ value: "sound.mp3" }] },
     ]);
     expect(resolveMarkdownMediaPreview("./sound.mp3", draft)?.source).toMatchObject({
-      resource: { _tag: "draft-workspace-file", cwd: "/repo/docs", path: "/repo/docs/./sound.mp3" },
+      resource: { _tag: "draft-workspace-file", cwd: "/repo/docs", path: "/repo/docs/sound.mp3" },
     });
   });
 

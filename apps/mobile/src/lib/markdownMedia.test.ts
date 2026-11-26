@@ -70,13 +70,13 @@ describe("resolveMarkdownMediaPreview", () => {
     });
   });
 
-  it.each(["./image.png", "./report.pdf", "./sound.mp3"])(
-    "uses the draft workspace when no thread exists: %s",
-    (href) => {
+  it.each(["image.png", "report.pdf", "sound.mp3"])(
+    "uses the draft workspace when no thread exists: ./%s",
+    (name) => {
       expect(
-        resolveMarkdownMediaPreview(href, { ...input, threadId: undefined })?.source,
+        resolveMarkdownMediaPreview(`./${name}`, { ...input, threadId: undefined })?.source,
       ).toMatchObject({
-        resource: { _tag: "draft-workspace-file", cwd: "/repo", path: `/repo/${href}` },
+        resource: { _tag: "draft-workspace-file", cwd: "/repo", path: `/repo/${name}` },
       });
     },
   );
