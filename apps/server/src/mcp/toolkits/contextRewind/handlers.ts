@@ -8,7 +8,11 @@ import { ContextRewindToolkit, ContextRewindTurnToolkit } from "./tools.ts";
 
 const rewindCallerContext = Effect.fn("ContextRewindHandlers.rewindCallerContext")(function* (
   tool: string,
-  input: { readonly summary: string; readonly toolCalls?: number | undefined },
+  input: {
+    readonly summary: string;
+    readonly toolCalls?: number | undefined;
+    readonly wholeTurn?: boolean;
+  },
 ) {
   const scope = yield* McpInvocationContext.McpInvocationContext;
   const caller = yield* McpInvocationContext.requireThreadScope(scope, tool);
@@ -18,6 +22,7 @@ const rewindCallerContext = Effect.fn("ContextRewindHandlers.rewindCallerContext
       threadId: caller.thread.threadId,
       summary: input.summary,
       toolCalls: input.toolCalls,
+      wholeTurn: input.wholeTurn,
     })
     .pipe(
       Effect.mapError(
@@ -42,6 +47,6 @@ export const layer = McpToolAccess.toLayer(ContextRewindToolkit, {
 
 export const turnLayer = McpToolAccess.toLayer(ContextRewindTurnToolkit, {
   context_rewind_turn: McpToolAccess.actsAsCaller(({ summary }) =>
-    rewindCallerContext("context_rewind_turn", { summary }),
+    rewindCallerContext("context_rewind_turn", { summary, wholeTurn: true }),
   ),
 });

@@ -15,7 +15,7 @@ const minimumTokens = Math.round(CONTEXT_REWIND_MIN_REMOVED_CHARS / 4).toLocaleS
 // and ends the provider turn after a successful call.
 export const ContextRewindToolkit = Toolkit.make(
   Tool.make("context_rewind", {
-    description: `Remove your most recent tool calls and their raw results from your context and replace them with a summary you write. Every later step re-reads your whole context, so call this straight after lookups (searches, fetches, large listings or file reads) whose raw output you no longer need, before doing other work, when work remains. It is refused when the removed results total under about ${minimumTokens} tokens. The summary is all you will remember: keep every fact you still need, with URLs, identifiers and file paths. Your turn ends at this call and continues from your summary.`,
+    description: `Remove your most recent tool calls and their raw results from your context and replace them with a summary you write. Every later step re-reads your whole context, so call this straight after lookups (searches, fetches, large listings or file reads) whose raw output you no longer need, before doing other work, when work remains. It is refused when the removed results total under about ${minimumTokens} tokens. The summary is all you will remember: keep every fact you still need, with URLs, identifiers and file paths, and name any tasks you delegated that are still running. Your turn ends at this call and continues from your summary.`,
     parameters: Schema.Struct({
       summary: Schema.String.check(Schema.isMinLength(1)).annotate({
         description: "What you learned from the tool calls being removed.",

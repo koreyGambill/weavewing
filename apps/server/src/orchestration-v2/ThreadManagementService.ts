@@ -615,6 +615,8 @@ export interface ThreadManagementServiceShape {
     readonly threadId: ThreadId;
     readonly summary: string;
     readonly toolCalls?: number | undefined;
+    /** The rewind removes the whole turn, so the agent's record of what it delegated goes too. */
+    readonly wholeTurn?: boolean | undefined;
   }) => Effect.Effect<{ readonly removedToolCalls: number }, ThreadManagementContextRewindError>;
   /**
    * Asks the agent to summarize the turns after a completed reply, then continues the conversation
@@ -1905,8 +1907,10 @@ const make = Effect.gen(function* () {
     if (runtime.value.rewindContext === undefined) return yield* fail("unsupported");
     // The continuation queues behind these, and a run that starts first moves past the cut.
     if (records.runs.some((run) => run.status === "queued")) return yield* fail("queued");
-    // The rewind would drop the agent's record of tasks it delegated that are still working.
+    // A whole-turn rewind drops the agent's record of tasks it delegated that are still working.
+    // A partial one keeps the turn, and its tool tells the agent to name them in the summary.
     if (
+      input.wholeTurn === true &&
       records.subagents.some(
         (task) => task.origin === "app_owned" && isOrchestrationV2WorkActive(task.status),
       )

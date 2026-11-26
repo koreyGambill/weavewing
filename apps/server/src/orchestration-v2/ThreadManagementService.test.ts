@@ -834,7 +834,14 @@ it.effect.each([
     }),
 );
 
-it.effect.each(["live", "unsupported-runtime", "refused", "queued", "delegated_work"] as const)(
+it.effect.each([
+  "live",
+  "unsupported-runtime",
+  "refused",
+  "queued",
+  "delegated_work",
+  "delegated-work-partial",
+] as const)(
   "rewinds the active provider thread's context and queues its continuation with state %s",
   (state) =>
     Effect.gen(function* () {
@@ -905,7 +912,7 @@ it.effect.each(["live", "unsupported-runtime", "refused", "queued", "delegated_w
                   // A message queued behind the turn would run before the continuation.
                   runs: state === "queued" ? [{ id: "run:queued", status: "queued" }] : [],
                   subagents:
-                    state === "delegated_work"
+                    state === "delegated_work" || state === "delegated-work-partial"
                       ? [{ id: "task:running", origin: "app_owned", status: "running" }]
                       : [],
                 } as unknown as OrchestrationV2ThreadProjection),
@@ -926,11 +933,16 @@ it.effect.each(["live", "unsupported-runtime", "refused", "queued", "delegated_w
       const result = yield* Effect.gen(function* () {
         const service = yield* ThreadManagementService.ThreadManagementService;
         return yield* service
-          .rewindContext({ threadId, summary: "SUP-1047 belongs to Imani Okafor." })
+          .rewindContext({
+            threadId,
+            summary: "SUP-1047 belongs to Imani Okafor.",
+            // Only a whole-turn rewind forgets the delegation itself.
+            wholeTurn: state === "delegated_work",
+          })
           .pipe(Effect.result);
       }).pipe(Effect.provide(Layer.merge(layerTest, ThreadCommandExecutor.layer)));
 
-      if (state === "live") {
+      if (state === "live" || state === "delegated-work-partial") {
         expect(result).toMatchObject({ success: { removedToolCalls: 3 } });
         expect(dispatched).toMatchObject([
           {
