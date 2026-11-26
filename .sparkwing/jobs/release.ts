@@ -52,6 +52,8 @@ async function assertInput(ctx: Context, co: Checkout) {
   for (const name of [".env", ".env.local"])
     if (FS.existsSync(Path.join(co.root, name))) throw new Error(`Release source must not contain ${name}`);
   if (ctx.args.stage !== "plan") assertPushedCommit(co.root, commit);
+  // Checked before any network step, so a missing Mac host is the first failure a run reports.
+  const macBuildHost = platforms.includes("mac") && ctx.args.stage !== "promote" ? macHost(await ctx.variable("WEAVEWING_MAC_HOST")) : undefined;
   const free = FS.statfsSync("/mnt/d");
   if (free.bavail * free.bsize < 30 * 1024 ** 3) throw new Error("D: has less than 30 GiB free. Stop and free space.");
   await logged(ctx, co, "release-tools", ["bash", "-c", 'set -eu; export PATH="$HOME/.cargo/bin:$PATH"; for tool in gh xwing tar rustup cargo; do command -v "$tool" >/dev/null || { case "$tool" in rustup|cargo) echo "Install: curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal" >&2;; gh) echo "Install: sudo apt-get install gh" >&2;; tar) echo "Install: sudo apt-get install tar" >&2;; xwing) echo "Install Xwing using the Wing setup" >&2;; esac; exit 1; }; done']);
@@ -68,8 +70,8 @@ async function assertInput(ctx: Context, co: Checkout) {
     throw new Error("Missing upstream/main; add the upstream remote and run git fetch upstream main --tags");
   }
   releaseNotes(co.root, input(ctx).version, commit);
-  if (platforms.includes("mac") && ctx.args.stage !== "promote")
-    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", macHost(await ctx.variable("WEAVEWING_MAC_HOST")), macPreflight(co.nodeVersion)]);
+  if (macBuildHost)
+    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", macBuildHost, macPreflight(co.nodeVersion)]);
   if (ctx.args.stage !== "promote" && (platforms.includes("linux") || platforms.includes("win")))
     await logged(ctx, co, "host-preflight", ["bash", "-c", 'set -eu; hint="Install prerequisites: sudo apt-get install build-essential pkg-config libsecret-1-dev imagemagick patchelf zip"; for tool in cc make pkg-config convert patchelf zip; do command -v "$tool" >/dev/null || { echo "$hint" >&2; exit 1; }; done; pkg-config --exists libsecret-1 || { echo "$hint" >&2; exit 1; }']);
   if (ctx.args.stage !== "promote" && platforms.includes("win"))
