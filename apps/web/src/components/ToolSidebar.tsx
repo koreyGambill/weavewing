@@ -9,7 +9,6 @@ import {
   Minimize2,
   PanelRight,
   PinIcon,
-  PinOffIcon,
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
@@ -61,9 +60,10 @@ const WIDE_MEDIA_QUERY = "(min-width: 981px)";
 /** A thread view mounts once the selection has rested this long, so quick switches load nothing. */
 export const SIDE_AREA_SETTLE_MS = 250;
 const SIDE_AREA_COVER_VARIABLE = "--side-area-cover-right";
-// Popups and dialogs portal outside the side area; using them is not a click outside it.
+// Popups and dialogs portal outside the side area, and the drop-down terminal sits beside it;
+// using any of them is not a click outside it.
 const LAYER_SELECTOR =
-  '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle]';
+  '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle], [data-dropdown-terminal], [data-dropdown-terminal-toggle]';
 
 function threadKey(ref: ScopedThreadRef | null) {
   return ref ? `${ref.environmentId}:${ref.threadId}` : null;
@@ -390,7 +390,7 @@ function SideArea({
             pressed={pinned}
             onClick={() => dispatch({ type: "pin" })}
           >
-            {pinned ? <PinOffIcon /> : <PinIcon />}
+            <PinIcon />
           </HeaderToggle>
           {definition.scope === "thread" ? (
             <HeaderToggle
