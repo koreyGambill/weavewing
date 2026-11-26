@@ -2,6 +2,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import type { DraftId } from "../composerDraftStore";
 import {
   ActivityIcon,
+  BellIcon,
   BoxesIcon,
   CalendarClockIcon,
   CalendarIcon,
@@ -18,7 +19,13 @@ import {
 import { createElement, type ComponentType, type ReactNode } from "react";
 
 import { CalendarTool } from "../components/CalendarTool";
-import { VIEW_IDS, type ViewId, type ViewLayout } from "../components/ToolSidebar.logic";
+import { InboxView } from "../components/inbox/InboxView";
+import {
+  VIEW_IDS,
+  type ThreadViewId,
+  type ViewId,
+  type ViewLayout,
+} from "../components/ToolSidebar.logic";
 import { StatusAlertCount, StatusView } from "./StatusView";
 import { ThreadViewBody } from "./ThreadViewBody";
 
@@ -74,8 +81,6 @@ export interface ViewDefinition {
     readonly slots: ViewSlots;
   }) => ReactNode;
 }
-
-type ThreadViewId = Exclude<ViewId, "calendar" | "status">;
 
 function threadView<Id extends ThreadViewId>(
   id: Id,
@@ -156,6 +161,16 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     CalendarClockIcon,
     "Agents that run on a schedule, a webhook or an event. Switch them on or off for this thread, the project or the whole server, and open a run's thread from its history.",
   ),
+  inbox: {
+    id: "inbox",
+    title: "Inbox",
+    icon: BellIcon,
+    about:
+      "Urgent problems and important things you must not miss. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
+    scope: "global",
+    minWidthPx: 280,
+    render: ({ slots }) => createElement(InboxView, { actions: slots.actions }),
+  },
   calendar: {
     id: "calendar",
     title: "Calendar",

@@ -5,17 +5,15 @@ import type {
   ThreadWorkspace,
 } from "@t3tools/contracts";
 import type { RightPanelSurface } from "./rightPanelStore";
-import type { SidebarView, ThreadContextSection } from "./threadContextSidebarStore";
 import type { ThreadTileLayout } from "./threadTileLayout";
 import { visibleTileGroups } from "./threadTileGeometry";
 
+/** The selected thread: the route's, or the side chat in its focused tile. */
 export function selectContextThread(
   owner: ScopedThreadRef | null,
   layout: ThreadTileLayout | null,
   surfaces: ReadonlyArray<RightPanelSurface>,
-  pinned: ScopedThreadRef | null,
 ): ScopedThreadRef | null {
-  if (pinned) return pinned;
   if (!owner || !layout) return owner;
   const groups = visibleTileGroups(layout);
   const group =
@@ -25,44 +23,6 @@ export function selectContextThread(
   return surface?.kind === "side-chat"
     ? { environmentId: owner.environmentId, threadId: surface.threadId }
     : owner;
-}
-
-interface SidebarViewState {
-  readonly view: SidebarView;
-  readonly lastTool: ThreadContextSection;
-}
-
-interface ToggleState extends SidebarViewState {
-  readonly hidden: ReadonlyArray<string>;
-}
-
-/** Selecting the active tool view returns to the thread list. */
-export function nextSidebarView(state: SidebarViewState, view: SidebarView): SidebarViewState {
-  if (view === "threads") return { view, lastTool: state.lastTool };
-  return state.view === view ? { view: "threads", lastTool: view } : { view, lastTool: view };
-}
-
-/**
- * A hidden sidebar opens on a tool view; a visible one flips between the threads and the last
- * tool. With every tool hidden there is nothing to flip to, so the thread list shows.
- */
-export function toggleThreadToolsView(
-  state: ToggleState,
-  sidebarVisible: boolean,
-): SidebarViewState & { revealPending: boolean } {
-  const tool = state.hidden.includes(state.lastTool) ? null : state.lastTool;
-  if (!sidebarVisible) {
-    return {
-      view: state.view === "threads" ? (tool ?? "threads") : state.view,
-      lastTool: state.lastTool,
-      revealPending: true,
-    };
-  }
-  return {
-    view: state.view === "threads" ? (tool ?? "threads") : "threads",
-    lastTool: state.lastTool,
-    revealPending: false,
-  };
 }
 
 export interface ThreadToolSignals {
@@ -90,43 +50,6 @@ export function summarizeThreadTools(workspace: ThreadWorkspace | null): ThreadT
     workspace.items.flatMap((item) => item.linkStates ?? []).find((link) => link.type === "ticket")
       ?.state ?? null;
   return { listCount, questionCount, ticketState };
-}
-
-export const THREAD_TOOL_ORDER: ReadonlyArray<ThreadContextSection> = [
-  "todos",
-  "evidence",
-  "artifacts",
-  "links",
-  "related",
-  "timeline",
-  "details",
-  "environments",
-  "inspect",
-  "automations",
-];
-
-export function firstVisibleThreadTool(hidden: ReadonlyArray<string>): ThreadContextSection | null {
-  return THREAD_TOOL_ORDER.find((tool) => !hidden.includes(tool)) ?? null;
-}
-
-/** Maps a view saved by the retired right panel to the view that replaced it. */
-export function migrateThreadToolsView(view: string | undefined): ThreadContextSection {
-  switch (view) {
-    case "marks":
-    case "ticket":
-      return "links";
-    case "context":
-      return "inspect";
-    case "artifacts":
-    case "related":
-    case "timeline":
-    case "details":
-    case "environments":
-    case "automations":
-      return view;
-    default:
-      return "todos";
-  }
 }
 
 interface RelatedShell {

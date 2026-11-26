@@ -3,30 +3,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import type { TodoFilter } from "./components/reviews/todoList.logic";
-import {
-  firstVisibleThreadTool,
-  migrateThreadToolsView,
-  nextSidebarView,
-  toggleThreadToolsView,
-} from "./threadContextSidebar";
-
-export type ThreadContextSection =
-  | "todos"
-  | "evidence"
-  | "artifacts"
-  | "links"
-  | "related"
-  | "timeline"
-  | "details"
-  | "environments"
-  | "inspect"
-  | "inbox"
-  | "automations";
-
-export type SidebarView = "threads" | ThreadContextSection;
-
-/** Everything on the strip a viewer can hide; the thread list always stays. */
-export type StripItem = ThreadContextSection;
+import { migrateViewId, type ViewId } from "./components/ToolSidebar.logic";
+import { adoptRetiredRailSelection, useToolSidebarStore } from "./toolSidebarStore";
 
 export type InboxTab = "inbox" | "snoozed" | "dismissed";
 /** A notification opened from the inbox list. */
@@ -37,10 +15,12 @@ export type InboxSelection = {
 };
 
 export interface ShowTarget {
-  /** Pins the tools to this thread. */
+  /** The thread the request is about; the view follows the selection unless `lock` is set. */
   readonly thread?: ScopedThreadRef;
+  /** Locks the side panel to `thread`, for a thread other than the selected one. */
+  readonly lock?: boolean;
   readonly artifactId?: string;
-  /** The thread the artifact belongs to, when it shouldn't pin the tools to that thread. */
+  /** The thread the artifact belongs to, when the request is not about one thread. */
   readonly artifactThread?: ScopedThreadRef;
   readonly environmentId?: string;
   /** Opens the inbox on this notification. */
@@ -53,18 +33,13 @@ export interface AutomationSelection {
   readonly taskId: string;
 }
 
+/** What each view remembers between openings: filters, scopes and the item it opens on. */
 interface ThreadContextSidebarState {
-  view: SidebarView;
-  lastTool: ThreadContextSection;
-  pinned: ScopedThreadRef | null;
-  hidden: ReadonlyArray<StripItem>;
   todoFilter: TodoFilter;
   todoShowClosed: boolean;
   /** All lists open follow-ups and your todos across the environment's threads. */
   todoScope: "thread" | "all";
   environmentSelection: { thread: ScopedThreadRef; id: string } | null;
-  /** Set when a tool view was requested while the sidebar may be hidden; the sidebar clears it. */
-  revealPending: boolean;
   /** The artifact the Artifacts view opens on, for its thread only; null lists them all. */
   artifactSelection: { thread: ScopedThreadRef | null; id: string } | null;
   inboxTab: InboxTab;
@@ -78,14 +53,9 @@ interface ThreadContextSidebarState {
   evidenceCoverageDismissed: Record<string, string>;
   dismissEvidenceCoverage: (key: string, head: string | null) => void;
   selectAutomation: (selection: AutomationSelection | null) => void;
-  selectView: (view: SidebarView) => void;
-  toggleTools: (sidebarVisible: boolean) => void;
-  /** Opens a tool from outside the strip, unhiding it, and reveals a hidden sidebar. */
-  show: (view: ThreadContextSection, target?: ShowTarget) => void;
+  /** Opens a view in the side panel on the item `target` names. */
+  show: (view: ViewId, target?: ShowTarget) => void;
   selectArtifact: (thread: ScopedThreadRef, id: string | null) => void;
-  consumeReveal: () => void;
-  pin: (thread: ScopedThreadRef | null) => void;
-  setHidden: (item: StripItem, hidden: boolean) => void;
   setTodoFilter: (filter: TodoFilter) => void;
   setTodoShowClosed: (show: boolean) => void;
   setTodoScope: (scope: "thread" | "all") => void;
@@ -97,15 +67,10 @@ interface ThreadContextSidebarState {
 export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
   persist(
     (set) => ({
-      view: "threads",
-      lastTool: "todos",
-      pinned: null,
-      hidden: [],
       todoFilter: "all",
       todoShowClosed: false,
       todoScope: "thread",
       environmentSelection: null,
-      revealPending: false,
       artifactSelection: null,
       inboxTab: "inbox",
       inboxSelection: null,
@@ -124,20 +89,8 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
           evidenceNeedsQa: needsQa ?? state.evidenceNeedsQa,
         })),
       selectAutomation: (automationSelection) => set({ automationSelection }),
-      selectView: (view) =>
-        set((state) => ({
-          ...nextSidebarView(state, view),
-          ...(view === "artifacts" ? { artifactSelection: null } : {}),
-          ...(view === "inbox" ? { inboxSelection: null } : {}),
-        })),
-      toggleTools: (sidebarVisible) => set((state) => toggleThreadToolsView(state, sidebarVisible)),
-      show: (view, target = {}) =>
-        set((state) => ({
-          view,
-          lastTool: view,
-          revealPending: true,
-          hidden: state.hidden.filter((entry) => entry !== view),
-          ...(target.thread ? { pinned: target.thread } : {}),
+      show: (view, target = {}) => {
+        set({
           ...(view === "artifacts"
             ? {
                 artifactSelection: target.artifactId
@@ -164,20 +117,14 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
                     : null,
               }
             : {}),
-        })),
+        });
+        useToolSidebarStore.getState().dispatch({
+          type: "show",
+          view,
+          ...(target.thread ? { thread: target.thread, lock: target.lock === true } : {}),
+        });
+      },
       selectArtifact: (thread, id) => set({ artifactSelection: id ? { thread, id } : null }),
-      consumeReveal: () => set({ revealPending: false }),
-      pin: (pinned) => set({ pinned }),
-      setHidden: (item, hide) =>
-        set((state) => ({
-          hidden: hide
-            ? [...state.hidden.filter((entry) => entry !== item), item]
-            : state.hidden.filter((entry) => entry !== item),
-          ...(hide && state.view === item ? { view: "threads" as const } : {}),
-          ...(hide && state.lastTool === item
-            ? { lastTool: firstVisibleThreadTool([...state.hidden, item]) ?? state.lastTool }
-            : {}),
-        })),
       setTodoFilter: (todoFilter) => set({ todoFilter }),
       setTodoShowClosed: (todoShowClosed) => set({ todoShowClosed }),
       setTodoScope: (todoScope) => set({ todoScope }),
@@ -187,38 +134,33 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
     }),
     {
       name: "t3code:thread-context-sidebar",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),
-      partialize: ({
-        view,
-        lastTool,
-        hidden,
-        todoFilter,
-        todoShowClosed,
-        todoScope,
-        evidenceCoverageDismissed,
-      }) => ({
-        view,
-        lastTool,
-        hidden,
+      partialize: ({ todoFilter, todoShowClosed, todoScope, evidenceCoverageDismissed }) => ({
         todoFilter,
         todoShowClosed,
         todoScope,
         evidenceCoverageDismissed,
       }),
-      // v0 stored the right panel's { open, view }; its view becomes the last tool.
-      // v1 named the inbox's strip slot "status".
+      // v0 stored the retired right panel's { open, view }; v1 and v2 the left rail's view and last
+      // tool. The side panel shows views now, so it takes the selection and the rail's fields go.
       migrate: (persisted, version) => {
-        const state = (persisted ?? {}) as { view?: string; hidden?: ReadonlyArray<string> };
-        if (version === 0) return { view: "threads", lastTool: migrateThreadToolsView(state.view) };
-        return version === 1 && state.hidden
-          ? {
-              ...state,
-              hidden: state.hidden.map((item) => (item === "status" ? "inbox" : item)),
-            }
-          : persisted;
+        const {
+          view,
+          lastTool,
+          hidden: _hidden,
+          ...rest
+        } = (persisted ?? {}) as {
+          view?: unknown;
+          lastTool?: unknown;
+          hidden?: unknown;
+        };
+        adoptRetiredRailSelection(
+          version === 0 ? { lastTool: migrateViewId(view) ?? "todos" } : { view, lastTool },
+        );
+        return rest as Partial<ThreadContextSidebarState>;
       },
     },
   ),

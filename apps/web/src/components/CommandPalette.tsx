@@ -1900,8 +1900,10 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:thread-context",
-      title: "Show thread tools",
+      title: "Show thread views",
       searchTerms: [
+        "thread tools",
+        "side panel",
         "list",
         "artifacts",
         "marks",
@@ -1909,12 +1911,11 @@ function OpenCommandPaletteDialog(props: {
         "timeline",
         "details",
         "context",
-        "pin",
       ],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        const store = useThreadContextSidebarStore.getState();
-        store.show(store.lastTool);
+        const { threadView } = useToolSidebarStore.getState();
+        useThreadContextSidebarStore.getState().show(threadView);
       },
     });
   }

@@ -13,6 +13,7 @@ import { toastManager } from "../components/ui/toast";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useShallow } from "zustand/react/shallow";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import { useToolSidebarStore } from "../toolSidebarStore";
 import { useEnvironments } from "../state/environments";
 import { reviewArtifactsDue } from "../state/reviews";
 import { useEnvironmentsWithScope } from "../state/session";
@@ -55,19 +56,21 @@ function EnvironmentReviewReminders({
   const settings = useClientSettings();
   const navigate = useNavigate();
   const active = useParams({ strict: false });
-  const tools = useThreadContextSidebarStore(
-    useShallow(({ view, artifactSelection, pinned }) => ({ view, artifactSelection, pinned })),
+  const artifactSelection = useThreadContextSidebarStore((state) => state.artifactSelection);
+  const side = useToolSidebarStore(
+    useShallow(({ open, view, locked }) => ({ open, view, locked })),
   );
   const [gate] = useState(() => createReviewReminderGate(environmentId, seen));
   const shownReviewId = due.find(
     (review) =>
       active.environmentId === environmentId &&
       active.threadId === review.threadId &&
-      tools.view === "artifacts" &&
-      tools.artifactSelection?.id === review.id &&
-      (tools.artifactSelection.thread === null ||
-        tools.artifactSelection.thread.threadId === review.threadId) &&
-      (tools.pinned === null || tools.pinned.threadId === review.threadId),
+      side.open &&
+      side.view === "artifacts" &&
+      artifactSelection?.id === review.id &&
+      (artifactSelection.thread === null ||
+        artifactSelection.thread.threadId === review.threadId) &&
+      (side.locked === null || side.locked.threadId === review.threadId),
   )?.id;
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes and closes imperative notification surfaces as persisted reminders become due or change

@@ -51,14 +51,14 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
   const selectedKey =
     selection === null ? null : automationRowKey(selection.environmentId, selection.taskId);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Escape leaves the detail from anywhere in the sidebar, including after focus fell back to the page.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Escape leaves the detail from anywhere in the side panel, including after focus fell back to the page.
   useEffect(() => {
     if (selectedKey === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       const target = event.target instanceof Element ? event.target : null;
-      const inSidebar = target === null || target === document.body;
-      if (!inSidebar && !target?.closest('[data-slot="sidebar"]')) return;
+      const inPanel = target === null || target === document.body;
+      if (!inPanel && !target?.closest("[data-side-area]")) return;
       // Menus and dialogs close themselves first.
       if (target?.closest('[role="menu"], [role="dialog"], [role="alertdialog"]')) return;
       event.preventDefault();

@@ -1,8 +1,10 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  adoptRetiredRail,
   describeLockedThread,
   INITIAL_SIDE_AREA,
+  migrateViewId,
   resolveDetailsDestination,
   resolveSideAreaThread,
   resolveSideAreaWidth,
@@ -21,7 +23,7 @@ const run = (state: SideAreaState, ...actions: SideAreaAction[]) =>
   actions.reduce(transitionSideArea, state);
 
 describe("side area", () => {
-  it("lists the rail's thread views, then Calendar and Status", () => {
+  it("lists the thread views, then Inbox, Calendar and Status", () => {
     expect(VIEW_IDS).toEqual([
       "todos",
       "evidence",
@@ -33,6 +35,7 @@ describe("side area", () => {
       "environments",
       "inspect",
       "automations",
+      "inbox",
       "calendar",
       "status",
     ]);
@@ -92,6 +95,31 @@ describe("side area", () => {
     expect(lockedHere.open).toBe(false);
   });
 
+  it("opens a view about a thread following it, locked only on request", () => {
+    const lockedB = run(INITIAL_SIDE_AREA, { type: "lock", thread: threadB });
+    expect(run(lockedB, { type: "show", view: "todos", thread: threadA })).toMatchObject({
+      open: true,
+      view: "todos",
+      locked: null,
+    });
+    expect(run(lockedB, { type: "show", view: "links", thread: threadB }).locked).toEqual(threadB);
+    expect(
+      run(INITIAL_SIDE_AREA, { type: "show", view: "todos", thread: threadA, lock: true }).locked,
+    ).toEqual(threadA);
+    expect(run(lockedB, { type: "show", view: "inbox" }).locked).toEqual(threadB);
+  });
+
+  it("toggles thread views on the last one shown, skipping global views", () => {
+    const toggle = { type: "toggleThreadViews" } as const;
+    expect(run(INITIAL_SIDE_AREA, toggle)).toMatchObject({ open: true, view: "details" });
+    const links = run(INITIAL_SIDE_AREA, { type: "show", view: "links" });
+    expect(run(links, toggle).open).toBe(false);
+    const status = run(links, { type: "show", view: "status" });
+    expect(status.threadView).toBe("links");
+    expect(run(status, toggle)).toMatchObject({ open: true, view: "links" });
+    expect(run(links, { type: "close" }, toggle)).toMatchObject({ open: true, view: "links" });
+  });
+
   it("maximizes only while open and leaves maximize when closing", () => {
     expect(run(INITIAL_SIDE_AREA, { type: "maximize" })).toEqual(INITIAL_SIDE_AREA);
     const maximized = run(
@@ -111,7 +139,13 @@ describe("side area", () => {
       ...stored,
       width: 640,
       maximized: false,
+      threadView: "links",
     });
+    expect(restoreSideArea({ ...stored, view: "status", threadView: "inspect" })).toMatchObject({
+      view: "status",
+      threadView: "inspect",
+    });
+    expect(restoreSideArea({ ...stored, view: "context" }).view).toBe("inspect");
     expect(restoreSideArea({ ...stored, width: 10 }).width).toBe(280);
     expect(restoreSideArea({ ...stored, view: "missing" })).toEqual(INITIAL_SIDE_AREA);
     expect(restoreSideArea({ ...stored, locked: { threadId: 3 } })).toEqual(INITIAL_SIDE_AREA);
@@ -157,15 +191,77 @@ describe("side area", () => {
     );
   });
 
-  it("gives the details card to the host showing the selected thread, the side area on a tie", () => {
-    const side = { threadRef: threadA, element: "side" };
-    const rail = { threadRef: threadB, element: "rail" };
-    expect(resolveDetailsDestination({ side, rail, selected: threadB })).toBe(rail);
-    expect(resolveDetailsDestination({ side, rail, selected: threadA })).toBe(side);
-    const railOnA = { threadRef: threadA, element: "rail" };
-    expect(resolveDetailsDestination({ side, rail: railOnA, selected: threadA })).toBe(side);
-    expect(resolveDetailsDestination({ side: null, rail, selected: threadA })).toBe(rail);
-    expect(resolveDetailsDestination({ side: null, rail: null, selected: threadA })).toBeNull();
+  it("gives the details card to the first host showing the selected thread", () => {
+    const first = { threadRef: threadA, element: "first" };
+    const second = { threadRef: threadB, element: "second" };
+    expect(resolveDetailsDestination([first, second], threadB)).toBe(second);
+    expect(resolveDetailsDestination([first, second], threadA)).toBe(first);
+    const secondOnA = { threadRef: threadA, element: "second" };
+    expect(resolveDetailsDestination([first, secondOnA], threadA)).toBe(first);
+    expect(resolveDetailsDestination([null, second], threadA)).toBe(second);
+    expect(resolveDetailsDestination([null, null], threadA)).toBeNull();
+  });
+
+  it.each([
+    ["todos", "todos"],
+    ["evidence", "evidence"],
+    ["artifacts", "artifacts"],
+    ["links", "links"],
+    ["related", "related"],
+    ["timeline", "timeline"],
+    ["details", "details"],
+    ["environments", "environments"],
+    ["inspect", "inspect"],
+    ["automations", "automations"],
+    ["inbox", "inbox"],
+    ["calendar", "calendar"],
+    ["status", "status"],
+    ["marks", "links"],
+    ["ticket", "links"],
+    ["context", "inspect"],
+    ["threads", null],
+    ["status-sources", null],
+    [42, null],
+    [undefined, null],
+  ])("migrates the stored view id %o to %o", (stored, expected) => {
+    expect(migrateViewId(stored)).toBe(expected);
+  });
+
+  it.each([
+    [
+      { view: "evidence", lastTool: "evidence" },
+      { open: true, view: "evidence", threadView: "evidence" },
+    ],
+    [
+      { view: "inbox", lastTool: "timeline" },
+      { open: true, view: "inbox", threadView: "timeline" },
+    ],
+    [
+      { view: "threads", lastTool: "inspect" },
+      { open: false, view: "details", threadView: "inspect" },
+    ],
+    [
+      { view: "threads", lastTool: "context" },
+      { open: false, view: "details", threadView: "inspect" },
+    ],
+    [
+      { view: "threads", lastTool: "gone" },
+      { open: false, view: "details", threadView: "details" },
+    ],
+    [{}, { open: false, view: "details", threadView: "details" }],
+  ])("opens the left rail's stored %o in the side panel", (rail, expected) => {
+    expect(adoptRetiredRail(INITIAL_SIDE_AREA, rail)).toEqual({
+      ...INITIAL_SIDE_AREA,
+      ...expected,
+    });
+  });
+
+  it("keeps an open side panel's view when the rail showed another", () => {
+    const status = { ...INITIAL_SIDE_AREA, open: true, view: "status" } as const;
+    expect(adoptRetiredRail(status, { view: "links", lastTool: "links" })).toEqual({
+      ...status,
+      threadView: "links",
+    });
   });
 
   it("names a locked thread from its shell, then its own read, and reports a deletion", () => {

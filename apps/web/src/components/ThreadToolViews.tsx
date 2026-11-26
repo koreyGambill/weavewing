@@ -60,10 +60,8 @@ import { threadMarksGet } from "../state/threadMarks";
 import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
 import { talkedWithThreads, withDelegates } from "../threadContextSidebar";
-import {
-  useThreadContextSidebarStore,
-  type ThreadContextSection,
-} from "../threadContextSidebarStore";
+import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import type { ThreadViewId } from "./ToolSidebar.logic";
 import { buildThreadRouteParams } from "../threadRoutes";
 import {
   type DraftId,
@@ -97,7 +95,7 @@ import { XwingEnvironmentsPanel } from "./xwing/XwingEnvironmentsPanel";
 import { FileRemoteMenuSection } from "./files/FileRemoteActions";
 
 /** Views that lay out their own padding and scrolling. */
-export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadContextSection> = new Set([
+export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadViewId> = new Set([
   "inspect",
   "details",
   "automations",
@@ -109,7 +107,7 @@ export function ThreadToolSection({
   detailsRef,
   actions,
 }: {
-  section: Exclude<ThreadContextSection, "automations" | "evidence">;
+  section: Exclude<ThreadViewId, "automations" | "evidence">;
   threadRef: ScopedThreadRef;
   detailsRef: (element: HTMLDivElement | null) => void;
   actions: HTMLDivElement | null;
