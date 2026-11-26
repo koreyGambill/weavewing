@@ -23,16 +23,13 @@ const normalizeAvailability = (
   typeof availability === "boolean" ? { browser: availability, device: false } : availability;
 
 /** Instructions for unavailable tools would steer the model away from its remaining automation. */
-const toolInstructions = (availability: boolean | T3CodeToolAvailability): string => {
-  const tools = normalizeAvailability(availability);
-  return [
+const toolInstructions = (tools: T3CodeToolAvailability): string =>
+  [
     tools.browser ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? T3_CODE_DEVICE_TOOL_INSTRUCTIONS : "",
-    tools.questions ? T3_CODE_QUESTION_TOOL_INSTRUCTIONS : "",
   ]
     .filter(Boolean)
     .join("\n\n");
-};
 
 export interface CodexRuntimeInfo {
   readonly model: string;
@@ -45,7 +42,8 @@ export function buildCodexAdditionalContext(
   runtime: CodexRuntimeInfo,
   toolsAvailable: boolean | T3CodeToolAvailability = true,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
-  const tools = toolInstructions(toolsAvailable);
+  const availability = normalizeAvailability(toolsAvailable);
+  const tools = toolInstructions(availability);
   // Split values to fit per-entry caps; number keys because Codex emits them in key order.
   return {
     ...Object.fromEntries(
@@ -59,5 +57,14 @@ export function buildCodexAdditionalContext(
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
+    // Its own entry: beside the browser and device blocks it outgrows the per-entry cap.
+    ...(availability.questions
+      ? {
+          t3_code_tools_questions: {
+            kind: "application",
+            value: T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+          },
+        }
+      : {}),
   };
 }

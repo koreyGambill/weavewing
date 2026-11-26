@@ -11,6 +11,8 @@ import {
   CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
 } from "./CodexDeveloperInstructions.ts";
 
+const CAP_HEADROOM_BYTES = 400;
+
 describe("buildCodexAdditionalContext", () => {
   describe.each([
     { model: "custom-model", modelName: "Custom 🦊 Model", reasoningEffort: "xhigh" },
@@ -24,9 +26,11 @@ describe("buildCodexAdditionalContext", () => {
           // Codex counts ceil(UTF-8 bytes / 4) tokens, excluding keys and wrappers.
           const bytes = Buffer.byteLength(entry.value, "utf8");
           const limit = CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES;
+          // Fails while an entry still fits, so growth is split before Codex truncates it.
+          const budget = limit - CAP_HEADROOM_BYTES;
           NodeAssert.ok(
-            bytes <= limit,
-            `${key}: ${bytes} UTF-8 bytes exceeds Codex's ${limit}-byte per-entry cap by ${bytes - limit} bytes; split the instructions into separate entries to avoid silent truncation`,
+            bytes <= budget,
+            `${key}: ${bytes} UTF-8 bytes is within ${CAP_HEADROOM_BYTES} bytes of Codex's ${limit}-byte per-entry cap (${limit - bytes} left); split the instructions into separate entries before Codex silently truncates them`,
           );
         }
       },
@@ -89,14 +93,17 @@ describe("Codex device context", () => {
   });
 
   it("adds the question block only when the session holds the questions capability", () => {
-    const tools = (questions: boolean) =>
+    const context = (questions: boolean) =>
       buildCodexAdditionalContext(
         { model: "gpt-6.1-sol" },
-        { browser: true, device: false, questions },
-      ).t3_code_tools?.value ?? "";
+        { browser: true, device: true, questions },
+      );
 
-    NodeAssert.ok(tools(true).includes(T3_CODE_QUESTION_TOOL_INSTRUCTIONS));
-    NodeAssert.ok(!tools(false).includes("question_ask"));
+    NodeAssert.equal(
+      context(true).t3_code_tools_questions?.value,
+      T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+    );
+    NodeAssert.ok(!JSON.stringify(context(false)).includes("question_ask"));
   });
 });
 
