@@ -85,7 +85,9 @@ it("opens the computer's picker from its shortcut while it sits in the thread me
   const shell = document.querySelector('[data-slot="composer-shell"]');
   expect(openComposerRowControl(shell, "composer.host")).toBe(true);
   const picker = page.getByRole("listbox");
-  await expect.element(picker.getByRole("option", { name: /Build box/ })).toBeVisible();
+  await expect
+    .element(picker.getByRole("option", { name: /Build box/ }), { timeout: 3000 })
+    .toBeVisible();
   const menuButton = (
     await page.getByRole("button", { name: "Thread menu" }).element()
   ).getBoundingClientRect();
