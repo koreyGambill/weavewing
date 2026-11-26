@@ -75,6 +75,10 @@ const localChild = (childThreadId: ThreadId | null): ThreadId => {
 // Effect returns a declared tool failure as `isError` with its encoded payload
 // as JSON text, never as `structuredContent`.
 
+// ProjectionStore marks its thread-shell rewind subquery, which a wait may run; the guard must stay.
+const SHELL_REWIND_TRANSFER_READ = "-- shell-fork-rewind-ordinal:";
+const SHELL_REWIND_CASE_GUARD =
+  /CASE WHEN json_extract\(t\.payload_json, '\$\.forkedFrom\.type'\) = 'run'\s+AND json_extract\(t\.payload_json, '\$\.lineage\.sideChat'\) IS NOT 1 THEN \(\s+-- shell-fork-rewind-ordinal:[^\n]*\n\s+SELECT[\s\S]*?FROM orchestration_v2_projection_threads AS source\s+WHERE source\.thread_id = json_extract\(t\.payload_json, '\$\.forkedFrom\.threadId'\)\s+AND json_extract\(source\.payload_json, '\$\.contextRewind'\) IS NOT NULL/;
 const parentThreadId = ThreadId.make("thread:mcp-orchestrator-parent");
 const projectId = ProjectId.make("project:mcp-orchestrator");
 const codexInstanceId = ProviderInstanceId.make("codex");
@@ -682,6 +686,8 @@ describe("orchestrator MCP toolkit", () => {
           delegated.resultContextTransferId,
         );
         const transferReads: Array<string> = [];
+        // The thread-shell read's marked rewind subquery, the one reviewed exception.
+        const shellRewindTransferReads: Array<string> = [];
         const messageReads: Array<string> = [];
         const runReads: Array<string> = [];
         const projectionTableReads: Array<string> = [];
@@ -708,7 +714,10 @@ describe("orchestrator MCP toolkit", () => {
                 projectionTableReads.push(table!);
               }
               if (/SELECT[\s\S]*FROM orchestration_v2_projection_context_transfers/i.test(query)) {
-                transferReads.push(query);
+                (query.includes(SHELL_REWIND_TRANSFER_READ)
+                  ? shellRewindTransferReads
+                  : transferReads
+                ).push(query);
               }
               if (/SELECT\s+payload_json\s+FROM orchestration_v2_projection_runs/i.test(query)) {
                 runReads.push(query);
@@ -737,6 +746,14 @@ describe("orchestrator MCP toolkit", () => {
         expect(wait.structuredContent).toEqual(expectedWait);
         expect(messageReads).toEqual([]);
         expect(transferReads).toHaveLength(0);
+        expect(shellRewindTransferReads.length).toBeGreaterThan(0);
+        for (const query of shellRewindTransferReads) {
+          // The exception holds only while the read stays behind the rewound-fork CASE guard.
+          expect(query.match(/FROM orchestration_v2_projection_context_transfers/gi)).toHaveLength(
+            1,
+          );
+          expect(query).toMatch(SHELL_REWIND_CASE_GUARD);
+        }
         const settledWait = yield* invoke(
           "t3_thread_wait",
           {

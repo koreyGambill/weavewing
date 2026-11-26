@@ -8557,6 +8557,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               END AS forked_from_run_source_thread_id,
               CASE WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                 AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1 THEN (
+                  -- shell-fork-rewind-ordinal: reads context transfers only for forks of rewound threads.
                   SELECT ${forkSourceRewindOrdinal(sql`source.thread_id`, sql`t.thread_id`)}
                   FROM orchestration_v2_projection_threads AS source
                   WHERE source.thread_id = json_extract(t.payload_json, '$.forkedFrom.threadId')
