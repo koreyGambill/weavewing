@@ -1,8 +1,9 @@
-import type { EnvironmentId, StatusSource, StatusState } from "@t3tools/contracts";
+import type { EnvironmentId, StatusItem, StatusSource, StatusState } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import * as Cause from "effect/Cause";
 
 import type { AppSymbolName } from "../../components/ui/AppSymbol";
+import { relativeTime } from "../../lib/time";
 
 export interface StatusStatePresentation {
   readonly label: string;
@@ -42,6 +43,24 @@ export function statusStatePresentation(state: StatusState): StatusStatePresenta
   return STATE_PRESENTATION[state];
 }
 
+const DISABLED_PRESENTATION: StatusStatePresentation = {
+  label: "Disabled",
+  textClassName: "text-foreground-muted",
+  tintColorClassName: "accent-foreground-muted",
+  symbol: "circle.dashed",
+};
+
+/** Status payloads mark a check that is switched off as unknown with the detail "disabled". */
+export function isStatusItemDisabled(item: Pick<StatusItem, "state" | "detail">): boolean {
+  return item.state === "unknown" && item.detail?.trim().toLowerCase() === "disabled";
+}
+
+export function statusItemPresentation(
+  item: Pick<StatusItem, "state" | "detail">,
+): StatusStatePresentation {
+  return isStatusItemDisabled(item) ? DISABLED_PRESENTATION : statusStatePresentation(item.state);
+}
+
 export type StatusEnvironmentResult =
   | { readonly kind: "loading" }
   | { readonly kind: "failed"; readonly message: string }
@@ -64,8 +83,14 @@ export function statusEnvironmentResult(
 export interface StatusEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
-  /** The server reports status sources and this client may read them. */
-  readonly readable: boolean;
+  /** The server reports status sources. */
+  readonly supported: boolean;
+  /** This client's session may read the server's status. */
+  readonly permitted: boolean;
+}
+
+export function isStatusEnvironmentReadable(environment: StatusEnvironment): boolean {
+  return environment.supported && environment.permitted;
 }
 
 export interface StatusEnvironmentGroup {
@@ -77,6 +102,7 @@ export interface StatusEnvironmentGroup {
 export type StatusScreenView =
   | { readonly kind: "no-environments" }
   | { readonly kind: "unsupported" }
+  | { readonly kind: "no-access" }
   | { readonly kind: "no-sources" }
   | {
       readonly kind: "groups";
@@ -93,8 +119,12 @@ export function statusScreenView(
   results: ReadonlyArray<StatusEnvironmentResult>,
 ): StatusScreenView {
   if (environments.length === 0) return { kind: "no-environments" };
-  const readable = environments.filter((environment) => environment.readable);
-  if (readable.length === 0) return { kind: "unsupported" };
+  const readable = environments.filter(isStatusEnvironmentReadable);
+  if (readable.length === 0) {
+    return environments.some((environment) => environment.supported)
+      ? { kind: "no-access" }
+      : { kind: "unsupported" };
+  }
   const groups = readable.map((environment, index) => ({
     environmentId: environment.environmentId,
     label: environment.label,
@@ -107,12 +137,16 @@ export function statusScreenView(
 }
 
 /**
- * When the source entered its current state, or null when the server has not seen it change
- * since it started.
+ * The source's state, with how long it has held when the server saw it change, such as
+ * "Failing for 5m".
  */
-export function statusSourceHeldSince(
+export function statusSourceStateText(
   source: Pick<StatusSource, "latest" | "lastTransition">,
-): string | null {
+  nowMs: number,
+): string {
+  const label = statusStatePresentation(source.latest.state).label;
   const transition = source.lastTransition;
-  return transition && transition.to === source.latest.state ? transition.at : null;
+  return transition && transition.to === source.latest.state
+    ? `${label} for ${relativeTime(transition.at, nowMs)}`
+    : label;
 }

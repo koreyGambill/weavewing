@@ -10,12 +10,11 @@ import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
-import { RelativeTime } from "../../components/RelativeTime";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { useDeadlinePassed } from "../../lib/clock";
+import { useDeadlinePassed, useNowMinuteMs } from "../../lib/clock";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { statusSourcesForEnvironments } from "../../state/status-sources";
 import { useSettingsEnvironmentMenu } from "../settings/components/SettingsEnvironmentFilterHeader";
@@ -26,9 +25,12 @@ import {
   type SettingsTarget,
 } from "../settings/settings-environment-filter";
 import {
+  isStatusEnvironmentReadable,
+  isStatusItemDisabled,
   statusEnvironmentResult,
+  statusItemPresentation,
   statusScreenView,
-  statusSourceHeldSince,
+  statusSourceStateText,
   statusStatePresentation,
   type StatusEnvironmentGroup,
 } from "./statusSources.logic";
@@ -44,12 +46,11 @@ export function SettingsStatusSourcesRouteScreen() {
   const environments = selectedTargets.map((target) => ({
     environmentId: target.environmentId,
     label: target.label,
-    readable:
-      target.serverConfig.environment.capabilities.statusSources === true &&
-      permitted.has(target.environmentId),
+    supported: target.serverConfig.environment.capabilities.statusSources === true,
+    permitted: permitted.has(target.environmentId),
   }));
   const readableIds = environments
-    .filter((environment) => environment.readable)
+    .filter(isStatusEnvironmentReadable)
     .map((environment) => environment.environmentId);
   const results = useAtomValue(statusSourcesForEnvironments(readableIds.join("\n")));
   const view = statusScreenView(environments, results.map(statusEnvironmentResult));
@@ -72,7 +73,12 @@ export function SettingsStatusSourcesRouteScreen() {
         ) : view.kind === "unsupported" ? (
           <EmptyState
             title="Status checks unavailable"
-            detail="The connected servers don't share status checks with this device. Update a server that predates status sources."
+            detail="The connected servers don't run status checks. Update them to a version with status sources."
+          />
+        ) : view.kind === "no-access" ? (
+          <EmptyState
+            title="Status checks unavailable"
+            detail="This device isn't allowed to read status on the connected servers."
           />
         ) : view.kind === "no-sources" ? (
           <EmptyState title="No status checks yet" detail={CONFIGURE_HINT} />
@@ -136,20 +142,26 @@ function StatusSourceRow(props: { readonly source: StatusSource; readonly first:
   const { source } = props;
   const [expanded, setExpanded] = useState(false);
   const state = statusStatePresentation(source.latest.state);
-  const heldSince = statusSourceHeldSince(source);
+  const stateText = statusSourceStateText(source, useNowMinuteMs());
   const snoozeEndsAt =
     source.config.snoozedUntil === null ? null : Date.parse(source.config.snoozedUntil);
   const snoozeEnded = useDeadlinePassed(snoozeEndsAt);
   const snoozedUntil = snoozeEnded ? null : source.config.snoozedUntil;
+  const origin = source.origin ? `From ${source.origin.label}` : null;
+  const summary = source.latest.summary;
   return (
     <View className={props.first ? "" : "border-t border-border-subtle"}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        accessibilityLabel={`${source.config.name}, ${state.label}`}
+        accessibilityLabel={source.config.name}
+        // Expanded, the summary is its own text below, so it is read once.
+        accessibilityValue={{
+          text: [stateText, origin, expanded ? null : summary].filter(Boolean).join(", "),
+        }}
         accessibilityHint={expanded ? "Hides details" : "Shows details"}
         onPress={() => setExpanded(!expanded)}
-        className="flex-row items-start gap-3 px-4 py-3 active:opacity-70"
+        className={`flex-row items-start gap-3 px-4 pt-3 active:opacity-70 ${expanded ? "pb-0.5" : "pb-3"}`}
       >
         <View className="pt-0.5">
           <SymbolView
@@ -168,24 +180,14 @@ function StatusSourceRow(props: { readonly source: StatusSource; readonly first:
             {source.config.name}
           </Text>
           <Text className={`text-sm ${state.textClassName}`} numberOfLines={1}>
-            {state.label}
-            {heldSince ? (
-              <>
-                {" for "}
-                <RelativeTime timestamp={heldSince} />
-              </>
-            ) : null}
-            {source.origin ? (
-              <Text className="text-sm text-foreground-muted">{` · From ${source.origin.label}`}</Text>
+            {stateText}
+            {origin ? (
+              <Text className="text-sm text-foreground-muted">{` · ${origin}`}</Text>
             ) : null}
           </Text>
-          {source.latest.summary ? (
-            <Text
-              selectable={expanded}
-              className="text-sm text-foreground-muted"
-              numberOfLines={expanded ? undefined : 1}
-            >
-              {source.latest.summary}
+          {summary && !expanded ? (
+            <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+              {summary}
             </Text>
           ) : null}
         </View>
@@ -200,6 +202,11 @@ function StatusSourceRow(props: { readonly source: StatusSource; readonly first:
       </Pressable>
       {expanded ? (
         <View className="gap-3 pb-3 pl-[46px] pr-4">
+          {summary ? (
+            <Text selectable className="text-sm text-foreground-muted">
+              {summary}
+            </Text>
+          ) : null}
           {source.latest.items.length > 0 ? (
             <View className="gap-2">
               {source.latest.items.map((item) => (
@@ -224,11 +231,13 @@ function StatusSourceRow(props: { readonly source: StatusSource; readonly first:
 }
 
 function StatusCheckRow(props: { readonly item: StatusItem }) {
-  const state = statusStatePresentation(props.item.state);
+  const state = statusItemPresentation(props.item);
+  // A disabled check's detail only repeats its label.
+  const detail = isStatusItemDisabled(props.item) ? undefined : props.item.detail;
   return (
     <View
       accessible
-      accessibilityLabel={`${props.item.name}, ${state.label}${props.item.detail ? `: ${props.item.detail}` : ""}`}
+      accessibilityLabel={`${props.item.name}, ${state.label}${detail ? `: ${detail}` : ""}`}
       className="flex-row items-start gap-2"
     >
       <View className="pt-0.5">
@@ -240,10 +249,15 @@ function StatusCheckRow(props: { readonly item: StatusItem }) {
         />
       </View>
       <View className="min-w-0 flex-1">
-        <Text className="text-sm text-foreground">{props.item.name}</Text>
-        {props.item.detail ? (
+        <Text className="text-sm text-foreground">
+          {props.item.name}
+          {isStatusItemDisabled(props.item) ? (
+            <Text className="text-sm text-foreground-muted"> · {state.label}</Text>
+          ) : null}
+        </Text>
+        {detail ? (
           <Text selectable className="text-sm text-foreground-muted">
-            {props.item.detail}
+            {detail}
           </Text>
         ) : null}
       </View>

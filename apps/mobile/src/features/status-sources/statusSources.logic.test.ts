@@ -6,7 +6,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   statusEnvironmentResult,
   statusScreenView,
-  statusSourceHeldSince,
+  statusItemPresentation,
+  statusSourceStateText,
   statusStatePresentation,
   type StatusEnvironmentResult,
 } from "./statusSources.logic";
@@ -66,6 +67,22 @@ describe("statusStatePresentation", () => {
   });
 });
 
+describe("statusItemPresentation", () => {
+  it("labels a switched-off check as disabled with a muted icon", () => {
+    expect(statusItemPresentation({ state: "unknown", detail: " Disabled " })).toEqual({
+      label: "Disabled",
+      textClassName: "text-foreground-muted",
+      tintColorClassName: "accent-foreground-muted",
+      symbol: "circle.dashed",
+    });
+  });
+
+  it("keeps the state's own presentation for other checks", () => {
+    expect(statusItemPresentation({ state: "unknown", detail: "Queued" }).label).toBe("Not run");
+    expect(statusItemPresentation({ state: "fail", detail: "disabled" }).label).toBe("Failing");
+  });
+});
+
 describe("statusEnvironmentResult", () => {
   it("is loading until the subscription delivers its first list", () => {
     expect(statusEnvironmentResult(AsyncResult.initial(true))).toEqual({ kind: "loading" });
@@ -99,10 +116,11 @@ describe("statusEnvironmentResult", () => {
 });
 
 describe("statusScreenView", () => {
-  const environment = (environmentId: EnvironmentId, readable = true) => ({
+  const environment = (environmentId: EnvironmentId, supported = true, permitted = true) => ({
     environmentId,
     label: LABELS.get(environmentId)!,
-    readable,
+    supported,
+    permitted,
   });
 
   it("has nothing to show without a connected environment", () => {
@@ -111,6 +129,12 @@ describe("statusScreenView", () => {
 
   it("says the servers need updating when none of them serve status sources", () => {
     expect(statusScreenView([environment(laptop, false)], [])).toEqual({ kind: "unsupported" });
+  });
+
+  it("says access is missing, not that servers need updating, when a server supports them", () => {
+    expect(
+      statusScreenView([environment(laptop, true, false), environment(oldServer, false)], []),
+    ).toEqual({ kind: "no-access" });
   });
 
   it("shows the empty state once every readable environment loaded no sources", () => {
@@ -158,20 +182,22 @@ describe("statusScreenView", () => {
   });
 });
 
-describe("statusSourceHeldSince", () => {
-  it("is the last transition's time when it led to the current state", () => {
+describe("statusSourceStateText", () => {
+  const now = Date.parse("2026-11-26T10:05:30.000Z");
+
+  it("adds how long the state has held when the last transition led to it", () => {
     const failing = source({
       latest: { source: "CI", state: "fail", summary: "HTTP 500", items: [] },
       lastTransition: { from: "ok", to: "fail", at: "2026-11-26T10:00:00.000Z" },
     });
-    expect(statusSourceHeldSince(failing)).toBe("2026-11-26T10:00:00.000Z");
+    expect(statusSourceStateText(failing, now)).toBe("Failing for 5m");
   });
 
-  it("is unknown before the server has seen the source change", () => {
-    expect(statusSourceHeldSince(source())).toBeNull();
+  it("is the bare state before the server has seen the source change", () => {
+    expect(statusSourceStateText(source(), now)).toBe("Passing");
     const superseded = source({
       lastTransition: { from: "ok", to: "fail", at: "2026-11-26T10:00:00.000Z" },
     });
-    expect(statusSourceHeldSince(superseded)).toBeNull();
+    expect(statusSourceStateText(superseded, now)).toBe("Passing");
   });
 });
