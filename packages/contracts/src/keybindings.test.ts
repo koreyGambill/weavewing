@@ -128,6 +128,7 @@ const SHIPPED_DEFAULT_COMMANDS = [
   "usage.period.week",
   "usage.tokens",
   "view.reopenClosed",
+  "waiting.show",
   "workspace.focusNext",
   "workspace.focusPrevious",
   "workspace.tile.focusDown",

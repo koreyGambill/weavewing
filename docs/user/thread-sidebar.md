@@ -87,7 +87,7 @@ folder with the conversation carried over. Finish or stop any work before moving
 
 The thread's views (Todos, Evidence, Artifacts, Links, Related, Timeline, Details,
 Environments, Inspect and Automations) open in the side panel on the right, along
-with Calendar and Status. Open it with the panel button at the right of the
+with Inbox, Calendar and Status. Open it with the panel button at the right of the
 titlebar, with `Cmd+Alt+Shift+B` on macOS or `Ctrl+Alt+Shift+B` on Windows and
 Linux, or on a thread's details with the panel button at the right end of the row
 under the composer. Choose a view from the menu at the top left of the panel. The
@@ -108,7 +108,22 @@ follow the focused tile; pin them to keep one thread while you move between
 tiles. Hide tools you don't use from the bottom of the strip. Opening a hidden
 tool from elsewhere, such as an artifact reminder, shows it again.
 
-The **Inbox**, the bell under Threads in the strip, collects notifications that
+**Waiting on you**, at the top of the thread list, counts the threads where
+something waits on you: a question, a change to check or a task. It also shows
+how many notifications are unread, and hides when nothing waits and nothing is
+unread. Click it, or press Enter on it, to list those threads, most recently
+changed first, with each kind's count; choose one to open it. Threads where you
+are only discussing something with the agent follow under **Waiting on the
+agent** and are not counted. Unread alerts that belong to no thread, such as a
+failing status source or an automation that keeps failing, come next, and
+choosing one opens it in the Inbox. **Open Inbox** opens the whole Inbox in the
+side panel. Arrow keys move through the list and Escape closes it. On narrow
+windows the list opens as a sheet. **Show what is waiting on me** in the command
+palette opens it too, and you can bind a shortcut to it under **Settings →
+Keybindings**. With **Waiting-on-you cards** off in **Settings → Threads**, the
+row shows only notifications.
+
+The **Inbox**, the bell under Threads in the strip and a view in the side panel, collects notifications that
 need urgent action or are important enough that you must not miss them, newest first.
 Agents must choose urgent or important when raising one. Routine progress,
 completions and review nitpicks stay in their threads. Landed work awaiting QA

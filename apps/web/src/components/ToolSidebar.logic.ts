@@ -5,13 +5,13 @@ import { THREAD_TOOL_ORDER } from "../threadContextSidebar";
 import type { ThreadContextSection } from "../threadContextSidebarStore";
 
 /** Every view the side area can show: the thread views, then the views that span threads. */
-export type ViewId = Exclude<ThreadContextSection, "inbox"> | "calendar" | "status";
+export type ViewId = ThreadContextSection | "calendar" | "status";
 
-const GLOBAL_VIEW_IDS = ["calendar", "status"] as const satisfies ReadonlyArray<ViewId>;
+const GLOBAL_VIEW_IDS = ["inbox", "calendar", "status"] as const satisfies ReadonlyArray<ViewId>;
 
 /** The view picker's order: thread views as the rail lists them, then global views. */
 export const VIEW_IDS: ReadonlyArray<ViewId> = [
-  ...THREAD_TOOL_ORDER.filter((id): id is Exclude<ThreadContextSection, "inbox"> => id !== "inbox"),
+  ...THREAD_TOOL_ORDER.filter((id) => id !== "inbox"),
   ...GLOBAL_VIEW_IDS,
 ];
 
@@ -42,7 +42,7 @@ const PersistedSideArea = Schema.Struct({
 /** The tools sidebar's stored shape before it became the side area. */
 const LegacyToolSidebar = Schema.Struct({
   visible: Schema.Boolean,
-  activeTool: Schema.NullOr(Schema.Literals(GLOBAL_VIEW_IDS)),
+  activeTool: Schema.NullOr(Schema.Literals(["calendar", "status"])),
   width: Schema.Finite,
 });
 

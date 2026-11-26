@@ -94,6 +94,7 @@ import {
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
+  UserRoundIcon,
   CalendarClockIcon,
   ClipboardCheckIcon,
   ExternalLinkIcon,
@@ -196,6 +197,8 @@ import {
 } from "../commandPaletteStore";
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { openWaitingList } from "./waiting/threadList/waitingListCommand";
+import { waitingThreadsAtom } from "./waiting/threadList/waitingOnYou";
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
@@ -549,6 +552,7 @@ function OpenCommandPaletteDialog(props: {
   });
   const markAllNotificationsRead = useAtomCommand(serverEnvironment.markAllNotificationsRead);
   const inboxes = useInboxEnvironments();
+  const waitingThreads = useAtomValue(waitingThreadsAtom);
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -1935,6 +1939,21 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (waitingThreads.waiting.length > 0 || inboxes.some((group) => group.inbox?.unreadCount)) {
+    actionItems.push({
+      kind: "action",
+      value: "action:waiting-on-you",
+      title: "Show what is waiting on me",
+      searchTerms: ["waiting on you", "questions", "qa", "tasks", "notifications", "alerts"],
+      icon: <UserRoundIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "waiting.show",
+      run: async () => {
+        // Without a thread list on screen, the Inbox is where the same things wait.
+        if (!openWaitingList())
+          useToolSidebarStore.getState().dispatch({ type: "show", view: "inbox" });
+      },
+    });
+  }
   actionItems.push({
     kind: "action",
     value: "action:inbox",
