@@ -372,7 +372,7 @@ import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/Compos
 import { useWaitingOnYouStrip } from "./waiting/useWaitingOnYouStrip";
 import { waitingRefreshKey } from "./waiting/waitingStrip.logic";
 import { questionDismissalEntries } from "./questions/questionDismissals.logic";
-import { questionSurfaceIdsToClose } from "./questions/questionsSurface.logic";
+import { questionSurfaceIdsToClose } from "@t3tools/client-runtime/state/question-surfaces";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";

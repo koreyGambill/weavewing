@@ -1,7 +1,4 @@
-import {
-  threadQuestionAnswerRecord,
-  threadQuestionHasDraft,
-} from "@t3tools/client-runtime/state/thread-questions";
+import { threadQuestionAnswerRecord, threadQuestionHasDraft } from "./threadQuestions.ts";
 import type { ThreadQuestion, ThreadWorkspace } from "@t3tools/contracts";
 
 /**

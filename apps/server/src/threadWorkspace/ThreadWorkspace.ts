@@ -14,6 +14,8 @@ import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   threadQuestionTitle,
+  questionWaitingItems,
+  taskWaitingItems,
   type ArtifactAnswerContextRecord,
   type WaitingItemSummary,
   type ThreadQuestion,
@@ -178,49 +180,7 @@ const isWaiting = (
   question: ThreadQuestion,
 ): question is ThreadQuestion & { readonly state: "open" | "deferred" } =>
   question.state === "open" || question.state === "deferred";
-// A withdrawn question stays mirrored while the user's dismissal is unreported history, so the
-// agent's next user-message turn can name it and the timeline can show it.
-const questionWaitingItems = (
-  workspace: Pick<Workspace, "questions">,
-): ReadonlyArray<WaitingItemSummary> =>
-  workspace.questions.flatMap((question): ReadonlyArray<WaitingItemSummary> => {
-    const common = {
-      kind: "question" as const,
-      ref: question.id,
-      key: question.id,
-      title: threadQuestionTitle(question.prompt),
-      ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
-    };
-    if (isWaiting(question))
-      return [
-        {
-          ...common,
-          state: question.discussedInMessageId ? "discussing" : question.state,
-          ...(question.sentInMessageId ? { sent: true as const } : {}),
-          ...(question.discussedInMessageId && question.state === "deferred"
-            ? { deferred: true as const }
-            : {}),
-        },
-      ];
-    return question.state === "withdrawn" && question.userChangedAt
-      ? [{ ...common, state: "dismissed", settledBy: "user" }]
-      : [];
-  });
 const isUserTask = (item: ListItem) => item.owner === "you";
-const taskWaitingItems = (workspace: Pick<Workspace, "items">): ReadonlyArray<WaitingItemSummary> =>
-  workspace.items.flatMap((item) =>
-    isUserTask(item) && item.state === "open"
-      ? [
-          {
-            kind: "task" as const,
-            ref: item.ref ?? "T",
-            key: item.id,
-            title: threadQuestionTitle(item.text),
-            state: item.discussedInMessageId ? ("discussing" as const) : ("open" as const),
-          },
-        ]
-      : [],
-  );
 /**
  * Numbers the user's tasks T1, T2, ... in list order after the highest number ever given out,
  * and records that number; the same workspace when nothing changes.

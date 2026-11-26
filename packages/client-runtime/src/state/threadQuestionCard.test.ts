@@ -1,7 +1,7 @@
 import type { ThreadQuestion } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { closedQuestionOutcome, closedQuestionShownAnswer } from "./ThreadQuestionCard.logic";
+import { closedQuestionOutcome, closedQuestionShownAnswer } from "./threadQuestionCard.ts";
 
 const question = (state: ThreadQuestion["state"], extra: Partial<ThreadQuestion> = {}) => ({
   state,

@@ -18,7 +18,7 @@ import {
   useComposerDraftStore,
 } from "../../composerDraftStore";
 import { toastManager } from "../ui/toast";
-import { draftedAnswersForComposer } from "./questionComposer.logic";
+import { draftedAnswersForComposer } from "@t3tools/client-runtime/state/thread-question-composer";
 import type { questionDraftWriter, SaveQuestionDraft } from "./questionDraftWriter";
 
 const answersOf = (threadRef: ScopedThreadRef) =>
