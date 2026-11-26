@@ -35,6 +35,7 @@ interface SerializedError {
 }
 
 type FromWorker =
+  | { readonly type: "pid"; readonly id: number; readonly pid: number }
   | { readonly type: "spawn"; readonly id: number; readonly pid: number | undefined }
   | { readonly type: "error"; readonly id: number; readonly error: SerializedError }
   | { readonly type: "data"; readonly id: number; readonly fd: number; readonly data: Uint8Array }
@@ -100,6 +101,8 @@ parentPort.on("message", (request) => {
       post({ type: "error", id, error: serialize(error) });
       return;
     }
+    // Sent before any event can run, so the server can end the process if this thread dies first.
+    if (child.pid !== undefined) post({ type: "pid", id, pid: child.pid });
     children.set(id, child);
     child.on("spawn", () => post({ type: "spawn", id, pid: child.pid }));
     child.on("error", (error) => post({ type: "error", id, error: serialize(error) }));
@@ -376,6 +379,9 @@ class SpawnWorker {
     const child = this.children.get(message.id);
     if (child === undefined) return;
     switch (message.type) {
+      case "pid":
+        child.pid = message.pid;
+        break;
       case "spawn":
         this.launching--;
         child.spawned = true;
@@ -429,7 +435,8 @@ class SpawnWorker {
         child.abandon();
         continue;
       }
-      if (!child.spawned) {
+      // Only a launch that never produced a process fails as a launch; any known pid gets killed.
+      if (!child.spawned && child.pid === undefined) {
         child.exited = true;
         child.emit("error", error);
         continue;

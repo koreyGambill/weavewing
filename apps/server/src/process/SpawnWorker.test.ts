@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off processEnvInEffect:off - fixtures need real paths, the process resource list and the live environment.
+import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -6,8 +7,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
@@ -21,6 +25,27 @@ vi.mock("@t3tools/shared/envTrampoline", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/shared/envTrampoline")>()),
   supportsEnvChdir: () => Promise.resolve(envChdir.supported),
 }));
+
+// A launcher thread that never acknowledges a spawn and dies on its first kill request.
+const launcherFault = vi.hoisted(() => ({ active: false }));
+vi.mock("node:worker_threads", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:worker_threads")>();
+  const typeOf = (message: unknown) => (message as { readonly type?: unknown }).type;
+  class Worker extends actual.Worker {
+    override emit(event: string | symbol, ...args: Array<unknown>): boolean {
+      if (launcherFault.active && event === "message" && typeOf(args[0]) === "spawn") return false;
+      return super.emit(event, ...args);
+    }
+    override postMessage(...args: Parameters<InstanceType<typeof actual.Worker>["postMessage"]>) {
+      if (launcherFault.active && typeOf(args[0]) === "kill") {
+        this.emit("error", new Error("The launcher thread failed."));
+        return;
+      }
+      super.postMessage(...args);
+    }
+  }
+  return { ...actual, Worker, default: { ...actual, Worker } };
+});
 
 const layer = SpawnWorker.layer.pipe(Layer.provide(NodeServices.layer));
 const text = <E>(stream: Stream.Stream<Uint8Array, E>) =>
@@ -200,5 +225,55 @@ describe("SpawnWorker", () => {
       const exited = new Promise((resolve) => direct.once("exit", () => resolve(direct.killed)));
       expect(yield* Effect.promise(() => exited)).toBe(true);
     }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.live("ends a child whose launcher thread fails before acknowledging the spawn", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-spawn-worker-" });
+      const socketPath = NodePath.join(dir, "child.sock");
+      const started = yield* Deferred.make<number>();
+      const closed = yield* Deferred.make<void>();
+      // The child's socket closes when it exits, whoever reaps it.
+      yield* Effect.acquireRelease(
+        Effect.callback<NodeNet.Server>((resume) => {
+          const server = NodeNet.createServer((socket) => {
+            socket.once("data", (pid) => Deferred.doneUnsafe(started, Exit.succeed(Number(pid))));
+            socket.on("close", () => Deferred.doneUnsafe(closed, Exit.void));
+          });
+          server.listen(socketPath, () => resume(Effect.succeed(server)));
+        }),
+        (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
+      );
+      launcherFault.active = true;
+      const child = SpawnWorker.spawnPiped(
+        process.execPath,
+        [
+          "-e",
+          "process.on('SIGTERM',()=>{});require('node:net').connect(process.argv[1]).write(String(process.pid));process.stdin.resume()",
+          socketPath,
+        ],
+        {},
+      );
+      const pid = yield* Deferred.await(started);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          launcherFault.active = false;
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }),
+      );
+      const reported = new Promise<string>((resolve) => {
+        child.once("exit", () => resolve("exit"));
+        child.once("error", () => resolve("error"));
+      });
+      child.kill("SIGTERM");
+      // The launcher knew the pid, so it ends the child before reporting a kill, not a failed launch.
+      expect(yield* Effect.promise(() => reported)).toBe("exit");
+      expect(yield* Deferred.await(closed).pipe(Effect.timeoutOption("5 seconds"))).toEqual(
+        Option.some(undefined),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
