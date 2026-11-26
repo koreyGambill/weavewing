@@ -98,6 +98,20 @@ vi.mock("../state/assets", () => ({
   useAssetUrlState: () => ({ _tag: "Success", url: "https://media.example/clip.mp4" }),
   useRefreshAssetUrl: () => mocks.refresh,
 }));
+vi.mock("../state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  // The pull request cases play a remote URL, so their server allows remote media to load.
+  const config = { settings: { autoLoadRemoteMedia: true } };
+  return {
+    serverEnvironment: {
+      configValueAtom: Atom.family((_environmentId: string) => Atom.make(config)),
+    },
+  };
+});
+vi.mock("../state/atom-registry", async () => {
+  const { AtomRegistry } = await import("effect/reactivity");
+  return { appAtomRegistry: AtomRegistry.make() };
+});
 vi.mock("./localAttachmentPreview", () => ({ loadLocalAttachmentPreview: vi.fn() }));
 vi.mock("./videoThumbnails", () => ({
   cachedVideoThumbnail: () => null,

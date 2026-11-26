@@ -7,6 +7,18 @@ import { messageImageGallery } from "../features/threads/messageImageGallery";
 import { filePreviewGallery, filePreviewKey } from "./filePreviewGallery";
 
 vi.mock("./uuid", () => ({}));
+vi.mock("../state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    serverEnvironment: {
+      configValueAtom: Atom.family((_environmentId: string) => Atom.make(null)),
+    },
+  };
+});
+vi.mock("../state/atom-registry", async () => {
+  const { AtomRegistry } = await import("effect/reactivity");
+  return { appAtomRegistry: AtomRegistry.make() };
+});
 
 describe("image preview groups", () => {
   it.each([false, true])(
