@@ -310,19 +310,24 @@ function isTextContentBlock(block: typeof TranscriptContentBlock.Type): boolean 
   return block.type === "text" || block.type === "input_text" || block.type === "output_text";
 }
 
-// T3 puts its instruction-update notice ahead of a resumed Claude session's prompt. The provider
-// keeps it as user text, but the user never wrote it, so import leaves it out.
 function extractText(
   content: string | ReadonlyArray<typeof TranscriptContentBlock.Type> | undefined,
+  withoutNotice: (text: string) => string = (text) => text,
 ): string {
-  if (typeof content === "string") return withoutClaudeInstructionNotice(content).trim();
+  if (typeof content === "string") return withoutNotice(content).trim();
   if (content === undefined) return "";
   return content
     .filter(isTextContentBlock)
-    .map((block) => withoutClaudeInstructionNotice(block.text ?? "").trim())
+    .map((block) => withoutNotice(block.text ?? "").trim())
     .filter((text) => text.length > 0)
     .join("\n");
 }
+
+// T3 puts its instruction-update notice ahead of a resumed Claude session's prompt. Claude keeps
+// it as user text, but the user never wrote it, so a Claude import leaves it out.
+const extractClaudeText = (
+  content: string | ReadonlyArray<typeof TranscriptContentBlock.Type> | undefined,
+) => extractText(content, withoutClaudeInstructionNotice);
 
 function normalizeTimestamp(value: string | undefined, fallback: string): string {
   if (value === undefined) return fallback;
@@ -597,7 +602,7 @@ function parseAgentSessionRecords(
     if (input.source === "claudeAgent") {
       if (isHiddenClaudeRecord(record)) continue;
       if (record.type !== "user" && record.type !== "assistant") continue;
-      const text = extractText(record.message?.content);
+      const text = extractClaudeText(record.message?.content);
       if (text.length === 0) continue;
       retainMessage({
         role: record.type,
@@ -705,7 +710,7 @@ function shouldRetainDecodedRecord(
     if (isHiddenClaudeRecord(record) || (record.type !== "user" && record.type !== "assistant")) {
       return false;
     }
-    return extractText(record.message?.content).length > 0;
+    return extractClaudeText(record.message?.content).length > 0;
   }
   if (extractDecodedCwd(record) !== null) return true;
   return (

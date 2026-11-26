@@ -3875,6 +3875,62 @@ describe("parseAgentSessionTranscript", () => {
       expect(JSON.stringify(thread?.messages)).not.toContain(CLAUDE_INSTRUCTION_NOTICE_MARKER);
     });
 
+    it("leaves the notice out of a merged string and keeps the user's text", () => {
+      const thread = parse(
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-session",
+          timestamp: "2026-08-25T08:00:00.000Z",
+          message: { role: "user", content: `${notice}\nFix the retry toast` },
+        }),
+      );
+      expect(thread?.title).toBe("Fix the retry toast");
+    });
+
+    it("leaves Codex and Pi messages that contain the notice untouched", () => {
+      const pasted = `${notice}\nWhy does this show up in my session?`;
+      const codex = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: [
+          encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
+          encodeTranscriptRecord({
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: pasted }],
+            },
+          }),
+        ].join("\n"),
+        source: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        fallbackSessionId: "fallback",
+        lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
+      });
+      const pi = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: [
+          encodeTranscriptRecord({
+            type: "session",
+            version: 3,
+            id: "pi-session",
+            cwd: "/home/user/app",
+          }),
+          encodeTranscriptRecord({
+            type: "message",
+            id: "m1",
+            parentId: null,
+            timestamp: "2026-08-25T08:00:00.000Z",
+            message: { role: "user", content: pasted },
+          }),
+        ].join("\n"),
+        source: "pi",
+        providerInstanceId: ProviderInstanceId.make("pi"),
+        fallbackSessionId: "fallback",
+        lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
+      });
+      expect(codex?.messages.map((message) => message.text)).toEqual([pasted]);
+      expect(pi?.messages.map((message) => message.text)).toEqual([pasted]);
+    });
+
     it("keeps user text that only mentions the notice's marker", () => {
       const text = `Why do my logs show ${CLAUDE_INSTRUCTION_NOTICE_MARKER} lines?`;
       const thread = parse(userRecord([text], "2026-08-25T08:00:00.000Z"));
