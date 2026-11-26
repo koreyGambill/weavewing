@@ -3,21 +3,21 @@ import { senderCardDetails } from "@t3tools/client-runtime/user-message";
 import type { MessageId, ScopedThreadRef } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
 import type { ReactNode } from "react";
-import { View, type ColorValue } from "react-native";
+import { Pressable, View, type ColorValue } from "react-native";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { CopyTextButton } from "./CopyTextButton";
 import { MessageReactionChip } from "./MessageReactionChip";
-import type { IncomingOrigin } from "./messageCards";
+import { senderCardRowLabel, type IncomingOrigin } from "./messageCards";
 import { useMessageReaction } from "./useMessageReaction";
 import { ThreadDisclosureChevron } from "./thread-work-log";
 import { ThreadMessageLink, useThreadCardTarget } from "./ThreadMessageLink";
-import { WorkLogIconSlot, WorkLogPressable } from "./work-log-layout";
+import { WorkLogIconSlot } from "./work-log-layout";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 
-// Web's breakpoints for the card: below them the relation label, then the time, leave the row.
+// Web's breakpoints for the card: below them the relation label shortens, then the time leaves.
 const LABEL_MIN_WIDTH = 576;
 const TIMESTAMP_MIN_WIDTH = 384;
 /** The expanded body's left margin, border and padding (`ml-7 border-l-2 pl-3`). */
@@ -64,9 +64,9 @@ export function SenderCard(props: {
   const canOpen = sender !== null && target.reachable;
   return (
     <View className="mb-1 min-w-0">
-      <WorkLogPressable
+      <Pressable
         accessibilityRole="button"
-        accessibilityLabel={[heading, details.preview].filter(Boolean).join(": ")}
+        accessibilityLabel={[heading, details.preview, reaction?.label].filter(Boolean).join(": ")}
         accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the message.`}
         accessibilityState={{ expanded: props.expanded }}
         // Screen readers treat the row as one element, so the sender link is an action on it.
@@ -83,6 +83,7 @@ export function SenderCard(props: {
           void Haptics.selectionAsync();
           props.onToggle();
         }}
+        className="min-h-11 flex-row items-center gap-1.5 rounded-md px-0.5 active:bg-subtle"
       >
         <WorkLogIconSlot>
           <SymbolView
@@ -94,11 +95,9 @@ export function SenderCard(props: {
           />
         </WorkLogIconSlot>
         <View className="min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden">
-          {props.width >= LABEL_MIN_WIDTH ? (
-            <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground-muted">
-              {details.label}
-            </Text>
-          ) : null}
+          <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground-muted">
+            {senderCardRowLabel(details.label, Boolean(name), props.width >= LABEL_MIN_WIDTH)}
+          </Text>
           {sender ? (
             <View className="min-w-0 max-w-[45%] shrink">
               <ThreadMessageLink
@@ -139,7 +138,7 @@ export function SenderCard(props: {
             />
           </View>
         </View>
-      </WorkLogPressable>
+      </Pressable>
       {props.expanded ? (
         <View
           className="mb-1.5 ml-7 mt-0.5 min-w-0 gap-2 border-l-2 border-l-border pl-3"
@@ -150,13 +149,16 @@ export function SenderCard(props: {
               {[heading, reaction?.label, props.timestampLabel].filter(Boolean).join(" · ")}
             </Text>
             {props.text.trim().length > 0 ? (
-              <CopyTextButton
-                accessibilityLabel="Copy message"
-                text={props.text}
-                tintColor={props.iconSubtleColor}
-                buttonSize={24}
-                iconSize={13}
-              />
+              // A full-size target whose margin keeps the header line compact.
+              <View className="-my-2.5">
+                <CopyTextButton
+                  accessibilityLabel="Copy message"
+                  text={props.text}
+                  tintColor={props.iconSubtleColor}
+                  buttonSize={44}
+                  iconSize={13}
+                />
+              </View>
             ) : null}
           </View>
           {props.children}

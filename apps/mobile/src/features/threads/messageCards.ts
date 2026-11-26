@@ -3,6 +3,7 @@ import {
   reactionInputsUnchanged,
   type InputMessageReaction,
 } from "@t3tools/client-runtime/state/message-reactions";
+import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { nonUserMessageOrigin } from "@t3tools/client-runtime/user-message";
 import type {
   MessageId,
@@ -31,15 +32,23 @@ export function incomingMessageCard(
 }
 
 /**
- * Whether tapping a thread name can open it: its environment is connected here, and the thread
- * still exists. A lookup that is still running or failed leaves the link on.
+ * Whether tapping a thread name can open it: its environment is connected right now, and the
+ * thread is known here or its metadata lookup found it. Until then the name stays plain text.
  */
 export function threadCardReachable(input: {
-  readonly connected: boolean;
+  readonly phase: EnvironmentConnectionPhase | null;
   readonly shellKnown: boolean;
-  readonly lookup: "pending" | "found" | "missing" | "failed";
+  readonly lookupFound: boolean;
 }): boolean {
-  return input.connected && (input.shellKnown || input.lookup !== "missing");
+  return input.phase === "connected" && (input.shellKnown || input.lookupFound);
+}
+
+/**
+ * The relation shown in the collapsed row. Narrow rows keep its first words ("Reply", "Report")
+ * when a sender name follows, and the whole label when it is the only source shown.
+ */
+export function senderCardRowLabel(label: string, named: boolean, wide: boolean): string {
+  return wide || !named ? label : (label.split(" from ", 1)[0] ?? label);
 }
 
 type ReactionRun = Parameters<typeof buildMessageRows>[0][number];

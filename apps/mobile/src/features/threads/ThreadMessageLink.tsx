@@ -11,12 +11,15 @@ import { useEnvironmentQuery } from "../../state/query";
 import { threadCardReachable } from "./messageCards";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 
+const LINK_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
+
 /** The live title of a thread a card names, and whether this phone can open it. */
 export function useThreadCardTarget(ref: ScopedThreadRef | null, fallbackTitle?: string) {
   const shell = useQuietThreadShell(ref);
-  const connected = useEnvironmentPresentation(ref?.environmentId ?? null).presentation !== null;
+  const phase =
+    useEnvironmentPresentation(ref?.environmentId ?? null).presentation?.connection.phase ?? null;
   const lookup = useEnvironmentQuery(
-    ref !== null && shell === null && connected
+    ref !== null && shell === null && phase === "connected"
       ? orchestrationEnvironment.threadLinkMetadata({
           environmentId: ref.environmentId,
           input: { threadIds: [ref.threadId] },
@@ -30,15 +33,9 @@ export function useThreadCardTarget(ref: ScopedThreadRef | null, fallbackTitle?:
     reachable:
       ref !== null &&
       threadCardReachable({
-        connected,
+        phase,
         shellKnown: shell !== null,
-        lookup: lookup.data
-          ? metadata
-            ? "found"
-            : "missing"
-          : lookup.error !== null
-            ? "failed"
-            : "pending",
+        lookupFound: metadata !== undefined,
       }),
   };
 }
@@ -82,7 +79,8 @@ export function ThreadMessageLink(props: {
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`Open ${props.title}`}
-      hitSlop={6}
+      // The card rows are 44 pt tall, so this reaches their full height.
+      hitSlop={LINK_HIT_SLOP}
       className="min-w-0 shrink flex-row items-center gap-1"
       onPress={(event) => {
         event.stopPropagation();
