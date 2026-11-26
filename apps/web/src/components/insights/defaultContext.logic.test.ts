@@ -149,19 +149,22 @@ describe("usedContextSources", () => {
     item({ label: "deferred", category: "tools", estimatedTokens: 5_000, counted: false }),
   ];
   const known = 24_600;
-  const withFirstTurn = (promptTokens: number | null) => ({
+  const active = "provider-thread-active";
+  const withStarting = (promptTokens: number | null, providerThreadId = active) => ({
     ...preview(items),
     cwd: "/home/me/repo/app",
-    firstTurn:
-      promptTokens === null ? null : { promptTokens, reportedAt: "2026-11-25T00:00:00.000Z" },
+    startingContext:
+      promptTokens === null ? null : { providerThreadId: providerThreadId as never, promptTokens },
   });
+  const hasStartingRow = (result: ReturnType<typeof usedContextSources>) =>
+    rows(result)?.some(([key]) => key === "harness") ?? false;
   const rows = (result: ReturnType<typeof usedContextSources>) =>
     result?.reconciles ? result.sources.map((source) => [source.key, source.tokens]) : null;
   const total = (result: ReturnType<typeof usedContextSources>) =>
     result?.reconciles ? result.sources.reduce((sum, source) => sum + source.tokens, 0) : null;
 
   it("groups instruction files by the server's repository flag and splits off the starting context", () => {
-    const result = usedContextSources(withFirstTurn(70_000), 163_000);
+    const result = usedContextSources(withStarting(70_000), 163_000, active);
     expect(rows(result)).toEqual([
       ["conversation", 93_000],
       ["harness", 70_000 - known],
@@ -175,30 +178,48 @@ describe("usedContextSources", () => {
 
   it("keeps instruction files in one row when the server sends no repository flag", () => {
     const unflagged = items.map(({ repository: _repository, ...rest }) => rest);
-    const result = usedContextSources({ ...preview(unflagged), firstTurn: null }, 70_000);
+    const result = usedContextSources(
+      { ...preview(unflagged), startingContext: null },
+      70_000,
+      active,
+    );
     expect(rows(result)).toContainEqual(["files", 18_200]);
   });
 
   it("folds the conversation into one remainder without a first-request report", () => {
-    const result = usedContextSources(withFirstTurn(null), 70_000);
+    const result = usedContextSources(withStarting(null), 70_000, active);
     expect(rows(result)?.at(0)).toEqual(["rest", 70_000 - known]);
     expect(total(result)).toBe(70_000);
   });
 
   it("ignores a first-request report larger than current use, as after compaction", () => {
-    const result = usedContextSources(withFirstTurn(100_000), 30_000);
+    const result = usedContextSources(withStarting(100_000), 30_000, active);
     expect(rows(result)).toContainEqual(["rest", 30_000 - known]);
     expect(total(result)).toBe(30_000);
   });
 
   it("ignores a first-request report smaller than the itemized estimates", () => {
-    const result = usedContextSources(withFirstTurn(10_000), 30_000);
-    expect(rows(result)?.some(([key]) => key === "harness")).toBe(false);
+    const result = usedContextSources(withStarting(10_000), 30_000, active);
+    expect(hasStartingRow(result)).toBe(false);
     expect(total(result)).toBe(30_000);
   });
 
+  it("shows no starting row for a preview that carries only the older first-turn count", () => {
+    const legacy = { ...preview(items), firstTurn: { promptTokens: 70_000, reportedAt: "x" } };
+    const result = usedContextSources(legacy as never, 163_000, active);
+    expect(hasStartingRow(result)).toBe(false);
+    expect(total(result)).toBe(163_000);
+  });
+
+  it("shows no starting row when the baseline belongs to another provider thread", () => {
+    const stale = withStarting(70_000, "provider-thread-before-switch");
+    const result = usedContextSources(stale, 163_000, active);
+    expect(hasStartingRow(result)).toBe(false);
+    expect(rows(result)?.at(0)).toEqual(["rest", 163_000 - known]);
+  });
+
   it("reports estimates that exceed the provider's count instead of rows", () => {
-    expect(usedContextSources(withFirstTurn(10_000), 5_000)).toEqual({
+    expect(usedContextSources(withStarting(10_000), 5_000, active)).toEqual({
       reconciles: false,
       knownTokens: known,
       usedTokens: 5_000,
@@ -206,6 +227,6 @@ describe("usedContextSources", () => {
   });
 
   it("returns null when the provider's default context is unsupported", () => {
-    expect(usedContextSources({ ...preview(items), support: "unsupported" }, 1)).toBeNull();
+    expect(usedContextSources({ ...preview(items), support: "unsupported" }, 1, active)).toBeNull();
   });
 });

@@ -684,14 +684,14 @@ it("takes the starting size only from the first turn of a conversation that bega
       driver: "claudeAgent",
       ...overrides,
     });
-  expect(starting()).toEqual({ promptTokens: 32_700, reportedAt: DateTime.formatIso(startedAt) });
+  expect(starting()).toEqual({ providerThreadId: fresh.id, promptTokens: 32_700 });
   // A first turn without a recorded first input, from before it was recorded or because its
   // first report carried none, never borrows a later turn's.
   expect(starting({ turns: [turn(1), turn(2, 50_000)] })).toBeNull();
   // After a switch from Codex, a turn of the earlier provider thread never stands in.
   expect(starting({ turns: [turn(1, 20_000, "codex-thread" as never), turn(2, 30_000)] })).toEqual({
+    providerThreadId: fresh.id,
     promptTokens: 30_000,
-    reportedAt: DateTime.formatIso(startedAt),
   });
   expect(starting({ turns: [] })).toBeNull();
   // These drivers' first report can describe a later request than the first.
@@ -754,11 +754,11 @@ it.effect("reports the first request's prompt as the starting size, not the turn
           home,
           Context.get(context, DefaultContext).preview({ threadId }),
         );
-        return preview.firstTurn;
+        return preview.startingContext;
       });
     expect(yield* startingSize(32_700)).toEqual({
+      providerThreadId: "provider-thread",
       promptTokens: 32_700,
-      reportedAt: DateTime.formatIso(startedAt),
     });
     // A turn stored before the first input was recorded gets no starting size.
     expect(yield* startingSize(undefined)).toBeNull();

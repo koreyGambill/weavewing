@@ -130,7 +130,11 @@ export interface UsedContextSource {
  * conversation only while it lies between the itemized total and current use. Estimates above the
  * count cannot reconcile and are reported as such.
  */
-export function usedContextSources(preview: DefaultContextPreview, usedTokens: number) {
+export function usedContextSources(
+  preview: DefaultContextPreview,
+  usedTokens: number,
+  activeProviderThreadId: string | null,
+) {
   if (preview.support === "unsupported") return null;
   const counted = preview.items.filter((item) => item.counted);
   const isFile = (item: DefaultContextItem) => item.category === "files";
@@ -163,7 +167,12 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
   const known = sources.reduce((sum, source) => sum + source.tokens, 0);
   const used = Math.max(0, usedTokens);
   if (known > used) return { reconciles: false as const, knownTokens: known, usedTokens: used };
-  const reported = preview.firstTurn?.promptTokens ?? null;
+  // A preview cached before a provider switch measured another conversation.
+  const starting = preview.startingContext;
+  const reported =
+    starting != null && starting.providerThreadId === activeProviderThreadId
+      ? starting.promptTokens
+      : null;
   const baseline = reported !== null && reported >= known && reported <= used ? reported : null;
   if (baseline === null) {
     sources.push({

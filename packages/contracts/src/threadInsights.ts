@@ -5,6 +5,7 @@ import {
   MessageId,
   NonNegativeInt,
   ProjectId,
+  ProviderThreadId,
   RunId,
   ThreadId,
   TurnItemId,
@@ -192,12 +193,14 @@ export const DefaultContextPreview = Schema.Struct({
     }),
   ),
   /**
-   * The prompt size the provider reported for the first model request on the thread's current
-   * provider thread: what loaded before the conversation, plus the first message. `reportedAt` is
-   * when that request's turn started. Null when no recorded count is known to be that request's.
+   * The prompt size the provider reported for the first model request on `providerThreadId`: what
+   * loaded before the conversation, plus the first message. Null when no recorded count is known to
+   * be that request's.
    */
-  firstTurn: Schema.optional(
-    Schema.NullOr(Schema.Struct({ promptTokens: NonNegativeInt, reportedAt: Schema.String })),
+  startingContext: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ providerThreadId: ProviderThreadId, promptTokens: NonNegativeInt }),
+    ),
   ),
   estimateMethod: Schema.String,
 });

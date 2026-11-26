@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 import { cn } from "../../lib/utils";
+import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { threadDefaultContextGet } from "../../state/threadInsights";
@@ -37,6 +38,7 @@ export function ComposerContextSources({
         })
       : null,
   );
+  const activeProviderThreadId = useQuietThreadShell(threadRef)?.activeProviderThreadId ?? null;
   const [open, setOpen] = useState<string | null>(null);
   if (!canRead) return null;
   if (query.error)
@@ -46,7 +48,7 @@ export function ComposerContextSources({
   const preview = query.data;
   if (preview == null)
     return <p className="mt-3 text-muted-foreground text-xs">Estimating what's using it…</p>;
-  const breakdown = usedContextSources(preview, usedTokens);
+  const breakdown = usedContextSources(preview, usedTokens, activeProviderThreadId);
   if (breakdown === null) return null;
   if (!breakdown.reconciles)
     return (
@@ -143,7 +145,7 @@ function SourceDetails({
       ? `Estimated: the latest report (${formatContextWindowTokens(usedTokens)}) minus the starting context (${formatContextWindowTokens(startingTokens)}). It covers messages, tool calls and their output, including what the first turn read. After compaction it is only the net growth since the start, so it can understate the conversation.`
       : source.key === "harness"
         ? `Estimated: the first model request's prompt as the provider reported it (${formatContextWindowTokens(startingTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message.`
-        : `Estimated: the latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No measured starting size is available to split off the conversation, so this includes it.`;
+        : `Estimated: the latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). The available counts can't separate the starting context from the conversation, so this includes it.`;
   return (
     <div className="text-muted-foreground">
       <p>{explanation}</p>

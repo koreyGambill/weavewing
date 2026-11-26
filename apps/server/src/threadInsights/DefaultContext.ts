@@ -101,9 +101,9 @@ const withText = (part: PreparedContextPart, text: string): PreparedContextPart 
 const byteLength = (text: string) => Buffer.byteLength(text, "utf8");
 
 /**
- * Drivers whose first usage report in a turn always measures the turn's first model request. Pi and
- * Muse can miss that request's report and send a later one first, and OpenCode reports only when a
- * turn ends, so their first report can hold what the turn read.
+ * Drivers whose first usage report is the turn's first request; Pi, Muse and OpenCode can report a
+ * later one first. Accepted gaps: Claude records a later request when the first reports only zero
+ * input, and Codex does when an OpenAI-compatible endpoint omits the first response's usage.
  */
 const FIRST_REQUEST_USAGE_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
 
@@ -123,11 +123,11 @@ export function startingPrompt(input: {
       >
     | undefined;
   readonly turns: ReadonlyArray<
-    Pick<OrchestrationV2ProviderTurn, "providerThreadId" | "ordinal" | "startedAt" | "tokenUsage">
+    Pick<OrchestrationV2ProviderTurn, "providerThreadId" | "ordinal" | "tokenUsage">
   >;
   readonly instanceId: ProviderInstanceId;
   readonly driver: string;
-}): DefaultContextPreview["firstTurn"] {
+}): DefaultContextPreview["startingContext"] {
   const { providerThread } = input;
   if (
     !FIRST_REQUEST_USAGE_DRIVERS.has(input.driver) ||
@@ -149,12 +149,7 @@ export function startingPrompt(input: {
       undefined,
     );
   const promptTokens = first?.tokenUsage?.firstInputTokens;
-  return promptTokens === undefined
-    ? null
-    : {
-        promptTokens,
-        reportedAt: DateTime.formatIso(first?.startedAt ?? providerThread.createdAt),
-      };
+  return promptTokens === undefined ? null : { providerThreadId: providerThread.id, promptTokens };
 }
 const failure = (message: string) => (cause: unknown) =>
   new ThreadInsightsError({ message, cause });
@@ -463,7 +458,7 @@ const make = Effect.gen(function* () {
             })
             .pipe(Effect.orElseSucceed(() => undefined));
     const firstRun = records?.runs.toSorted((a, b) => a.ordinal - b.ordinal).at(0);
-    const firstTurn =
+    const startingContext =
       providerRecords === undefined || thread === undefined
         ? null
         : startingPrompt({
@@ -498,7 +493,7 @@ const make = Effect.gen(function* () {
                 reportsFiles: footprint?.instructionSources !== undefined,
                 injectedBytes: lastFootprint.parts.reduce((sum, part) => sum + part.bytes, 0),
               },
-        firstTurn,
+        startingContext,
         estimateMethod:
           "UTF-8 bytes divided by four, rounded up; not tokenizer counts. Instruction files are what the provider documents loading for this folder, not what it reported.",
       } satisfies DefaultContextPreview,
