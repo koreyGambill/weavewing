@@ -14,6 +14,7 @@ import {
   qaCapturePreview,
   qaCardStatus,
   qaDiscussRecord,
+  qaFullText,
   qaHistory,
   qaHistoryCapped,
   qaLandedLine,
@@ -89,6 +90,15 @@ it("adds the ask to the landed line only when the title is not the ask", () => {
     "Landed on main · 0123456 · from “Make the strip compact”",
   );
   expect(qaLandedLine(landing, change({ summary: "" }))).toBe("Landed on main · 0123456");
+});
+
+it("keeps a multiline summary or ask whole, and nothing when one line says it all", () => {
+  expect(qaFullText("  Fix the strip\n\n- keep it compact\n- no overlap \n")).toBe(
+    "Fix the strip\n\n- keep it compact\n- no overlap",
+  );
+  expect(qaFullText("Fix the strip")).toBeNull();
+  expect(qaFullText("Fix the strip\n   \n")).toBeNull();
+  expect(qaFullText("")).toBeNull();
 });
 
 it("finds a row's change among the thread's landings", () => {

@@ -27,6 +27,7 @@ import {
   qaCardTitle,
   qaCheckLabel,
   qaDiscussRecord,
+  qaFullText,
   qaLandedLine,
   qaNoteLabel,
   qaReviewLabel,
@@ -142,6 +143,8 @@ export function WaitingQaCard(props: {
   const record = qaDiscussRecord(landing, change);
   const note = qa.note.trim();
   const noteLabel = qaNoteLabel(qa);
+  const fullSummary = qaFullText(change.summary);
+  const fullAsk = qaFullText(change.ask);
 
   const answer = async (state: "pending" | "confirmed" | "waived", nextNote?: string) => {
     setBusy(true);
@@ -202,6 +205,20 @@ export function WaitingQaCard(props: {
       <Text selectable className="font-sans text-xs text-foreground-secondary">
         {qaLandedLine(landing, change)}
       </Text>
+      {fullSummary === null ? null : (
+        <Detail label="Summary">
+          <Text selectable className={detailText}>
+            {fullSummary}
+          </Text>
+        </Detail>
+      )}
+      {fullAsk === null ? null : (
+        <Detail label="Ask">
+          <Text selectable className={detailText}>
+            {fullAsk}
+          </Text>
+        </Detail>
+      )}
       <Detail label="Review">
         <Text selectable className={detailText}>
           {qaReviewLabel(change.review)}

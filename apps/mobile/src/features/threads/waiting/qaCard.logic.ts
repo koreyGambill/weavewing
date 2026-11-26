@@ -70,6 +70,16 @@ export function qaCardTitle(change: Pick<QaChange, "summary" | "ask" | "id">): s
   return firstLine(change.summary) || firstLine(change.ask) || change.id;
 }
 
+/**
+ * The whole text, for a summary or ask with more than the first line the title and landed line
+ * show; null when that line is all there is.
+ */
+export function qaFullText(text: string): string | null {
+  const trimmed = text.trim();
+  const newline = trimmed.indexOf("\n");
+  return newline >= 0 && trimmed.slice(newline + 1).trim() !== "" ? trimmed : null;
+}
+
 export const qaRef = (change: QaChange) =>
   change.qa.ref === undefined ? "QA" : `QA${change.qa.ref}`;
 
