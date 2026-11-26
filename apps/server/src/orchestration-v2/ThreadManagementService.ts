@@ -57,8 +57,8 @@ import {
   rewindToReplyThreadRefusal,
 } from "@t3tools/shared/orchestrationV2RewindToReply";
 import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -1919,7 +1919,7 @@ const make = Effect.gen(function* () {
       (run) =>
         run.ordinal > point.ordinal && run.startedAt !== null && run.status !== "rolled_back",
     ).length;
-    const requestId = NodeCrypto.randomUUID();
+    const requestId = yield* Effect.sync(() => SecureRandom.uuidV4Unsafe());
     const messageId = MessageId.make(`message:rewind-summary:${requestId}`);
     yield* dispatch({
       type: "message.dispatch",
@@ -1962,7 +1962,7 @@ const make = Effect.gen(function* () {
       if (summary?.type !== "assistant_message" || summary.text.trim() === "") {
         return yield* fail("summary-failed");
       }
-      const archiveThreadId = ThreadId.make(NodeCrypto.randomUUID());
+      const archiveThreadId = ThreadId.make(yield* Effect.sync(() => SecureRandom.uuidV4Unsafe()));
       yield* dispatch({
         type: "thread.fork",
         commandId: CommandId.make(`command:rewind-summary:${requestId}:rewind`),
@@ -1990,10 +1990,8 @@ const make = Effect.gen(function* () {
       );
       return { archiveThreadId, summarizedTurns: turns };
     }).pipe(
-      Effect.catch((cause) =>
-        isRewindWithSummaryError(cause)
-          ? Effect.fail(cause)
-          : Effect.fail(fail("summary-failed", undefined, cause)),
+      Effect.mapError((cause) =>
+        isRewindWithSummaryError(cause) ? cause : fail("summary-failed", undefined, cause),
       ),
     );
     // The summary turn runs on its own, so finish it even when the caller stops waiting.

@@ -6999,8 +6999,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               toProviderInstanceId: continuation.providerInstanceId,
             }),
           ),
-          // Names the archive, so bringing it back drops the summary before it is sent.
-          transferId: transfer.id,
+          transferId: null,
           threadId: thread.id,
           targetRunId: summaryRunId,
           fromProviderThreadIds: [splitSource.id],

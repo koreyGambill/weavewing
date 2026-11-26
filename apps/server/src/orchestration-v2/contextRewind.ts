@@ -75,6 +75,8 @@ export const CONTEXT_REWIND_SUMMARY_ORIGIN = {
 } as const;
 
 const turnsLabel = (turns: number) => (turns === 1 ? "1 turn" : `${turns} turns`);
+const laterTurns = (turns: number, after: string) =>
+  turns === 1 ? `The turn after ${after}` : `The ${turns} turns after ${after}`;
 
 /** The first line of the stored summary, which the thread also shows as its title. */
 export const contextRewindSummaryTitle = (turns: number) =>
@@ -92,11 +94,11 @@ export function contextRewindSummaryPrompt(input: {
   const shown = excerpt.length > 200 ? `${excerpt.slice(0, 197)}...` : excerpt;
   return `${contextRewindSummaryTitle(input.turns)}
 
-The user is rewinding this conversation to your reply that begins "${shown}". The ${turnsLabel(input.turns)} after that reply, and this request, will leave your context. The summary you write now is all you will remember of them. Files stay as they are on disk.
+The user is rewinding this conversation to your reply that begins "${shown}". That reply and everything before it stay in your context. ${laterTurns(input.turns, "it")}, and this request, will leave your context, and the summary you write now is all you will remember of them. Files stay as they are on disk.
 
 Write that summary for your future self. Cover:
 - what you learned, about the code, the environment and what the user wants;
-- the files you created, changed or deleted, and the commands and other actions you ran that changed something, so you do not repeat them;
+- the files you created, changed or deleted, and the commands and other actions you ran with what they showed, so you do not repeat them;
 - the decisions made, with their reasons;
 - what remains to do.
 
@@ -112,5 +114,5 @@ export function contextRewindSummaryModelText(input: {
 
 ${input.summary}
 
-The user rewound the conversation to an earlier reply. The ${turnsLabel(input.turns)} after it were removed from your context, and the summary above, which you wrote, replaces them. Files were not restored: changes made in those turns are still on disk.`;
+The user rewound the conversation to an earlier reply. ${laterTurns(input.turns, "it")} ${input.turns === 1 ? "was" : "were"} removed from your context, and the summary above, which you wrote, replaces ${input.turns === 1 ? "it" : "them"}. Files were not restored: changes made in ${input.turns === 1 ? "that turn" : "those turns"} are still on disk.`;
 }

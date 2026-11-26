@@ -6212,7 +6212,7 @@ describe("orchestration v2 provider switching", () => {
               const next = (yield* Ref.get(capturedTurns)).at(-1)!;
               assert.equal(next.providerThreadId, main.thread.activeProviderThreadId);
               assert.include(next.text, `Context rewind: summary of 1 turn\n\n${SUMMARY}`);
-              assert.include(next.text, "The 1 turn after it were removed from your context");
+              assert.include(next.text, "The turn after it was removed from your context");
               assert.include(next.text, "Files were not restored");
               assert.include(next.text, "continue from the prefix");
               const delivered = summaryHandoffs(yield* orchestrator.getThreadProjection(root));
@@ -6284,46 +6284,6 @@ describe("orchestration v2 provider switching", () => {
           assert.equal(error.message, "There is no later conversation to move.");
           assert.lengthOf(yield* Ref.get(capturedTurns), 2);
         }),
-      ),
-    );
-
-    it.live("drops an unsent summary once the archived turns merge back", () =>
-      withRewindSummaryHarness(
-        "rewind-summary-merge-back",
-        {},
-        ({ capturedTurns, workspaceFile }) =>
-          Effect.gen(function* () {
-            const orchestrator = yield* Orchestrator.OrchestratorV2;
-            const threads = yield* ThreadManagementService.ThreadManagementService;
-            const { before, prefixReply } = yield* setUpThread(workspaceFile);
-            const { archiveThreadId } = yield* threads.rewindWithSummary({
-              threadId: root,
-              runId: before.runs[0]!.id,
-              replyMessageId: prefixReply.messageId,
-              createdBy: "user",
-              creationSource: "web",
-            });
-            yield* sendTo(archiveThreadId, "work in the archive");
-            const archive = yield* orchestrator.getThreadProjection(archiveThreadId);
-
-            yield* orchestrator.dispatch({
-              type: "thread.merge_back",
-              commandId: CommandId.make("rewind-summary:merge-back"),
-              createdBy: "user",
-              creationSource: "web",
-              sourceThreadId: archiveThreadId,
-              targetThreadId: root,
-              sourcePoint: { type: "run", runId: archive.runs.at(-1)!.id },
-            });
-            yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
-            yield* waitForIdle(root);
-
-            const merged = (yield* Ref.get(capturedTurns)).at(-1)!;
-            assert.equal(merged.threadId, root);
-            assert.notInclude(merged.text, SUMMARY);
-            const [handoff] = summaryHandoffs(yield* orchestrator.getThreadProjection(root));
-            assert.equal(handoff?.status, "superseded");
-          }),
       ),
     );
   });

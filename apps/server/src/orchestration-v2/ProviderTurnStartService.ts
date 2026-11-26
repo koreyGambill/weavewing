@@ -559,20 +559,6 @@ export const layer: Layer.Layer<
           projection.thread.contextSplit?.continuationProviderThreadId ===
             handoff.toProviderThreadId,
       );
-      const rewindArchiveThreadId =
-        rewindSummary === undefined
-          ? undefined
-          : projection.contextTransfers.find((transfer) => transfer.id === rewindSummary.transferId)
-              ?.targetThreadId;
-      // Bring back returns the summarized turns themselves, so the summary is no longer needed.
-      const rewindSummaryBroughtBack =
-        rewindArchiveThreadId !== undefined &&
-        projection.contextTransfers.some(
-          (transfer) =>
-            transfer.type === "merge_back" &&
-            transfer.sourceThreadId === rewindArchiveThreadId &&
-            transfer.targetThreadId === projection.thread.id,
-        );
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "fork" &&
@@ -2075,9 +2061,7 @@ export const layer: Layer.Layer<
               ? ""
               : sideChatHandoff.summaryText;
           const rewindSummaryContext =
-            rewindSummary === undefined || rewindSummaryBroughtBack || compact || goalCommand
-              ? ""
-              : rewindSummary.summaryText;
+            rewindSummary === undefined || compact || goalCommand ? "" : rewindSummary.summaryText;
           const refresh = explicitRefresh ?? automaticRefresh;
           const newestContext =
             refresh === undefined || compact || goalCommand
@@ -2139,18 +2123,16 @@ export const layer: Layer.Layer<
                       delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
                     }),
                   ]),
-              ...(rewindSummary === undefined || nativeThreadId == null
+              ...(rewindSummary === undefined ||
+              rewindSummaryContext === "" ||
+              nativeThreadId == null
                 ? []
-                : rewindSummaryBroughtBack
-                  ? [persistHandoff({ ...rewindSummary, status: "superseded" as const })]
-                  : rewindSummaryContext === ""
-                    ? []
-                    : [
-                        persistHandoff({
-                          ...rewindSummary,
-                          delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
-                        }),
-                      ]),
+                : [
+                    persistHandoff({
+                      ...rewindSummary,
+                      delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
+                    }),
+                  ]),
             ],
             (record) =>
               record.pipe(
