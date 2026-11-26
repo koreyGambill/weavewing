@@ -100,3 +100,24 @@ it("saves a ticked tool as kept and an unticked one as left out", async () => {
     ],
   });
 });
+
+it("shows the claude.ai connectors default, Off, for a value an older version saved", async () => {
+  function SavedForm() {
+    const [value, setValue] = useState<Record<string, unknown> | undefined>({
+      claudeAiConnectors: "inherit",
+    });
+    return (
+      <ProviderSettingsForm
+        definition={providerClients.get(ProviderDriverKind.make("claudeAgent"))!}
+        value={value}
+        idPrefix="claude"
+        variant="dialog"
+        onChange={setValue}
+      />
+    );
+  }
+  await using screen = await render(<SavedForm />);
+  await expect
+    .element(screen.getByRole("combobox", { name: "claude.ai connectors in new threads" }))
+    .toHaveTextContent("Off");
+});

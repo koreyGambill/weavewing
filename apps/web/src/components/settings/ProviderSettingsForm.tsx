@@ -639,7 +639,9 @@ function ProviderSettingsSelect({
 }) {
   const options = field.options ?? [];
   const fallback = options[0]?.value ?? "";
-  const current = readProviderConfigString(value, field.key) || fallback;
+  const stored = readProviderConfigString(value, field.key);
+  // A value the field no longer offers, such as one an older version saved, shows the default.
+  const current = options.some((option) => option.value === stored) ? stored : fallback;
   const label = options.find((option) => option.value === current)?.label ?? current;
   return (
     <Select
