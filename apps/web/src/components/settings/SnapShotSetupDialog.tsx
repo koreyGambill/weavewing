@@ -20,6 +20,7 @@ import {
   captureSetupShortcutReady,
   type CaptureSetupStep,
 } from "./SnapShotSetupDialog.logic";
+import { APP_BASE_NAME } from "~/branding";
 
 const SETUP_STEPS = [
   { id: "access", label: "Access" },
@@ -30,7 +31,7 @@ const GNOME_ACCESS_COPY = {
   "not-installed": {
     title: "Install the extension",
     description:
-      "The T3 Code GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
+      "The SnapShots GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
   },
   "restart-required": {
     title: "Extension installed",
@@ -170,8 +171,7 @@ export function SnapShotSetupDialog({
                     helper?.status === "update-required"
                       ? "Update the capture helper"
                       : "Allow snapshots",
-                  description:
-                    "T3 Code's capture helper lets you capture other apps and return to your draft. It's included with T3 Code.",
+                  description: `${APP_BASE_NAME}'s capture helper lets you capture other apps and return to your draft. It's included with ${APP_BASE_NAME}.`,
                 }
           : backend === "niri"
             ? {
@@ -352,7 +352,7 @@ export function SnapShotSetupDialog({
                     </p>
                   ))}
                   {step === "access" && (backend === "gnome" || helperBackend) ? (
-                    <p>Included with T3 Code. No download needed.</p>
+                    <p>Included with {APP_BASE_NAME}. No download needed.</p>
                   ) : null}
                   {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (
                     <Button

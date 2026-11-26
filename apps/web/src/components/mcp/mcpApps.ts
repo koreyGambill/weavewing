@@ -7,10 +7,11 @@ import instinctLogo from "./logos/instinct.png";
 import museLogo from "./logos/muse.png";
 import openClawLogo from "./logos/openclaw.png";
 import pokeLogo from "./logos/poke.png";
+import { APP_BASE_NAME } from "~/branding";
 
-/** How the Connect step hands T3 Code's MCP URL to an app. Every `link` is https. */
+/** How the Connect step hands Weavewing's MCP URL to an app. Every `link` is https. */
 export type McpAppHandoff =
-  /** Opens the app's add form with T3 Code filled in. */
+  /** Opens the app's add form with Weavewing filled in. */
   | { readonly kind: "open"; readonly link: (mcpUrl: string) => string }
   /** Copies the URL, then opens the page it goes on. */
   | { readonly kind: "copy-url"; readonly link: string }
@@ -51,7 +52,8 @@ export const MCP_APPS: readonly McpApp[] = [
     logo: pokeLogo,
     handoff: {
       kind: "open",
-      link: (url) => `https://poke.com/integrations/new?name=T3%20Code&url=${encoded(url)}`,
+      link: (url) =>
+        `https://poke.com/integrations/new?name=${encodeURIComponent(APP_BASE_NAME)}&url=${encoded(url)}`,
     },
     steps: ["Open poke.com/integrations/new.", "Paste the URL and add the integration."],
     docs: "https://poke.com/docs/mcp-servers",
@@ -63,7 +65,7 @@ export const MCP_APPS: readonly McpApp[] = [
     handoff: {
       kind: "open",
       link: (url) =>
-        `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=T3%20Code&connectorUrl=${encoded(url)}`,
+        `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=${encodeURIComponent(APP_BASE_NAME)}&connectorUrl=${encoded(url)}`,
     },
     steps: [
       "In Claude, open Customize, then Connectors.",
@@ -109,7 +111,7 @@ export const MCP_APPS: readonly McpApp[] = [
       "Choose Custom apps, then Add, and paste the URL.",
     ],
     docs: "https://support.google.com/gemini/answer/17209137",
-    // Gemini's sign-in and its tool schema checks do not work with T3 Code yet.
+    // Gemini's sign-in and its tool schema checks do not work with Weavewing yet.
     hidden: true,
   },
   {

@@ -46,6 +46,7 @@ import {
   useScopedSettingSource,
   useUpdateScopedSettings,
 } from "./useScopedSettings";
+import { APP_BASE_NAME } from "~/branding";
 
 const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
@@ -279,8 +280,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       description={
         <>
           A folder on that machine for threads started outside a project. A missing folder falls
-          back to one in T3 Code's data directory; a Git checkout, your home folder or ~/.xwing is
-          refused.
+          back to one in {APP_BASE_NAME}'s data directory; a Git checkout, your home folder or
+          ~/.xwing is refused.
           {defaultFolderNotes.map((note) => (
             <span key={note} role="status" className="mt-1 block text-warning-foreground">
               {note}

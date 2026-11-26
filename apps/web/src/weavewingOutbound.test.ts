@@ -62,7 +62,7 @@ const REVIEWED_MEDIA_SINKS = {
   "apps/web/src/components/settings/ProjectFaviconThumbnail.tsx": "project favicons",
   "apps/web/src/components/settings/ThemeSearchSection.tsx": "results of a user's Open VSX search",
   "apps/web/src/components/statusSources/StatusSourceIcon.tsx": "server-fetched configured source",
-  "apps/web/src/components/T3AppIcon.tsx": "bundled icon",
+  "apps/web/src/components/SourceControlAppIcon.tsx": "bundled icon",
 };
 
 describe("Weavewing outbound guard", () => {

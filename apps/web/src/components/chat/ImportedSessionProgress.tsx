@@ -9,6 +9,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { APP_BASE_NAME } from "~/branding";
 
 export function ImportedSessionProgress({
   threadRef,
@@ -41,7 +42,7 @@ export function ImportedSessionProgress({
           <div className="max-h-[35vh] space-y-3 overflow-y-auto px-4 pb-3">
             <p className="text-xs text-muted-foreground">
               Following the original Claude terminal. Updates every 5 seconds while this panel is
-              open, newest messages first. Finish its turn before continuing in T3 Code.
+              open, newest messages first. Finish its turn before continuing in {APP_BASE_NAME}.
             </p>
             {progress.data?.updatedAt ? (
               <p className="text-xs text-muted-foreground">

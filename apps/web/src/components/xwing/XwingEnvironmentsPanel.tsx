@@ -47,6 +47,7 @@ import {
   RestoreControl,
 } from "./XwingEnvironmentLifecycle";
 import { filterXwingEnvironments, xwingEnvironmentLabel } from "./xwingEnvironments.logic";
+import { APP_BASE_NAME } from "~/branding";
 
 const isXwingEnvironmentId = Schema.is(XwingEnvironmentId);
 
@@ -170,7 +171,7 @@ export function XwingEnvironmentsPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!supported ? (
-          <Notice>Update this machine's T3 Code server to list Xwing environments.</Notice>
+          <Notice>Update this machine's {APP_BASE_NAME} server to list Xwing environments.</Notice>
         ) : !canRead ? (
           <Notice>This connection cannot read environments.</Notice>
         ) : creating && projectId !== null && !validSelection ? (

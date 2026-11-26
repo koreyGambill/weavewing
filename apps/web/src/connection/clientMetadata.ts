@@ -4,6 +4,18 @@ import type {
   ClientOs,
   DesktopBridge,
 } from "@t3tools/contracts";
+import { APP_BASE_NAME } from "~/branding";
+
+// Servers store these labels on each session and older clients send them, so they stay as sent.
+const DESKTOP_CLIENT_LABEL = "T3 Code Desktop";
+const WEB_CLIENT_LABEL = "T3 Code Web";
+
+/** A session's client label as this app shows it, naming its own desktop and web clients by brand. */
+export function presentClientLabel(label: string): string {
+  if (label === DESKTOP_CLIENT_LABEL) return `${APP_BASE_NAME} Desktop`;
+  if (label === WEB_CLIENT_LABEL) return `${APP_BASE_NAME} Web`;
+  return label;
+}
 
 export interface BrowserIdentity {
   readonly userAgent: string;
@@ -77,7 +89,7 @@ export function clientPresentationMetadata(input: {
 }): AuthClientPresentationMetadata {
   if (input.desktopBridge !== undefined) {
     return {
-      label: "T3 Code Desktop",
+      label: DESKTOP_CLIENT_LABEL,
       deviceType: "desktop",
       os: clientOsFromElectronPlatform(input.desktopBridge.getClientPlatform()),
       surface: "desktop",
@@ -86,7 +98,7 @@ export function clientPresentationMetadata(input: {
   }
 
   return {
-    label: "T3 Code Web",
+    label: WEB_CLIENT_LABEL,
     deviceType: browserDeviceType(input.identity),
     os: browserClientOs(input.identity),
     surface: "web",

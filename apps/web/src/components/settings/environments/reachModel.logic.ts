@@ -18,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 
 import { formatRelativeElapsed } from "~/timestampFormat";
+import { presentClientLabel } from "~/connection/clientMetadata";
 
 /** A server this app knows, with what this app can read and change there. */
 export interface ReachServerInput {
@@ -201,7 +202,7 @@ function linkSessionEnvironmentId(session: AuthClientSession): EnvironmentId | n
 
 function deviceName(session: AuthClientSession): string {
   const client = clientOf(session);
-  if (client.label) return client.label;
+  if (client.label) return presentClientLabel(client.label);
   const parts = [client.browser, client.os].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" on ") : "Unnamed device";
 }

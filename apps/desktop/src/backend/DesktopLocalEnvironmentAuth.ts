@@ -106,6 +106,7 @@ export const make = Effect.gen(function* () {
           httpBaseUrl: config.httpBaseUrl.href,
           credential,
           clientMetadata: {
+            // Sessions store this label and web clients rebrand it on display, so it stays as sent.
             label: "T3 Code Desktop",
             deviceType: "desktop",
           },

@@ -59,6 +59,7 @@ import { Textarea } from "../ui/textarea";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { APP_BASE_NAME } from "~/branding";
 
 const KINDS = {
   "wing-status": "Wing status",
@@ -84,7 +85,8 @@ export function StatusSourcesSettings() {
       <SettingsPageContainer>
         <SettingsSection title="Status sources">
           <p className="px-4 py-3 text-sm text-muted-foreground">
-            Connect to an environment running a version of T3 Code that supports status sources.
+            Connect to an environment running a version of {APP_BASE_NAME} that supports status
+            sources.
           </p>
         </SettingsSection>
       </SettingsPageContainer>

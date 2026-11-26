@@ -42,6 +42,7 @@ import { Input } from "../ui/input";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { APP_BASE_NAME } from "~/branding";
 
 /** A branch name suggested from an environment name; Xwing's own default can be invalid. */
 function suggestedBranch(name: string): string {
@@ -616,7 +617,7 @@ export function CleanupReview({
       ) : null}
       {data.threads.length > 0 ? (
         <div className="text-muted-foreground">
-          <p>Thread history stays in T3 Code:</p>
+          <p>Thread history stays in {APP_BASE_NAME}:</p>
           <ul className="pl-2">
             {data.threads.map((thread) => (
               <li key={thread.threadId} className="flex min-w-0 items-center gap-1">

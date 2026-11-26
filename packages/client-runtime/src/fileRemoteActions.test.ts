@@ -83,11 +83,11 @@ describe("resolveFileRemoteActions", () => {
     const reasons = [
       [
         { _tag: "Unavailable", reason: "unsupported-host", host: "code.example.test" },
-        "T3 Code cannot link files on code.example.test",
+        "Weavewing cannot link files on code.example.test",
       ],
       [
         { _tag: "Unavailable", reason: "network-path" },
-        "T3 Code does not read git on network paths",
+        "Weavewing does not read git on network paths",
       ],
       [{ _tag: "Unavailable", reason: "outside-workspace" }, "This path leaves its workspace"],
     ] as const;
@@ -198,7 +198,7 @@ describe("fileLinkPreflight", () => {
     expect(
       fileLinkPreflight({ canReadFiles: true, identity: identity("code.example.test/a/b") })
         .disabledReason,
-    ).toBe("T3 Code cannot link files on code.example.test");
+    ).toBe("Weavewing cannot link files on code.example.test");
   });
 });
 

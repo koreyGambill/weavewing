@@ -316,7 +316,7 @@ it("opens the sender thread from a queued incoming card", async () => {
   await expect.element(page.getByText(/Follow the runbook/)).toBeVisible();
   await page.getByRole("link", { name: "Thread, Release lead", exact: true }).click();
   expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
-  await page.getByRole("button", { name: /^T3 Code:/ }).click();
+  await page.getByRole("button", { name: /^Weavewing:/ }).click();
   await expect.element(page.getByText("Continue where you left off.")).toBeVisible();
 });
 

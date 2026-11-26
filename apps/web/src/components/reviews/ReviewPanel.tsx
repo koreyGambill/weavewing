@@ -47,6 +47,7 @@ import {
   sendReview,
   useReviewDraft,
 } from "./reviewDrafts";
+import { APP_BASE_NAME } from "~/branding";
 
 const isReviewId = Schema.is(ReviewId);
 
@@ -93,7 +94,8 @@ export function ReviewPanel({
   if (!supported)
     return (
       <p className="p-5 text-sm text-muted-foreground">
-        Reviews are unavailable on this environment. Connect to a T3 Code build with review support.
+        Reviews are unavailable on this environment. Connect to a {APP_BASE_NAME} build with review
+        support.
       </p>
     );
   if (!canRead)

@@ -2,6 +2,8 @@ import { type DesktopWslState, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
+  connectDeviceName,
+  describeConnectDeviceClient,
   isServerNetworkAccessible,
   formatDesktopSshConnectionError,
   parseManualDesktopSshTarget,
@@ -55,6 +57,25 @@ it.each([
     expect(selected?.compatibility.hostedHttpsApp).toBe("mixed-content-blocked");
   }
   expect(serverPairingEndpoints([], desktopLocal)).toEqual([]);
+});
+
+describe("session client labels", () => {
+  it("names stored desktop and web sessions by this app's brand", () => {
+    expect(connectDeviceName({ client: { label: "T3 Code Desktop", deviceType: "desktop" } })).toBe(
+      "Weavewing Desktop",
+    );
+    expect(
+      describeConnectDeviceClient({
+        client: { label: "T3 Code Web", deviceType: "desktop", os: "macOS" },
+      }),
+    ).toBe("Weavewing Web · macOS");
+  });
+
+  it("shows any other label as the device sent it", () => {
+    expect(connectDeviceName({ client: { label: "Pixel 9", deviceType: "mobile" } })).toBe(
+      "Pixel 9",
+    );
+  });
 });
 
 describe("togglePairingScopeSelection", () => {

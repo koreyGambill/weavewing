@@ -19,6 +19,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { type CommandHandler, registerCommands } from "./dispatcher";
+import { APP_BASE_NAME } from "~/branding";
 
 const CHAT_ROUTE_ID = "/_chat";
 
@@ -124,7 +125,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
             stackedThreadToast({
               type: "info",
               title: "Preview is desktop-only",
-              description: "Open T3 Code in the desktop app to use the in-app preview.",
+              description: `Open ${APP_BASE_NAME} in the desktop app to use the in-app preview.`,
             }),
           );
           return;

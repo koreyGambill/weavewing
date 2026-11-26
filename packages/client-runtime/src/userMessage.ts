@@ -21,8 +21,9 @@ import {
 import { filePreviewKind } from "@t3tools/shared/filePreview";
 import { imageMimeType } from "@t3tools/shared/image";
 import { videoMimeType } from "@t3tools/shared/video";
+import { PRODUCT_NAME } from "./productName.ts";
 
-/** The working row while T3 Code's own compaction runs. */
+/** The working row while the app's own compaction runs. */
 export const IDLE_COMPACTING_LABELS = {
   beforeCacheExpires: "Compacting before the cache expires…",
   onReturn: "Compacting…",
@@ -184,7 +185,9 @@ function senderOriginLabel(
     case "wake":
       return { label: "Wake" };
     case "system":
-      return { label: origin.event === "message" ? "T3 Code" : `T3 Code · ${origin.event}` };
+      return {
+        label: origin.event === "message" ? PRODUCT_NAME : `${PRODUCT_NAME} · ${origin.event}`,
+      };
   }
 }
 
@@ -194,7 +197,7 @@ function messageFirstLine(text: string): string {
 }
 
 /**
- * The collapsed row of a message another thread, task or T3 Code sent to `receiver`.
+ * The collapsed row of a message another thread, task or the app sent to `receiver`.
  * A generated `summary` stands in for the first line once it arrives.
  */
 export function senderCardDetails(

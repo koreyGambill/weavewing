@@ -99,7 +99,7 @@ beforeEach(() => {
   mocks.createFromPath.mockReturnValue({ isEmpty: () => false, resize: () => icon });
   mocks.loadURL.mockResolvedValue(undefined);
   windows.length = 0;
-  helper = new MacPermissionHelper();
+  helper = new MacPermissionHelper("Weavewing (Nightly)");
 });
 afterEach(() => {
   helper.close();
@@ -108,6 +108,12 @@ afterEach(() => {
 const iconPaths = ["/bundle/prod-resources/icon.png"];
 const open = () =>
   helper.show("accessibility", "/bundle/mac-permission-preload.cjs", null, iconPaths);
+it("names the installed app the user drags into System Settings", async () => {
+  await open();
+  const html = decodeURIComponent(String(mocks.loadURL.mock.calls[0]![0]));
+  expect(html).toContain("Drag Weavewing (Nightly) into the list above");
+  expect(html).toContain('aria-label="Drag Weavewing (Nightly) to System Settings');
+});
 it("does not reopen a superseded helper when its initial probe completes", async () => {
   const pending = Promise.withResolvers<boolean>();
   const first = helper.show(

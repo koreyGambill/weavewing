@@ -209,7 +209,7 @@ describe("resolveUserMessagePresentation", () => {
     ).toEqual({ text: "Why?", attribution: "guest", scheduledTaskId: undefined, guestName: "Sam" });
   });
 
-  it("attributes older server-sent restart continuations to T3 Code, not another agent", () => {
+  it("attributes older server-sent restart continuations to the app, not another agent", () => {
     const text = "Note: the T3 server restarted.";
     expect(
       resolveUserMessagePresentation({
@@ -389,7 +389,7 @@ describe("senderCardDetails", () => {
       ),
     ).toEqual({ label: "Scheduled task", name: "Daily audit", preview: "Check it." });
     expect(senderCardDetails({ kind: "system", event: "agent API" }, " ", receiver, null)).toEqual({
-      label: "T3 Code · agent API",
+      label: "Weavewing · agent API",
       preview: "",
     });
   });

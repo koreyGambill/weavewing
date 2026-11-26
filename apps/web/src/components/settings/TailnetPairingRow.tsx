@@ -9,6 +9,7 @@ import { useManagedPolicy } from "~/state/managedPolicy";
 import { isManagedSettingPath } from "@t3tools/contracts";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { APP_BASE_NAME } from "~/branding";
 
 const parseLogins = (value: string) => [
   ...new Set(
@@ -50,7 +51,7 @@ export function TailnetPairingRow({
       description={
         <>
           Open <code>/tailnet</code> at {environmentLabel}'s Tailscale address on a phone or laptop
-          to pair with all your T3 Code servers, without copying a code.
+          to pair with all your {APP_BASE_NAME} servers, without copying a code.
         </>
       }
       managed={

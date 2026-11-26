@@ -4,6 +4,7 @@ import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
 import { createAdvertisedEndpoint } from "@t3tools/shared/advertisedEndpoint";
 import { readHostedPairingRequest } from "../../hostedPairing";
+import { presentClientLabel } from "~/connection/clientMetadata";
 import {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
@@ -476,7 +477,12 @@ export function connectDeviceName({
 }: {
   readonly client?: AuthClientMetadata | undefined;
 }): string {
-  return client?.label ?? client?.os ?? client?.browser ?? "this device";
+  return (
+    (client?.label ? presentClientLabel(client.label) : undefined) ??
+    client?.os ??
+    client?.browser ??
+    "this device"
+  );
 }
 
 /** How a T3 Connect device describes itself. It can say anything, so the code is what to trust. */
@@ -485,8 +491,11 @@ export function describeConnectDeviceClient({
 }: {
   readonly client?: AuthClientMetadata | undefined;
 }): string {
-  const bits = [client?.label, client?.os, client?.browser, client?.ipAddress].filter(
-    (value): value is string => typeof value === "string" && value.length > 0,
-  );
+  const bits = [
+    client?.label ? presentClientLabel(client.label) : undefined,
+    client?.os,
+    client?.browser,
+    client?.ipAddress,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
   return bits.length > 0 ? [...new Set(bits)].join(" · ") : "Unknown device";
 }

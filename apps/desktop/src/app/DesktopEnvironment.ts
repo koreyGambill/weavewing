@@ -19,6 +19,7 @@ import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
 import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
+import { APP_BASE_NAME } from "./DesktopBranding.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
 
 export interface MakeDesktopEnvironmentInput {
@@ -87,8 +88,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly resolveResourcePathCandidates: (fileName: string) => readonly string[];
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
-
-const APP_BASE_NAME = "Weavewing";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;

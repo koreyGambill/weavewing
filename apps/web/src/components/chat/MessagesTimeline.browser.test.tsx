@@ -1776,7 +1776,7 @@ describe("MessagesTimeline agent messages", () => {
     expect(onOpenThread).toHaveBeenCalledWith(SENDER_THREAD_ID, ENVIRONMENT_ID);
   });
 
-  it("keeps messages sent by T3 Code readable", async () => {
+  it("keeps messages sent by Weavewing readable", async () => {
     setup();
     await using screen = await renderTimeline([
       message(AGENT_MESSAGE, { createdBy: "agent", creationSource: "server" }),

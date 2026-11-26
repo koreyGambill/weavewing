@@ -33,7 +33,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const path = yield* Path.Path;
-    const helper = new MacPermissionHelper();
+    const helper = new MacPermissionHelper(environment.displayName);
     yield* Effect.addFinalizer(() => Effect.sync(() => helper.close()));
     return MacPermissions.of({
       showHelper: Effect.fn("MacPermissions.showHelper")(function* (permission, owner, isGranted) {

@@ -16,6 +16,7 @@ import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "./DesktopWslEnvironment.ts";
+import { APP_BASE_NAME } from "../app/DesktopBranding.ts";
 
 export const WSL_INSTANCE_ID_PREFIX = "wsl:";
 const WSL_DEFAULT_DISTRO_ID = `${WSL_INSTANCE_ID_PREFIX}default`;
@@ -143,7 +144,7 @@ export const layer = Layer.effect(
                 Ref.set(
                   preflightErrorRef,
                   Option.some(
-                    `Another T3 Code server is using this distro's T3 home, or an older background service is set up for it. Stop that server or pair with it, or try \`t3 update\` in the distro. If the older launcher cannot update, run \`t3 service uninstall\` and optionally reinstall with \`t3 service install\` from a current CLI in the distro. If \`t3\` is missing or outdated, install it from ${CLI_INSTALL_GUIDE_URL}, and pass \`--base-dir\` with the service's T3 home to each command.`,
+                    `Another ${APP_BASE_NAME} server is using this distro's T3 home, or an older background service is set up for it. Stop that server or pair with it, or try \`t3 update\` in the distro. If the older launcher cannot update, run \`t3 service uninstall\` and optionally reinstall with \`t3 service install\` from a current CLI in the distro. If \`t3\` is missing or outdated, install it from ${CLI_INSTALL_GUIDE_URL}, and pass \`--base-dir\` with the service's T3 home to each command.`,
                   ),
                 ),
               ),

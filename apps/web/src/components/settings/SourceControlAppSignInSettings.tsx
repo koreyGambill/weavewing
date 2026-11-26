@@ -9,7 +9,7 @@ import * as Cause from "effect/Cause";
 import { CheckIcon, ExternalLinkIcon, CopyIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { T3AppIcon } from "~/components/T3AppIcon";
+import { SourceControlAppIcon } from "~/components/SourceControlAppIcon";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -46,7 +46,7 @@ function ExternalLink(props: { readonly href: string; readonly children: ReactNo
 function AppMark(props: { readonly signedIn: boolean }) {
   return (
     <div className="relative size-10 shrink-0">
-      <T3AppIcon className="size-full" />
+      <SourceControlAppIcon className="size-full" />
       {props.signedIn ? (
         <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-success text-white ring-2 ring-card">
           <CheckIcon aria-hidden className="size-2.5" strokeWidth={3} />

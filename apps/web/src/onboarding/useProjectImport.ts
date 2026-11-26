@@ -78,7 +78,7 @@ export function useProjectImport({
       })),
     ),
   );
-  // Projects already in T3 Code stay in the list, but reopening the page does not import their
+  // Projects already in Weavewing stay in the list, but reopening the page does not import their
   // history again unless the user picks them. The scan can be 30 s old, so the live list decides.
   const projects = useProjects();
   const isNewProject = isNewOnboardingProject(projects);

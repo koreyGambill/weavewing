@@ -65,6 +65,7 @@ import {
 } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
+import { APP_BASE_NAME } from "~/branding";
 
 type SavedBackendListRowProps = {
   environment: EnvironmentPresentation;
@@ -741,7 +742,7 @@ function ConfiguredCloudLinkRow({
       ) : isElectron ? (
         <SettingsRow
           {...searchableSetting("t3-connect")}
-          description="Run `t3 connect link` on the host, then restart T3 Code there."
+          description={`Run \`t3 connect link\` on the host, then restart ${APP_BASE_NAME} there.`}
         />
       ) : null}
       {signedOut && showSwitch ? null : (

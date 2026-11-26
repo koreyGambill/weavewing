@@ -93,6 +93,7 @@ import {
 } from "./snapShot.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { readImageDimensions } from "@t3tools/shared/imageDimensions";
+import { APP_BASE_NAME } from "../app/DesktopBranding.ts";
 
 const isCaptureSetupRequiredError = Schema.is(CaptureSetupRequiredError);
 
@@ -106,17 +107,12 @@ const FLASH_STATIC_DURATION_MS = 60;
 const FLASH_FRAME_INTERVAL_MS = 16;
 const FLASH_PEAK_OPACITY = 0.08;
 const MAC_SCREEN_CAPTURE_SETTINGS_URL = MAC_PERMISSION_SETTINGS_URLS["screen-recording"];
-const MAC_SCREEN_CAPTURE_PERMISSION_MESSAGE =
-  "Allow Screen Recording in System Settings, then restart T3 Code.";
-const MAC_ACCESSIBILITY_PERMISSION_MESSAGE =
-  "Allow Accessibility in System Settings, then restart T3 Code.";
-const MAC_BOTH_PERMISSIONS_MESSAGE =
-  "Allow Accessibility and Screen Recording in System Settings, then restart T3 Code.";
-const MAC_PERMISSION_MESSAGES = new Set([
-  MAC_SCREEN_CAPTURE_PERMISSION_MESSAGE,
-  MAC_ACCESSIBILITY_PERMISSION_MESSAGE,
-  MAC_BOTH_PERMISSIONS_MESSAGE,
-]);
+// System Settings lists the app by its installed name, such as "Weavewing (Nightly)".
+const macPermissionMessages = (appName: string) => ({
+  screen: `Allow Screen Recording in System Settings, then restart ${appName}.`,
+  accessibility: `Allow Accessibility in System Settings, then restart ${appName}.`,
+  both: `Allow Accessibility and Screen Recording in System Settings, then restart ${appName}.`,
+});
 
 const decodePendingCapture = Schema.decodeUnknownEffect(DesktopPendingSnapShot);
 
@@ -364,7 +360,7 @@ function snapShotAppName(
   return appName.replace(/\.exe$/i, "").trim() || appName;
 }
 
-async function requestMacScreenCapturePermission(): Promise<string | null> {
+async function requestMacScreenCapturePermission(appName: string): Promise<string | null> {
   let status: ReturnType<typeof Electron.systemPreferences.getMediaAccessStatus>;
   try {
     status = Electron.systemPreferences.getMediaAccessStatus("screen");
@@ -381,7 +377,7 @@ async function requestMacScreenCapturePermission(): Promise<string | null> {
     }
   } catch {}
   await Electron.shell.openExternal(MAC_SCREEN_CAPTURE_SETTINGS_URL).catch(() => undefined);
-  return MAC_SCREEN_CAPTURE_PERMISSION_MESSAGE;
+  return macPermissionMessages(appName).screen;
 }
 
 function currentMacPermissions(): NonNullable<DesktopSnapShotState["macPermissions"]> {
@@ -392,21 +388,27 @@ function currentMacPermissions(): NonNullable<DesktopSnapShotState["macPermissio
 }
 
 function macPermissionMessage(
+  appName: string,
   permissions: NonNullable<DesktopSnapShotState["macPermissions"]>,
   includeAccessibility: boolean,
 ): string | null {
+  const messages = macPermissionMessages(appName);
   const accessibilityGranted = !includeAccessibility || permissions.accessibility;
   if (!accessibilityGranted && !permissions.screenRecording) {
-    return MAC_BOTH_PERMISSIONS_MESSAGE;
+    return messages.both;
   }
   if (!accessibilityGranted) {
-    return MAC_ACCESSIBILITY_PERMISSION_MESSAGE;
+    return messages.accessibility;
   }
-  return permissions.screenRecording ? null : MAC_SCREEN_CAPTURE_PERMISSION_MESSAGE;
+  return permissions.screenRecording ? null : messages.screen;
 }
 
-function currentMacSnapShotPermissionMessage(includeAccessibility: boolean): string | null {
+function currentMacSnapShotPermissionMessage(
+  appName: string,
+  includeAccessibility: boolean,
+): string | null {
   return macPermissionMessage(
+    appName,
     {
       screenRecording: Electron.systemPreferences.getMediaAccessStatus("screen") === "granted",
       accessibility:
@@ -417,16 +419,17 @@ function currentMacSnapShotPermissionMessage(includeAccessibility: boolean): str
 }
 
 async function requestMacSnapShotPermissions(
+  appName: string,
   includeAccessibility: boolean,
 ): Promise<string | null> {
   const accessibilityGranted =
     !includeAccessibility || Electron.systemPreferences.isTrustedAccessibilityClient(true);
-  const screenMessage = await requestMacScreenCapturePermission();
+  const screenMessage = await requestMacScreenCapturePermission(appName);
   if (!accessibilityGranted && screenMessage) {
-    return MAC_BOTH_PERMISSIONS_MESSAGE;
+    return macPermissionMessages(appName).both;
   }
   if (!accessibilityGranted) {
-    return MAC_ACCESSIBILITY_PERMISSION_MESSAGE;
+    return macPermissionMessages(appName).accessibility;
   }
   return screenMessage;
 }
@@ -949,7 +952,7 @@ export const make = Effect.gen(function* () {
       const capturedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       if (snapshot.linuxActivationFailure) {
         yield* Effect.logWarning(
-          "The compositor could not activate T3 Code after the snapshot",
+          `The compositor could not activate ${APP_BASE_NAME} after the snapshot`,
           snapshot.linuxActivationFailure.cause,
         );
       }
@@ -1067,7 +1070,7 @@ export const make = Effect.gen(function* () {
     if (mode === "portal" && niriSocketPath()) {
       return {
         available: false,
-        message: "Configure the capture shortcut in your Niri config, not in T3 Code.",
+        message: `Configure the capture shortcut in your Niri config, not in ${APP_BASE_NAME}.`,
       };
     }
     if (mode === "portal" && isHyprlandCaptureSession()) {
@@ -1203,7 +1206,10 @@ export const make = Effect.gen(function* () {
     const permissionMessage =
       requestedPermissionMessage ??
       (environment.platform === "darwin"
-        ? currentMacSnapShotPermissionMessage(settings.snapShotIncludeAccessibility)
+        ? currentMacSnapShotPermissionMessage(
+            environment.displayName,
+            settings.snapShotIncludeAccessibility,
+          )
         : null);
     if (permissionMessage) {
       yield* Ref.set(stateRef, {
@@ -1221,7 +1227,9 @@ export const make = Effect.gen(function* () {
           const { startNiriCaptureShortcut } = await import("./NiriCaptureShortcut.ts");
           return startNiriCaptureShortcut(linuxAppId, onCurrentShortcut, () => {
             void runPromise(
-              setShortcutFailure("The Niri capture endpoint disconnected. Restart T3 Code."),
+              setShortcutFailure(
+                `The Niri capture endpoint disconnected. Restart ${APP_BASE_NAME}.`,
+              ),
             ).catch(() => undefined);
           });
         },
@@ -1245,7 +1253,7 @@ export const make = Effect.gen(function* () {
         shortcutActionRegistered: registered,
         shortcutMessage: registered
           ? "Set up the shortcut to add it to your Niri config."
-          : "Could not start the Niri capture endpoint. Another T3 Code instance may be using it.",
+          : `Could not start the Niri capture endpoint. Another ${APP_BASE_NAME} instance may be using it.`,
         message: null,
       });
       return;
@@ -1372,7 +1380,9 @@ export const make = Effect.gen(function* () {
   ) {
     if (environment.platform !== "darwin") return;
     const owner = Electron.BrowserWindow.getFocusedWindow();
-    yield* Effect.promise(() => requestMacSnapShotPermissions(includeAccessibility));
+    yield* Effect.promise(() =>
+      requestMacSnapShotPermissions(environment.displayName, includeAccessibility),
+    );
     if (Electron.systemPreferences.getMediaAccessStatus("screen") !== "granted") {
       yield* permissions.showHelper("screen-recording", owner);
     } else if (
@@ -1486,7 +1496,8 @@ export const make = Effect.gen(function* () {
               .catch(() => undefined),
           );
         }
-      } else yield* Effect.promise(requestMacScreenCapturePermission);
+      } else
+        yield* Effect.promise(() => requestMacScreenCapturePermission(environment.displayName));
       yield* permissions.showHelper(
         action === "allow-accessibility" ? "accessibility" : "screen-recording",
         owner,
@@ -1638,12 +1649,18 @@ export const make = Effect.gen(function* () {
                 const settings = yield* Ref.get(settingsRef);
                 const macPermissions = currentMacPermissions();
                 const message = settings.snapShotEnabled
-                  ? macPermissionMessage(macPermissions, settings.snapShotIncludeAccessibility)
+                  ? macPermissionMessage(
+                      environment.displayName,
+                      macPermissions,
+                      settings.snapShotIncludeAccessibility,
+                    )
                   : null;
                 const recovered =
                   message === null &&
                   state.message !== null &&
-                  MAC_PERMISSION_MESSAGES.has(state.message)
+                  Object.values(macPermissionMessages(environment.displayName)).includes(
+                    state.message,
+                  )
                     ? yield* configurationMutex
                         .withPermits(1)(applySettings(settings, null, true))
                         .pipe(Effect.andThen(Ref.get(stateRef)))

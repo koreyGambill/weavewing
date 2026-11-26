@@ -18,6 +18,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { projectEnvironment } from "~/state/projects";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { APP_BASE_NAME } from "~/branding";
 
 const EMPTY_GRANTS: ReadonlyArray<OutsideWorkspaceEditGrant> = [];
 
@@ -77,7 +78,7 @@ export function OutsideEditAccess({
       ? canGrant
         ? "This file is outside the workspace, so it opens read-only until you allow editing."
         : "This file is outside the workspace. Editing it needs a connection that can write files and run terminals."
-      : "This file stays read-only: T3 Code never edits credential folders, git metadata, hard-linked files, or its own state outside the workspace.";
+      : `This file stays read-only: ${APP_BASE_NAME} never edits credential folders, git metadata, hard-linked files, or its own state outside the workspace.`;
 
   return (
     <>
@@ -164,8 +165,8 @@ export function OutsideEditAccess({
                 <p>
                   <strong>Allow any file on this machine</strong> lets you edit every file on this
                   machine outside the workspace, from this workspace while it is open. Only
-                  credential folders, git metadata, hard-linked files and T3 Code's own folders stay
-                  read-only.
+                  credential folders, git metadata, hard-linked files and {APP_BASE_NAME}'s own
+                  folders stay read-only.
                 </p>
                 <p>
                   Clients allowed to write files and run terminals can use either grant. Agents edit

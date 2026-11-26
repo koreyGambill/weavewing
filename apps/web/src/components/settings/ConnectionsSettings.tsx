@@ -93,6 +93,7 @@ import {
   type ConnectDeviceRevokeRequest,
   RevokeConnectDeviceDialog,
 } from "./RevokeConnectDeviceDialog";
+import { APP_BASE_NAME } from "~/branding";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -718,8 +719,8 @@ function ConnectionsSettingsContent({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDesktopServerExposureMode === "network-accessible"
-                ? "Let your other devices connect to T3 Code over the network. Pair devices to give them access. T3 Code will restart."
-                : "Devices connected over your local network will disconnect. Existing tunnels, such as T3 Connect or Tailscale HTTPS, keep working. T3 Code will restart."}
+                ? `Let your other devices connect to ${APP_BASE_NAME} over the network. Pair devices to give them access. ${APP_BASE_NAME} will restart.`
+                : `Devices connected over your local network will disconnect. Existing tunnels, such as T3 Connect or Tailscale HTTPS, keep working. ${APP_BASE_NAME} will restart.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -761,7 +762,7 @@ function ConnectionsSettingsContent({
           <AlertDialogHeader>
             <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
             <AlertDialogDescription>
-              T3 Code will restart the local backend without Tailscale Serve.
+              {APP_BASE_NAME} will restart the local backend without Tailscale Serve.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -799,8 +800,8 @@ function ConnectionsSettingsContent({
           <DialogHeader>
             <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
             <DialogDescription>
-              T3 Code will restart the local backend with Tailscale Serve enabled and ask Tailscale
-              to proxy HTTPS traffic to this backend.
+              {APP_BASE_NAME} will restart the local backend with Tailscale Serve enabled and ask
+              Tailscale to proxy HTTPS traffic to this backend.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>

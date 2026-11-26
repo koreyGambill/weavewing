@@ -25,6 +25,7 @@ import { stackedThreadToast, toastManager } from "../../ui/toast";
 import { applyWslEnableSelection, isWslSettingsRowVisible } from "../ConnectionsSettings.logic";
 import { SettingsRow } from "../settingsLayout";
 import { searchableSetting } from "../settingsSearch";
+import { APP_BASE_NAME } from "~/branding";
 
 // Colons are invalid in distro names, keeping picker sentinels collision-free.
 const BACKEND_VALUE_DEFAULT_WSL = "backend:default-wsl";
@@ -282,7 +283,7 @@ export function WslBackendSettings({
         {desktopWslState.enabled ? (
           <SettingsRow
             title="WSL only"
-            description="Run only the WSL backend. T3 Code restarts when this changes."
+            description={`Run only the WSL backend. ${APP_BASE_NAME} restarts when this changes.`}
             className="bg-muted/20 pl-7 sm:pl-8"
             control={
               <Switch
@@ -326,15 +327,15 @@ export function WslBackendSettings({
             <AlertDialogDescription>
               {pendingWslChange?.kind === "disable"
                 ? pendingWslChange.wasWslOnly
-                  ? "T3 Code will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
-                  : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in T3 Code until you re-enable WSL."
+                  ? `${APP_BASE_NAME} will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL.`
+                  : `The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in ${APP_BASE_NAME} until you re-enable WSL.`
                 : pendingWslChange?.kind === "distro"
-                  ? "T3 Code will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
+                  ? `${APP_BASE_NAME} will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted.`
                   : pendingWslChange?.kind === "enable"
                     ? "Run the WSL backend alongside the Windows one, or stop the Windows backend and use only WSL? You can change this later from Settings."
                     : pendingWslChange?.nextValue
-                      ? "T3 Code will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
-                      : "T3 Code will restart and bring the Windows backend back up alongside WSL."}
+                      ? `${APP_BASE_NAME} will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again.`
+                      : `${APP_BASE_NAME} will restart and bring the Windows backend back up alongside WSL.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

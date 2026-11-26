@@ -433,6 +433,7 @@ import {
   type LocalThreadErrorEntry,
   makeThreadErrorSetter,
 } from "./ChatView.logic";
+import { APP_BASE_NAME } from "~/branding";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
@@ -2961,7 +2962,7 @@ export default function ChatView(props: ChatViewProps) {
         : serverConfig === null
           ? "Side chats are not ready yet. Try again in a moment."
           : serverConfig.environment.capabilities.sideChats !== true
-            ? "Update this environment's T3 Code server to use side chats."
+            ? `Update this environment's ${APP_BASE_NAME} server to use side chats.`
             : sideChatsOffered && !isServerThread
               ? "Side chats start after the first message."
               : sideChat.available &&

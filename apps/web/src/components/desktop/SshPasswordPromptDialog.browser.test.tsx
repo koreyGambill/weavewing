@@ -68,4 +68,5 @@ it("shows a prompt that arrived before the dialog mounted", async () => {
 
   await using screen = await render(<SshPasswordPromptDialog />);
   await expect.element(screen.getByText("SSH verification required")).toBeVisible();
+  await expect.element(screen.getByText(/Weavewing passes your response/)).toBeVisible();
 });

@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/contracts";
 
 import { sourceControlClients } from "./sourceControlClients.ts";
+import { PRODUCT_NAME } from "./productName.ts";
 
 /** How long a menu waits for the server to read git before giving up on the forge rows. */
 const FILE_LINK_TIMEOUT_MS = 3000;
@@ -15,7 +16,7 @@ export type FileLinkState =
   | { readonly status: "timed-out" }
   | { readonly status: "ready"; readonly link: SourceControlFileLink };
 
-/** An action that sends the file to a place outside T3 Code, such as its forge page. */
+/** An action that sends the file to a place outside the app, such as its forge page. */
 export interface FileRemoteAction {
   readonly id: string;
   readonly label: string;
@@ -116,11 +117,11 @@ function unavailableReason(state: FileLinkState): string {
     case "not-repository":
       return "This file is not in a git repository with a remote";
     case "unsupported-host":
-      return `T3 Code cannot link files on ${link.host ?? "this remote's host"}`;
+      return `${PRODUCT_NAME} cannot link files on ${link.host ?? "this remote's host"}`;
     case "no-branch":
       return "The remote has no default branch fetched, and this branch has no upstream there";
     case "network-path":
-      return "T3 Code does not read git on network paths";
+      return `${PRODUCT_NAME} does not read git on network paths`;
     case "outside-workspace":
       return "This path leaves its workspace";
   }
@@ -201,7 +202,7 @@ export function fileLinkPreflight(input: {
   if (definition?.fileUrl === undefined)
     return {
       forge,
-      disabledReason: `T3 Code cannot link files on ${input.identity.canonicalKey.split("/")[0]}`,
+      disabledReason: `${PRODUCT_NAME} cannot link files on ${input.identity.canonicalKey.split("/")[0]}`,
     };
   return { forge, disabledReason: null };
 }
