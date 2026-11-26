@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schedule from "effect/Schedule";
 
+import { MOBILE_APP_VARIANTS } from "./lib/public-config.ts";
 import { run, ScenarioError } from "./scenarios/shell.ts";
 
 // e2e loads this module for its values, so the paths and the host are resolved once, here.
@@ -177,7 +178,7 @@ export default {
         session: "t3-scenarios",
       }),
       app: {
-        bundleId: "com.t3tools.t3code.dev",
+        bundleId: MOBILE_APP_VARIANTS.development.identifier,
         // Metro starts after the server listens, so it answering means both are up.
         readyUrl: `http://127.0.0.1:${MOBILE.metroPort}/status`,
         command: {

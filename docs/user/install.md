@@ -67,7 +67,7 @@ independent server.
 
 ### Intel Macs
 
-There is no `t3` executable for Intel Macs (the desktop app is available). To
+Weavewing releases have no `t3` executable or desktop app for Intel Macs. To
 run a server there, build it from source with `vp`, which provides the Node version it needs
 ([Install vp](../operations/development.md#first-checkout)):
 

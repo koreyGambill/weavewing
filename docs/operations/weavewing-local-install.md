@@ -123,8 +123,9 @@ To install it on the Mac:
 
 1. Check the DMG against `SHA256SUMS`.
 2. Quit the app by bundle id
-   (`osascript -e 'tell application id "dev.weavewing.desktop" to quit'`) and
-   wait for its processes to exit.
+   (`osascript -e 'tell application id "dev.wingstack.weavewing.desktop" to quit'`;
+   a build older than that bundle id runs as `dev.weavewing.desktop`) and wait
+   for its processes to exit.
 3. Back up `~/.t3/userdata` and the old app.
 4. `hdiutil attach -nobrowse -readonly`, `ditto` the app into `/Applications`,
    detach.

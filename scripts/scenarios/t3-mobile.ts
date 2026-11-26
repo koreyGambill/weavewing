@@ -8,10 +8,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { APP_DIR, MOBILE, MOBILE_T3_HOME } from "../e2e.config.ts";
+import { MOBILE_APP_VARIANTS } from "../lib/public-config.ts";
 import { run, ScenarioError } from "./shell.ts";
 import { makeState, runPromise, type T3State } from "./t3.ts";
 
-const APP_ID = "com.t3tools.t3code.dev";
+const APP_ID = MOBILE_APP_VARIANTS.development.identifier;
 const SCHEME = "t3code-dev";
 
 export interface MobileT3 extends T3State {

@@ -9,6 +9,7 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { newProjectFolderName } from "@t3tools/shared/path";
+import { RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -203,7 +204,7 @@ function namedProjectReadme(name: string): string {
     "",
     `# ${name}`,
     "",
-    "Created in [T3 Code](https://t3.codes).",
+    `Created in [Weavewing](https://github.com/${RELEASE_REPOSITORY}).`,
     "",
   ].join("\n");
 }

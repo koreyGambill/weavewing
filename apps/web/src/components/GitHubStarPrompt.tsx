@@ -4,6 +4,7 @@ import { RELEASE_REPOSITORY } from "@t3tools/shared/releaseIdentity";
 import * as Schema from "effect/Schema";
 import { StarIcon } from "lucide-react";
 
+import { APP_BASE_NAME } from "~/branding";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { readLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -43,7 +44,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
       toastManager.update(id, {
         type: "success",
         title: "Thanks for the star!",
-        description: "It really helps T3 Code grow.",
+        description: `It really helps ${APP_BASE_NAME} grow.`,
         timeout: 5_000,
         actionProps: undefined,
         data: {},
@@ -57,7 +58,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
     toastManager.update(id, { actionProps: { children: "Open GitHub", onClick: openInBrowser } });
   };
   const id = toastManager.add({
-    title: "Enjoying T3 Code?",
+    title: `Enjoying ${APP_BASE_NAME}?`,
     description: "Give us a star on GitHub to let us know!",
     timeout: 0,
     onClose: dismiss,

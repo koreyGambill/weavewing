@@ -12,8 +12,10 @@ const identity: { RELEASE_REPOSITORY: string; RELEASE_TAG_PREFIX: string } = FS.
   : { RELEASE_REPOSITORY: "koreyGambill/weavewing", RELEASE_TAG_PREFIX: "weavewing-v" };
 export const RELEASE_REPOSITORY = identity.RELEASE_REPOSITORY;
 export const TAG_PREFIX = identity.RELEASE_TAG_PREFIX;
-/** The packaged macOS app's CFBundleIdentifier. Must equal MACOS_BUNDLE_ID in packages/shared/src/releaseIdentity.ts. */
-export const MACOS_BUNDLE_ID = "dev.wingstack.weavewing.desktop";
+/** The packaged macOS app's CFBundleIdentifier, the only one a release DMG may carry. */
+export const MACOS_BUNDLE_ID: string = FS.existsSync(identityUrl)
+  ? (await import(identityUrl.href)).MACOS_BUNDLE_ID
+  : "dev.wingstack.weavewing.desktop";
 export const PLATFORMS = ["linux", "win", "mac"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 /** Optional Sparkwing secrets for Developer ID signing; the Mac build requires all of them or none. */
