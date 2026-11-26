@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ThreadId } from "@t3tools/contracts";
 
-import { checkLabel, coverageDraft, leavesNeedsQa, reviewDisplay } from "./evidence.logic";
+import { checkLabel, coverageDraft, leavesNeedsQa, qaTally, reviewDisplay } from "./evidence.logic";
 
 describe("coverageDraft", () => {
   it("lists each merge and counts the ones past the cap", () => {
@@ -110,5 +110,21 @@ describe("checkLabel", () => {
     [{ label: "unit", result: "fail" }, "unit failed"],
   ] as const)("labels %j", (check, label) => {
     expect(checkLabel(check)).toBe(label);
+  });
+});
+
+describe("qaTally", () => {
+  it("counts notes under Noted, apart from the changes with nothing to check", () => {
+    const tally = qaTally({ pending: 1, quiet: 3, confirmed: 0, problem: 0, waived: 0, noted: 2 });
+    expect(tally.map(({ label, count }) => [label, count])).toEqual([
+      ["Open", 1],
+      ["Nothing to check", 1],
+      ["Noted", 2],
+    ]);
+  });
+
+  it("reads a server that does not count notes as all nothing to check", () => {
+    const tally = qaTally({ pending: 0, quiet: 2, confirmed: 0, problem: 0, waived: 0 });
+    expect(tally.map(({ label, count }) => [label, count])).toEqual([["Nothing to check", 2]]);
   });
 });

@@ -292,7 +292,7 @@ it.effect("lists compact summaries newest first, pages, and filters by thread an
         target: { branch: "main", sha: "abc1234" },
         verifications: [{ label: "gate", result: "pass" }],
         changeCount: 2,
-        qa: { pending: 2, quiet: 0, confirmed: 0, problem: 0, waived: 0 },
+        qa: { pending: 2, quiet: 0, confirmed: 0, problem: 0, waived: 0, noted: 0 },
       });
       // Summaries never carry changes, summaries or captures.
       assert.isBelow(JSON.stringify(page.items[1]).length, 400);
@@ -1303,7 +1303,7 @@ it.effect("records an approval alone quietly, recomputes reasons and keeps the u
       assert.deepStrictEqual(
         again.changes.map((item) => [item.qa, item.raised, item.ref]),
         [
-          ["confirmed", [], 1],
+          ["confirmed", ["captures"], 1],
           ["pending", ["needs_you"], 2],
           ["pending", ["review_changes_requested"], 3],
         ],
@@ -1312,7 +1312,7 @@ it.effect("records an approval alone quietly, recomputes reasons and keeps the u
       assert.deepStrictEqual(
         landing.changes.map(({ qa }) => [qa.state, qa.by, qa.raised]),
         [
-          ["confirmed", "user", []],
+          ["confirmed", "user", ["captures"]],
           ["pending", "server", ["needs_you"]],
           ["pending", "server", ["review_changes_requested"]],
         ],
@@ -1993,17 +1993,30 @@ it.effect(
             [
               "noted",
               [
-                { id: "routine", title: "Quote commas", gaps: ["Not tried on a slow network."] },
-                { id: "marked", title: "Changed marked", gaps: ["No live remote."] },
+                {
+                  id: "routine",
+                  title: "Quote commas",
+                  gapPreviews: ["Not tried on a slow network."],
+                  gapCount: 1,
+                },
+                {
+                  id: "marked",
+                  title: "Changed marked",
+                  gapPreviews: ["No live remote."],
+                  gapCount: 1,
+                },
                 {
                   id: "default-gaps",
                   title: "Changed default-gaps",
-                  gaps: ["Not tried on a slow network."],
+                  gapPreviews: ["Not tried on a slow network."],
+                  gapCount: 1,
                 },
               ],
             ],
           ],
         );
+        // The landing's tally counts its notes apart from changes with nothing to check.
+        assert.deepInclude(notes.items[0]!.qa, { quiet: 4, noted: 3 });
         const everywhere = yield* evidence.list({ notes: true });
         assert.deepStrictEqual(
           everywhere.items.map((item) => item.id),
@@ -2013,45 +2026,136 @@ it.effect(
     ).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("never turns a stored card into a note unless the agent marks it a note", () =>
+const STATES = [
+  "untouched-forced",
+  "untouched-gaps",
+  "discussed",
+  "user-reopened",
+  "user-note",
+  "agent-pending",
+  "promoted",
+  "confirmed",
+  "dismissed",
+  "problem",
+  "legacy-pending",
+  "legacy-confirmed",
+  "legacy-answered",
+] as const;
+
+/** One landing holding a change in each stored state a later record can meet. */
+const seedStates = (landingId: string) =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    const sql = yield* SqlClient.SqlClient;
+    yield* evidence.record(
+      recordInput(
+        landingId,
+        STATES.map((id) => (id === "promoted" ? unmarked(id) : change(id))),
+      ),
+    );
+    const where = (id: string) => sql`landing_id = ${landingId} AND change_id = ${id}`;
+    yield* sql`UPDATE evidence_qa SET raised_json = '["gaps"]' WHERE ${where("untouched-gaps")}`;
+    yield* evidence.markDiscussed({
+      threadId: lead,
+      messageId: MessageId.make(`m-${landingId}`),
+      changes: [{ landingId, changeId: "discussed" }],
+    });
+    yield* evidence.setQa({ landingId, changeId: "user-reopened", state: "confirmed" });
+    yield* evidence.setQa({ landingId, changeId: "user-reopened", state: "pending" });
+    yield* sql`UPDATE evidence_qa SET note = 'Check the toast on a phone' WHERE ${where("user-note")}`;
+    yield* sql`UPDATE evidence_qa SET by = 'agent' WHERE ${where("agent-pending")}`;
+    yield* evidence.setQa({ landingId, changeId: "promoted", state: "pending" });
+    yield* evidence.setQa({ landingId, changeId: "confirmed", state: "confirmed" });
+    yield* evidence.setQa({ landingId, changeId: "dismissed", state: "waived" });
+    yield* sql`UPDATE evidence_qa SET state = 'problem', by = 'agent', note = 'Overlaps'
+      WHERE ${where("problem")}`;
+    // Rows from before reasons were kept carry the default attribution, the user.
+    yield* sql`UPDATE evidence_qa SET raised_json = NULL, by = 'user' WHERE ${where("legacy-pending")}`;
+    yield* sql`UPDATE evidence_qa SET raised_json = NULL, by = 'user', state = 'confirmed'
+      WHERE ${where("legacy-confirmed")}`;
+    yield* sql`UPDATE evidence_qa SET raised_json = '["legacy"]', by = 'user', state = 'waived'
+      WHERE ${where("legacy-answered")}`;
+  });
+
+const storedRows = (landingId: string) =>
+  SqlClient.SqlClient.pipe(
+    Effect.flatMap(
+      (sql) => sql<{
+        readonly change_id: string;
+        readonly state: string;
+        readonly by: string;
+        readonly raised_json: string | null;
+        readonly note: string;
+        readonly discussed_message_id: string | null;
+        readonly ref: number | null;
+      }>`SELECT change_id, state, by, raised_json, note, discussed_message_id, ref FROM evidence_qa
+        WHERE landing_id = ${landingId}`,
+    ),
+    Effect.map((rows) => new Map(rows.map(({ change_id, ...row }) => [change_id, row]))),
+  );
+
+it.effect(
+  "a later record keeps every card the user acted on, and every settled change's presence",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        yield* seedThread({ id: "lead" });
+        for (const [index, attention] of [undefined, "note", "needs_you"].entries()) {
+          const landingId = `states-${index}`;
+          yield* seedStates(landingId);
+          const before = yield* storedRows(landingId);
+          yield* evidence.record(
+            recordInput(
+              landingId,
+              STATES.map((id) =>
+                attention === undefined ? unmarked(id) : change(id, { attention }),
+              ),
+            ),
+          );
+          const after = yield* storedRows(landingId);
+          for (const id of STATES) {
+            const was = before.get(id)!;
+            const now = after.get(id)!;
+            const label = `${id} recorded again with ${attention ?? "no mark"}`;
+            assert.strictEqual(now.ref, was.ref, label);
+            if (!id.startsWith("untouched")) {
+              // State, attribution, reasons, note and discussion all stand.
+              assert.deepStrictEqual(now, was, label);
+              continue;
+            }
+            const expected =
+              attention === "note"
+                ? { state: "quiet", raised_json: "[]" }
+                : attention === "needs_you"
+                  ? { state: "pending", raised_json: '["needs_you"]' }
+                  : { state: "pending", raised_json: was.raised_json };
+            assert.deepInclude(now, { ...expected, by: "server" }, label);
+          }
+        }
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("never hands out a QA number again, from a record or a Needs me", () =>
   withHome(() =>
     Effect.gen(function* () {
       const evidence = yield* Service.EvidenceService;
-      const sql = yield* SqlClient.SqlClient;
-      yield* evidence.record(
-        recordInput("older", [change("gaps"), change("legacy"), change("agent")]),
-      );
-      // Cards stored before agents marked changes: raised for gaps, or from before reasons were kept.
-      yield* sql`UPDATE evidence_qa SET raised_json = '["gaps"]' WHERE change_id = 'gaps'`;
-      yield* sql`UPDATE evidence_qa SET raised_json = NULL WHERE change_id = 'legacy'`;
-
-      const again = yield* evidence.record(
-        recordInput("older", [unmarked("gaps"), unmarked("legacy"), unmarked("agent")]),
-      );
+      const first = yield* evidence.record(recordInput("numbers", [change("one"), change("two")]));
       assert.deepStrictEqual(
-        again.changes.map((item) => [item.id, item.qa, item.raised, item.ref]),
-        [
-          ["gaps", "pending", ["gaps"], 1],
-          ["legacy", "pending", ["gaps"], 2],
-          ["agent", "pending", ["needs_you"], 3],
-        ],
+        first.changes.map((item) => item.ref),
+        [1, 2],
       );
-      const demoted = yield* evidence.record(
-        recordInput("older", [
-          change("gaps", { attention: "note" }),
-          change("legacy", { attention: "note" }),
-          change("agent", { attention: "note" }),
-        ]),
-      );
-      assert.deepStrictEqual(
-        demoted.changes.map((item) => [item.qa, item.raised]),
-        [
-          ["quiet", []],
-          ["quiet", []],
-          ["quiet", []],
-        ],
-      );
-      assert.deepStrictEqual(yield* evidence.waitingQa(lead), []);
+      // QA2 is removed and a note takes its place.
+      yield* evidence.record(recordInput("numbers", [change("one"), unmarked("note")]));
+      const promoted = yield* evidence.setQa({
+        landingId: "numbers",
+        changeId: "note",
+        state: "pending",
+      });
+      assert.strictEqual(promoted.ref, 3);
+      const next = yield* evidence.record(recordInput("later", [change("three")]));
+      assert.strictEqual(next.changes[0]!.ref, 4);
     }),
   ).pipe(Effect.provide(testLayer)),
 );
@@ -2100,6 +2204,115 @@ it.effect("the user's Needs me raises a note's card, and a later record keeps it
         state: "pending",
       });
       assert.deepInclude(reopened, { ref: 1, raised: ["needs_you"] });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a lead's Notes list its delegated children's notes, as its timeline does", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
+      const child = ThreadId.make("child");
+      yield* evidence.record(
+        recordInput("by-child", [unmarked("child-note")], { threadId: child }),
+      );
+      yield* evidence.record(recordInput("by-lead", [unmarked("lead-note")], { landedAt }));
+      const ids = (threadId: ThreadId) =>
+        evidence
+          .list({ threadId, notes: true })
+          .pipe(Effect.map((page) => page.items.map((item) => item.id).toSorted()));
+      assert.deepStrictEqual(yield* ids(lead), ["by-child", "by-lead"]);
+      assert.deepStrictEqual(yield* ids(child), ["by-child"]);
+      // The other lists keep listing a thread's own landings.
+      assert.deepStrictEqual(
+        (yield* evidence.list({ threadId: lead })).items.map((item) => item.id),
+        ["by-lead"],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a lead's thread read holds every landing its waiting strip lists, however old", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
+      yield* evidence.record(
+        recordInput("old-child", [unmarked("old-note")], {
+          threadId: ThreadId.make("child"),
+          landedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      );
+      for (let index = 0; index < 50; index++)
+        yield* evidence.record(
+          recordInput(`newer-${index}`, [change("c", { attention: "note", gaps: [] })], {
+            landedAt: `2026-11-2${index % 5}T1${index % 10}:00:${String(index).padStart(2, "0")}.000Z`,
+          }),
+        );
+      const read = () =>
+        evidence
+          .thread({ threadId: lead })
+          .pipe(Effect.map((result) => result.landings.map((landing) => landing.id)));
+      assert.notInclude(yield* read(), "old-child");
+
+      yield* evidence.setQa({ landingId: "old-child", changeId: "old-note", state: "pending" });
+      const [waiting] = yield* evidence.waitingQa(lead);
+      assert.strictEqual(waiting?.key, "old-child/old-note");
+      // The waiting mirror stores what the strip lists, as the thread's projection does.
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.waiting', json(${JSON.stringify([waiting])}))
+        WHERE thread_id = 'lead'`;
+      const landings = yield* read();
+      assert.strictEqual(landings.length, 51);
+      assert.include(landings, "old-child");
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a Notes page lists at most 50 notes, each shortened, and pages on to the rest", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const long = (n: number) =>
+        `${"Not run against the staging receiver ".repeat(8)}${n}`.slice(0, 300);
+      // Five landings of 12 worst-case notes each: long titles, ten long gaps apiece.
+      for (let landing = 0; landing < 5; landing++)
+        yield* evidence.record(
+          recordInput(
+            `notes-${landing}`,
+            Array.from({ length: 12 }, (_, index) =>
+              unmarked(`n${index}`, {
+                summary: `Retry ${"failed webhook deliveries ".repeat(10)}`,
+                gaps: Array.from({ length: 10 }, (_, gap) => long(gap)),
+              }),
+            ),
+            { landedAt: `2026-11-2${landing}T10:00:00.000Z` },
+          ),
+        );
+      const first = yield* evidence.list({ notes: true });
+      const notes = first.items.flatMap((item) => item.notes ?? []);
+      assert.strictEqual(notes.length, 48);
+      assert.deepStrictEqual(
+        first.items.map((item) => item.id),
+        ["notes-4", "notes-3", "notes-2", "notes-1"],
+      );
+      for (const note of notes) {
+        assert.isAtMost(note.title.length, 120);
+        assert.strictEqual(note.gapCount, 10);
+        assert.strictEqual(note.gapPreviews.length, 3);
+        for (const preview of note.gapPreviews) assert.isAtMost(preview.length, 80);
+      }
+      assert.isBelow(JSON.stringify(first).length, 40_000);
+      const second = yield* evidence.list({ notes: true, before: first.next! });
+      assert.deepStrictEqual(
+        second.items.map((item) => item.id),
+        ["notes-0"],
+      );
+      assert.isNull(second.next);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

@@ -46,7 +46,6 @@ import {
   evidenceGet,
   evidenceList,
   evidenceSetQa,
-  reloadEvidence,
   useEvidenceEnvironment,
 } from "../../state/evidence";
 import { useEnvironmentQuery } from "../../state/query";
@@ -81,6 +80,7 @@ import {
   coverageDraft,
   leavesNeedsQa,
   QA_STATES,
+  qaTally,
   reviewDisplay,
 } from "./evidence.logic";
 
@@ -394,7 +394,7 @@ function LandingPage({
         />
       ) : (
         <Button variant="ghost" size="micro" onClick={() => setMore(true)}>
-          Load older landings
+          {input.notes ? "Show older" : "Load older landings"}
         </Button>
       )}
     </>
@@ -445,15 +445,13 @@ function LandingCard({
             ))}
           </span>
           <span className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-            {QA_STATES.filter(({ state }) => landing.qa[state] > 0).map(
-              ({ state, label, icon: Icon, tone }) => (
-                <span key={state} className="inline-flex items-center gap-0.5">
-                  <Icon aria-hidden className={cn("size-3", tone)} />
-                  <span className="sr-only">{label}</span>
-                  {landing.qa[state]}
-                </span>
-              ),
-            )}
+            {qaTally(landing.qa).map(({ key, label, icon: Icon, tone, count }) => (
+              <span key={key} className="inline-flex items-center gap-0.5">
+                <Icon aria-hidden className={cn("size-3", tone)} />
+                <span className="sr-only">{label}</span>
+                {count}
+              </span>
+            ))}
             {landing.exempt ? (
               <span className="min-w-0 break-words">Exempt: {landing.exempt.reason}</span>
             ) : (
@@ -491,51 +489,119 @@ function LandingNotes({
 }) {
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // The server's evidence revision refreshes the list once the note is raised.
   const raise = async (changeId: string, trigger: HTMLElement) => {
     if (!(await setQa({ environmentId, input: { landingId, changeId, state: "pending" } }))) return;
     toastManager.add({ type: "success", title: "Raised as a QA card in its thread." });
     // The raised note leaves the list; focus stays on its landing while other notes remain.
     if (notes.length === 1) focusAfterCardLeaves(trigger);
     else trigger.closest("section")?.querySelector<HTMLElement>("[data-evidence-card]")?.focus();
-    reloadEvidence();
   };
   return (
     <ul className="min-w-0 space-y-2 border-t border-border p-2">
-      {notes.map((note) => (
-        <li key={note.id} className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-start gap-1">
-            <span className="min-w-0 flex-1 break-words font-medium">{note.title}</span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="micro"
-                    className="shrink-0"
-                    disabled={!canSet}
-                    aria-label={`Needs me: ${note.title}`}
-                    onClick={(event) => void raise(note.id, event.currentTarget)}
-                  />
-                }
-              >
-                Needs me
-              </TooltipTrigger>
-              <TooltipPopup side="top">Show it as a QA card in its thread</TooltipPopup>
-            </Tooltip>
-          </div>
-          {note.gaps.map((gap, index) => (
-            <p
-              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
-              key={`${index}:${gap}`}
-              className="flex items-start gap-1.5 text-muted-foreground"
-            >
-              <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
-              <span className="min-w-0 break-words">{gap}</span>
-            </p>
-          ))}
-        </li>
-      ))}
+      {notes.map((note) => {
+        const shortened =
+          note.gapCount > note.gapPreviews.length ||
+          [note.title, ...note.gapPreviews].some((text) => text.endsWith("…"));
+        const open = expanded.has(note.id);
+        return (
+          <li key={note.id} className="min-w-0 space-y-1">
+            <div className="flex min-w-0 items-start gap-1">
+              <span className="min-w-0 flex-1 break-words font-medium">{note.title}</span>
+              {shortened ? (
+                <Button
+                  variant="ghost"
+                  size="icon-tiny"
+                  aria-label={open ? `Show less of ${note.title}` : `Show all of ${note.title}`}
+                  aria-expanded={open}
+                  onClick={() => {
+                    const next = new Set(expanded);
+                    if (open) next.delete(note.id);
+                    else next.add(note.id);
+                    setExpanded(next);
+                  }}
+                >
+                  <ChevronsUpDownIcon />
+                </Button>
+              ) : null}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="micro"
+                      className="shrink-0"
+                      disabled={!canSet}
+                      aria-label={`Needs me: ${note.title}`}
+                      onClick={(event) => void raise(note.id, event.currentTarget)}
+                    />
+                  }
+                >
+                  Needs me
+                </TooltipTrigger>
+                <TooltipPopup side="top">Show it as a QA card in its thread</TooltipPopup>
+              </Tooltip>
+            </div>
+            {open ? (
+              <NoteDetail environmentId={environmentId} landingId={landingId} changeId={note.id} />
+            ) : (
+              <>
+                {note.gapPreviews.map((gap, index) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+                  <GapLine key={`${index}:${gap}`} gap={gap} />
+                ))}
+                {note.gapCount > note.gapPreviews.length ? (
+                  <p className="pl-4.5 text-muted-foreground">
+                    and {note.gapCount - note.gapPreviews.length} more
+                  </p>
+                ) : null}
+              </>
+            )}
+          </li>
+        );
+      })}
     </ul>
+  );
+}
+
+function GapLine({ gap }: { gap: string }) {
+  return (
+    <p className="flex items-start gap-1.5 text-muted-foreground">
+      <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+      <span className="min-w-0 break-words">{gap}</span>
+    </p>
+  );
+}
+
+/** A note's full summary and gaps, read with its landing when the note is expanded. */
+function NoteDetail({
+  environmentId,
+  landingId,
+  changeId,
+}: {
+  environmentId: EnvironmentId;
+  landingId: string;
+  changeId: string;
+}) {
+  const landing = useEnvironmentQuery(evidenceGet({ environmentId, input: { landingId } }));
+  const change = landing.data?.changes.find((candidate) => candidate.id === changeId);
+  if (change === undefined)
+    return (
+      <p className="text-muted-foreground">
+        {landing.error ? `Couldn't load this note: ${landing.error}` : "Loading the note…"}
+      </p>
+    );
+  return (
+    <>
+      {change.summary ? (
+        <p className="whitespace-pre-wrap break-words text-muted-foreground">{change.summary}</p>
+      ) : null}
+      {change.gaps.map((gap, index) => (
+        // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+        <GapLine key={`${index}:${gap}`} gap={gap} />
+      ))}
+    </>
   );
 }
 
@@ -817,7 +883,6 @@ function QaMenu({
     if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))
       return;
     if (leaves(next)) focusAfterCardLeaves(trigger.current);
-    reloadEvidence();
   };
   return (
     <Menu>
@@ -891,7 +956,6 @@ function WaivedNote({
     )
       return;
     close();
-    reloadEvidence();
   };
   // The agent's record stays its own; Reopen is how the user changes it.
   if (change.qa.by === "agent")
