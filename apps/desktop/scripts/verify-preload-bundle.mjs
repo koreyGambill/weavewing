@@ -62,6 +62,7 @@ const createSandboxModules = (exposedGlobals) => {
     invoke: () => Promise.resolve(undefined),
     on: () => undefined,
     removeListener: () => undefined,
+    send: () => undefined,
     sendSync: () => undefined,
   };
   const electron = {
@@ -104,13 +105,18 @@ const executeBundle = (source, sandboxModules) => {
   };
 
   // A real preload loads with the page's DOM; no page events fire while the bundle runs here.
-  const document = Object.assign(new EventTarget(), { fullscreenElement: null });
+  const document = Object.assign(new EventTarget(), {
+    activeElement: null,
+    fullscreenElement: null,
+  });
   const window = Object.assign(new EventTarget(), { document });
+  class HTMLElement extends EventTarget {}
 
   NodeVM.runInNewContext(
     source,
     {
       document,
+      HTMLElement,
       process: sandboxProcess,
       require: requireSandboxModule,
       window,

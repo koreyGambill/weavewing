@@ -88,6 +88,8 @@ describe("desktop preload bundle verifier", () => {
         report();
         document.addEventListener("fullscreenchange", report);
         window.addEventListener("resize", report);
+        const active = document.activeElement;
+        electron.ipcRenderer.send("focus", active instanceof HTMLElement && active.closest("a") !== null);
       `),
     );
   });
