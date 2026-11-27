@@ -6,6 +6,7 @@ import { MessageSquareReplyIcon } from "lucide-react";
 import { waitingCardsEnvironmentIdsAtom } from "../../state/threadQuestions";
 import { revealAnswerInChat } from "../questions/questionReveal";
 import { Button } from "../ui/button";
+import { TrackedAskActions } from "./TrackedAskActions";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useTrackedAsks } from "./trackedAnswers-web-state";
 
@@ -32,29 +33,35 @@ export function TrackedAskMarker({
   const hint = latest
     ? `${ask.question} · ${new Date(latest.answeredAt).toLocaleString()}`
     : ask.question;
+  const showAnswer = () => {
+    if (latest) revealAnswerInChat(scopedThreadKey(threadRef), ask.id, latest.n);
+  };
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <div className="me-1 flex items-center justify-end gap-1 text-xs text-muted-foreground" />
-        }
-      >
-        <MessageSquareReplyIcon className="size-3 shrink-0" aria-hidden="true" />
-        <span className="font-semibold">{ask.id}</span>
-        <span aria-hidden="true">·</span>
-        {hasAnswer && latest ? (
-          <Button
-            size="xs"
-            variant="link"
-            onClick={() => revealAnswerInChat(scopedThreadKey(threadRef), ask.id, latest.n)}
-          >
-            {label}
-          </Button>
-        ) : (
-          <span>{label}</span>
-        )}
-      </TooltipTrigger>
-      <TooltipPopup side="top">{hint}</TooltipPopup>
-    </Tooltip>
+    <div className="flex min-w-0 items-center justify-end gap-0.5">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <div className="me-1 flex items-center justify-end gap-1 text-xs text-muted-foreground" />
+          }
+        >
+          <MessageSquareReplyIcon className="size-3 shrink-0" aria-hidden="true" />
+          <span className="font-semibold">{ask.id}</span>
+          <span aria-hidden="true">·</span>
+          {hasAnswer && latest ? (
+            <Button
+              size="xs"
+              variant="link"
+              onClick={() => revealAnswerInChat(scopedThreadKey(threadRef), ask.id, latest.n)}
+            >
+              {label}
+            </Button>
+          ) : (
+            <span>{label}</span>
+          )}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{hint}</TooltipPopup>
+      </Tooltip>
+      <TrackedAskActions ask={ask} threadRef={threadRef} onShow={showAnswer} />
+    </div>
   );
 }

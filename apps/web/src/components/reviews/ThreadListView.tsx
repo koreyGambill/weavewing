@@ -1,3 +1,5 @@
+import { AnswersSection } from "../answers/AnswersSection";
+import { waitingCardsEnvironmentIdsAtom } from "../../state/threadQuestions";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AuthOrchestrationReadScope,
@@ -818,6 +820,9 @@ export function ThreadListSummary({ threadRef }: { threadRef: ScopedThreadRef })
 /** Todos with a Thread | All switch; All lists the environment's open follow-ups. */
 export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
   const scope = useThreadContextSidebarStore((state) => state.todoScope);
+  const waitingCardsEnabled = useAtomValue(waitingCardsEnvironmentIdsAtom).includes(
+    threadRef.environmentId,
+  );
   const connected = useConnectedEnvironmentIds();
   const { presentationById } = useEnvironments();
   const environmentLabel = presentationById.get(threadRef.environmentId)?.entry.target.label;
@@ -845,6 +850,9 @@ export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : (
         <FollowUpSection environmentId={threadRef.environmentId} showDone={false} />
       )}
+      {waitingCardsEnabled ? (
+        <AnswersSection key={scope} threadRef={threadRef} scope={scope} />
+      ) : null}
     </div>
   );
 }

@@ -1,12 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import {
-  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
-  THREAD_QUESTIONS_ARTIFACT_ID,
-  trackedQuestionLabel,
-  type OrchestrationMessageContext,
-  type TrackedAsk,
-} from "@t3tools/contracts";
+import type { OrchestrationMessageContext, TrackedAsk } from "@t3tools/contracts";
+import { trackedAskContextForMessage } from "@t3tools/shared/composerContextReferences";
 
 interface AnswerDraft {
   readonly track: boolean;
@@ -20,6 +15,11 @@ interface AnswerDraftStore {
   readonly toggleTrack: (key: string) => void;
   readonly toggleDiscuss: (key: string, ask: Pick<TrackedAsk, "id" | "question">) => void;
   readonly clearSent: (key: string, sent: AnswerDraft) => void;
+  readonly restore: (
+    key: string,
+    context: OrchestrationMessageContext | undefined,
+    asks: ReadonlyArray<TrackedAsk>,
+  ) => void;
 }
 
 export const useTrackedAnswerDraftStore = create<AnswerDraftStore>()(
@@ -46,6 +46,17 @@ export const useTrackedAnswerDraftStore = create<AnswerDraftStore>()(
           delete drafts[key];
           return { drafts };
         }),
+      restore: (key, context, asks) =>
+        set(({ drafts }) => {
+          const track = context?.trackedAsk !== undefined;
+          const discuss = asks
+            .filter((ask) => context?.discussAnswers?.includes(ask.id))
+            .map(({ id, question }) => ({ id, question }));
+          const next = { ...drafts };
+          if (track || discuss.length > 0) next[key] = { track, discuss };
+          else delete next[key];
+          return { drafts: next };
+        }),
     }),
     { name: "t3-tracked-answer-drafts", partialize: ({ drafts }) => ({ drafts }) },
   ),
@@ -61,29 +72,11 @@ export function withTrackedAnswerDraft(
   draft: AnswerDraft | undefined,
 ): OrchestrationMessageContext | undefined {
   if (!draft || (!draft.track && draft.discuss.length === 0)) return context;
-  const eligible = (context?.records ?? []).flatMap(
-    (record): NonNullable<TrackedAsk["about"]>[] => {
-      if (record.kind === "waiting-item" && "itemKind" in record)
-        return [{ kind: record.itemKind, key: record.key, ref: record.ref }];
-      if (
-        record.kind === "artifact-answer" &&
-        "artifactId" in record &&
-        (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID ||
-          record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID)
-      )
-        return [{ kind: "question", key: record.questionId, ref: record.questionId }];
-      return [];
-    },
-  );
-  const about = eligible.length === 1 ? eligible[0] : undefined;
   return {
     ...(context ?? { version: 1, records: [] }),
     ...(draft.track
       ? {
-          trackedAsk: {
-            question: trackedQuestionLabel(text, about),
-            ...(about === undefined ? {} : { about }),
-          },
+          trackedAsk: trackedAskContextForMessage(text, context?.records ?? []),
         }
       : {}),
     ...(draft.discuss.length === 0 ? {} : { discussAnswers: draft.discuss.map((ask) => ask.id) }),

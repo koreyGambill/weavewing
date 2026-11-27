@@ -18,7 +18,6 @@ import {
   taskWaitingItems,
   TrackedAnswerText,
   TrackedAnswerMore,
-  trackedQuestionLabel,
   type RunId,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ThreadStreamItem,
@@ -74,6 +73,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import {
   formatComposerContextHref,
   sanitizeComposerContextLabel,
+  trackedAskContextForMessage,
 } from "@t3tools/shared/composerContextReferences";
 import { migrateAnnotations } from "./ThreadMarks.ts";
 import {
@@ -119,6 +119,7 @@ export class ThreadWorkspace extends Context.Service<
       threadId: ThreadId,
       messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
       delivered: boolean,
+      editing?: boolean,
     ) => Effect.Effect<ReadonlyArray<TrackedAsk>, ThreadWorkspaceError>;
     readonly listRead: (
       input: ThreadListReadInput,
@@ -891,6 +892,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
     delivered: boolean,
+    editing = false,
   ) {
     const userMessages = messages.filter(
       (message) =>
@@ -899,7 +901,9 @@ const make = Effect.gen(function* () {
         message.createdBy === "user" &&
         (message.origin?.kind ?? "user") === "user" &&
         message.context?.guest === undefined &&
-        (message.context?.trackedAsk !== undefined || message.context?.discussAnswers?.length),
+        (editing ||
+          message.context?.trackedAsk !== undefined ||
+          message.context?.discussAnswers?.length),
     );
     if (userMessages.length === 0) return [];
     const current = yield* load(threadId);
@@ -928,8 +932,14 @@ const make = Effect.gen(function* () {
           changed = true;
         }
       }
-      if (tracking === undefined) continue;
       const previous = next.asks?.find((ask) => ask.askedInMessageId === message.id);
+      if (tracking === undefined) {
+        if (editing && previous?.state === "queued") {
+          next.asks = next.asks?.filter((ask) => ask.id !== previous.id) ?? [];
+          changed = true;
+        }
+        continue;
+      }
       if (previous === undefined) {
         const added = addTrackedAsk(
           next,
@@ -1009,7 +1019,12 @@ const make = Effect.gen(function* () {
           });
         }
       }
-      if (!("all" in input)) return { entries };
+      const counts = {
+        owed: entries.filter(({ ask }) => ask.state === "queued" || ask.state === "owed").length,
+        toRead: entries.filter(({ ask }) => ask.state === "answered").length,
+        closed: entries.filter(({ ask }) => ask.state === "closed").length,
+      };
+      if (!("all" in input)) return { entries, counts };
       const key = (entry: TrackedAnswersPage["entries"][number]) =>
         `${entry.ask.createdAt}/${entry.threadId}/${entry.ask.id}`;
       const cursor = input.cursor;
@@ -1019,6 +1034,7 @@ const make = Effect.gen(function* () {
       const page = sorted.slice(0, 50);
       return {
         entries: page,
+        counts,
         ...(sorted.length > page.length ? { cursor: key(page[page.length - 1]!) } : {}),
       };
     }, lock.withPermit),
@@ -1045,7 +1061,7 @@ const make = Effect.gen(function* () {
       const { ask, workspace } = addTrackedAsk(
         current,
         {
-          question: trackedQuestionLabel(message.text),
+          ...trackedAskContextForMessage(message.text, message.context?.records ?? []),
           askedInMessageId: message.id,
           createdAt: DateTime.formatIso(yield* DateTime.now),
         },

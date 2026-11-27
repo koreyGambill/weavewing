@@ -9,6 +9,8 @@ import {
   type KnownComposerContextRecord,
   type ScopedThreadRef,
   type ThreadContextRecord,
+  type TrackedAsk,
+  trackedQuestionLabel,
   type WaitingItemContextRecord,
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
@@ -26,6 +28,42 @@ const CONTEXT_LINK = new RegExp(
   String.raw`(!?)\[([^\]\n]{0,${MAX_LINK_LABEL_LENGTH}})\]\((${COMPOSER_CONTEXT_HREF_PREFIX}[^\s)]{1,200})\)`,
   "g",
 );
+
+export function trackedAskContextForMessage(
+  text: string,
+  records: ReadonlyArray<ComposerContextRecord>,
+) {
+  const references = records.flatMap((record): NonNullable<TrackedAsk["about"]>[] => {
+    if (record.kind === "waiting-item" && "itemKind" in record)
+      return [{ kind: record.itemKind, key: record.key, ref: record.ref }];
+    if (
+      record.kind === "artifact-answer" &&
+      "artifactId" in record &&
+      (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID ||
+        record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID)
+    )
+      return [{ kind: "question", key: record.questionId, ref: record.questionId }];
+    return [];
+  });
+  const about = references.length === 1 ? references[0] : undefined;
+  const note =
+    about?.kind === "question"
+      ? records.flatMap((record) =>
+          record.kind === "artifact-answer" &&
+          "questionId" in record &&
+          record.questionId === about.key
+            ? [record.note]
+            : [],
+        )[0]
+      : undefined;
+  const plain = stripAttachmentOnlyBootstrapPrompt(
+    replaceComposerContextReferences(text, () => ""),
+  ).trim();
+  return {
+    question: trackedQuestionLabel(plain || note || "", about),
+    ...(about === undefined ? {} : { about }),
+  };
+}
 
 // The digest alone distinguishes producer ids sharing the truncated 48-character slug.
 function fnv1a64(value: string): string {

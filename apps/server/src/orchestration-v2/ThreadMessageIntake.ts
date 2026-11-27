@@ -143,8 +143,10 @@ const markDiscussed = Effect.fn("ThreadMessageIntake.markDiscussed")(function* (
 const recordTrackedMessages = Effect.fn("ThreadMessageIntake.recordTrackedMessages")(function* (
   threadId: ThreadId,
   messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
+  editing = false,
 ) {
   if (
+    !editing &&
     !messages.some(
       (message) => message.context?.trackedAsk || message.context?.discussAnswers?.length,
     )
@@ -152,7 +154,7 @@ const recordTrackedMessages = Effect.fn("ThreadMessageIntake.recordTrackedMessag
     return;
   const workspace = yield* Effect.serviceOption(ThreadWorkspace);
   if (Option.isSome(workspace))
-    yield* workspace.value.recordTrackedMessages(threadId, messages, false);
+    yield* workspace.value.recordTrackedMessages(threadId, messages, false, editing);
 });
 
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
@@ -284,6 +286,7 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
           result.storedEvents.flatMap(({ event }) =>
             event.type === "message.updated" ? [event.payload] : [],
           ),
+          command.type === "queued-run.edit",
         ).pipe(
           Effect.mapError(
             (cause) =>

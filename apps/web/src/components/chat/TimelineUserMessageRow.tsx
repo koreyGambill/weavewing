@@ -1,4 +1,5 @@
 import { TrackedAskMarker } from "../answers/TrackedAskMarker";
+import { TrackSentMessage } from "../answers/TrackSentMessage";
 import { MessageReactionChip } from "./MessageReactionChip";
 import { SenderCard } from "./SenderCard";
 import { InlineAudioPreview } from "../files/InlineAudioPreview";
@@ -762,6 +763,9 @@ function UserTimelineRow({
         floatActions ? "flex-wrap" : "shrink-0",
       )}
     >
+      {row.projectedItem && !folded ? (
+        <TrackSentMessage threadRef={ctx.threadRef} message={row.message} />
+      ) : null}
       {sender && !folded ? (
         <InlineButton
           render={

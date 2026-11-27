@@ -200,6 +200,7 @@ import {
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
 import { useTrackedAnswerDraftStore } from "./answers/trackedAnswerDraft";
+import { openTrackedAnswersSection } from "./answers/AnswersSection";
 import { openInbox, openInboxView } from "./inbox/openInbox";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
 import { useWaitingOnYou } from "./waiting/threadList/waitingOnYou";
@@ -1907,6 +1908,18 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["track", "answer", "question"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
       run: () => useTrackedAnswerDraftStore.getState().toggleTrack(draftKey),
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:show-tracked-answers",
+      title: "Show tracked answers",
+      searchTerms: ["history", "checklist", "answers"],
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      run: () => {
+        const ref = scopeThreadRef(activeThread.environmentId, activeThread.id);
+        useThreadContextSidebarStore.getState().show("todos", { thread: ref });
+        openTrackedAnswersSection(ref);
+      },
     });
   }
 

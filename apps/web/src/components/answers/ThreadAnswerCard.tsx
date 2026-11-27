@@ -17,7 +17,7 @@ function answerCardElementId(id: string) {
   return `thread-answer-${id}`;
 }
 
-function TrackedAnswerBody({
+export function TrackedAnswerBody({
   answer,
   threadRef,
   cwd,

@@ -119,6 +119,10 @@ on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
 Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
 in Settings.
 
+With **Waiting-on-you cards** enabled, press **Cmd+Shift+Y** on macOS or
+**Ctrl+Shift+Y** on Windows and Linux to toggle **Track answer** while the
+composer has focus.
+
 ## Copy pull request references
 
 With a PR open in a tile or on the Pull requests page, use `mod+shift+c`

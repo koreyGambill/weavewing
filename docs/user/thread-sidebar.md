@@ -503,6 +503,20 @@ thread** from its long-press menu on mobile.
 **Thread ID** copies the bare ID for scripts and the `t3` CLI. See
 [keybindings](./keybindings.md) for custom configuration.
 
+## Keep a tracked answer
+
+Enable **Waiting-on-you cards** in **Settings → Labs**. Turn on **Track answer**
+before you send a question, including when you send a follow-up from a card.
+For a message you already sent, choose **Track the answer** from its actions.
+
+When the agent answers, read the card in chat. Choose **Discuss** to write a
+follow-up or **Got it** to close the answer. You can also close it from
+**Waiting on you** above the composer. An unanswered question stays tracked
+until you withdraw it.
+
+Choose **Show tracked answers** in the command palette to find earlier answers.
+Use **Thread** for this conversation or **All** to look across the environment.
+
 ## Inspect agent work
 
 **Limited** means the provider stopped on a usage or rate limit. The conversation

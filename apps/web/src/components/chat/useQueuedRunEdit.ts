@@ -32,12 +32,14 @@ import { Atom } from "effect/reactivity";
 import type { RefObject } from "react";
 import { useAssetUrls } from "../../assets/assetUrls";
 import {
+  composerTargetKey,
   queuedRunEditDraftId,
   useComposerDraftStore,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   type ComposerThreadTarget,
 } from "../../composerDraftStore";
+import { useTrackedAnswerDraftStore, withTrackedAnswerDraft } from "../answers/trackedAnswerDraft";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import {
   awaitAttachmentUploads,
@@ -118,6 +120,8 @@ async function submitQueuedRunEdit(input: {
 }): Promise<string | null> {
   const { environmentId, draftTarget, editing, content } = input;
   const editText = content.prompt.trim();
+  const answerDraftKey = composerTargetKey(draftTarget);
+  const answerDraft = useTrackedAnswerDraftStore.getState().drafts[answerDraftKey];
   const newAttachments = [...content.images, ...content.files];
   const uploadFiles = async (files: ReadonlyArray<ComposerFileAttachment>) => {
     const validateFiles = () => {
@@ -174,6 +178,14 @@ async function submitQueuedRunEdit(input: {
           attachmentId: uploads[editing.existingAttachments.length + index]?.id ?? attachment.id,
         })),
       })?.records ?? [];
+    const context = {
+      version: 1 as const,
+      records: [
+        ...new Map(
+          [...keptRecords, ...newRecords].map((record) => [record.contextId, record] as const),
+        ).values(),
+      ],
+    };
     const result = await input.editQueuedRun({
       environmentId,
       input: {
@@ -183,19 +195,12 @@ async function submitQueuedRunEdit(input: {
         edit: {
           messageId: editing.messageId,
           attachments: uploads,
-          context: {
-            version: 1,
-            records: [
-              ...new Map(
-                [...keptRecords, ...newRecords].map(
-                  (record) => [record.contextId, record] as const,
-                ),
-              ).values(),
-            ],
-          },
+          context: withTrackedAnswerDraft(context, editText, answerDraft) ?? context,
         },
       },
     });
+    if (result._tag === "Success" && answerDraft)
+      useTrackedAnswerDraftStore.getState().clearSent(answerDraftKey, answerDraft);
     return result._tag === "Failure" ? "Could not save the edited queued message." : null;
   } catch (error) {
     return error instanceof Error ? error.message : "Could not save the edited queued message.";
@@ -254,6 +259,7 @@ export function useQueuedRunEdit(input: {
   };
   const clearEditDraft = (runId: RunId) => {
     const target = queuedRunEditDraftId(routeThreadRef, runId);
+    useTrackedAnswerDraftStore.getState().restore(composerTargetKey(target), undefined, []);
     // A save in flight still sends these uploads.
     if (isSaving) useComposerDraftStore.getState().clearComposerContent(target);
     else discardQueuedEditDraft(target);
@@ -267,6 +273,9 @@ export function useQueuedRunEdit(input: {
     const context = serverProjection?.messages.find(
       (message) => message.id === request.messageId,
     )?.context;
+    useTrackedAnswerDraftStore
+      .getState()
+      .restore(composerTargetKey(target), context, serverProjection?.thread.trackedAsks ?? []);
     const referenced = new Set(collectInlineContextIds(sentText));
     const records = (context?.records ?? []).filter((record) => referenced.has(record.contextId));
     // A reply shows above the composer while its message is edited, not as a chip in the text.

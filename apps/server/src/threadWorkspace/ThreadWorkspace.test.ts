@@ -378,6 +378,51 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("keeps a queued edit's ref and allocates a new ref after tracking is turned off", () =>
+  Effect.gen(function* () {
+    const { service } = yield* harness();
+    const original = trackedMessage("queued");
+    yield* service.recordTrackedMessages(threadId, [original], false);
+    const edited = {
+      ...original,
+      context: {
+        version: 1 as const,
+        records: [],
+        trackedAsk: { question: "When does the counter reset?" },
+      },
+    };
+    const kept = yield* service.recordTrackedMessages(threadId, [edited], false, true);
+    expect(kept).toMatchObject([
+      { id: "A1", question: "When does the counter reset?", state: "queued" },
+    ]);
+    const untracked = { ...edited, context: { version: 1 as const, records: [] } };
+    yield* service.recordTrackedMessages(threadId, [untracked], false, true);
+    expect((yield* service.get({ threadId })).asks).toEqual([]);
+    const trackedAgain = yield* service.recordTrackedMessages(threadId, [edited], false, true);
+    expect(trackedAgain).toMatchObject([{ id: "A2", state: "queued" }]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("pages archived tracked answers with counts from the whole environment", () =>
+  Effect.gen(function* () {
+    const { service, threadState } = yield* harness();
+    yield* service.recordTrackedMessages(
+      threadId,
+      Array.from({ length: 52 }, (_, index) => trackedMessage(`message-${index}`)),
+      true,
+    );
+    threadState.archivedAt = at;
+    const first = yield* service.asksRead({ all: true });
+    expect(first.entries).toHaveLength(50);
+    expect(first.counts).toEqual({ owed: 52, toRead: 0, closed: 0 });
+    expect(first.entries.every((row) => row.archived)).toBe(true);
+    const next = yield* service.asksRead({ all: true, cursor: first.cursor! });
+    expect(next.entries).toHaveLength(2);
+    expect(next.cursor).toBeUndefined();
+    expect(new Set([...first.entries, ...next.entries].map((row) => row.ask.id)).size).toBe(52);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("requires handed_off while a ticket is open and reads its live state", () =>
   Effect.gen(function* () {
     const h = yield* harness();

@@ -115,5 +115,12 @@ export const TrackedAnswersPage = Schema.Struct({
     }),
   ),
   cursor: Schema.optional(Schema.String),
+  counts: Schema.optional(
+    Schema.Struct({
+      owed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      toRead: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      closed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
 });
 export type TrackedAnswersPage = typeof TrackedAnswersPage.Type;
