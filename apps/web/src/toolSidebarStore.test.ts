@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { createJSONStorage } from "zustand/middleware";
+import { useThreadContextSidebarStore } from "./threadContextSidebarStore";
+import { useToolSidebarStore } from "./toolSidebarStore";
 
 const SIDE_KEY = "weavewing_tool_sidebar";
 const RAIL_KEY = "t3code:thread-context-sidebar";
@@ -27,14 +30,24 @@ const rail = (view: string, lastTool: string) =>
 const basePanel = (open: boolean, view: string) =>
   stored({ open, view, width: 480, pinned: false, locked: null }, 0);
 
-/** Loads both stores as the app does at start, from `storage`. */
+function setStorage(storage: ReturnType<typeof memoryStorage>) {
+  useToolSidebarStore.persist.setOptions({ storage: createJSONStorage(() => storage) });
+  useThreadContextSidebarStore.persist.setOptions({ storage: createJSONStorage(() => storage) });
+}
+
+/** Loads both stores in startup order, including the one-time rail handoff. */
 async function load(storage: ReturnType<typeof memoryStorage>) {
-  vi.resetModules();
-  vi.stubGlobal("localStorage", storage);
-  vi.stubGlobal("window", { localStorage: storage });
-  const { useThreadContextSidebarStore } = await import("./threadContextSidebarStore");
-  const { useToolSidebarStore } = await import("./toolSidebarStore");
-  vi.unstubAllGlobals();
+  // Reset away from the fixture because setState writes the persisted document.
+  setStorage(memoryStorage({}));
+  useToolSidebarStore.setState(useToolSidebarStore.getInitialState(), true);
+  useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState(), true);
+  // Empty storage leaves the rail handoff pending even if the next snapshot is unreadable.
+  useToolSidebarStore.persist.clearStorage();
+  await useToolSidebarStore.persist.rehydrate();
+
+  setStorage(storage);
+  await useToolSidebarStore.persist.rehydrate();
+  await useThreadContextSidebarStore.persist.rehydrate();
   const panel = useToolSidebarStore.getState();
   return {
     panel: { open: panel.open, view: panel.view, width: panel.width, threadView: panel.threadView },
@@ -84,7 +97,6 @@ describe("upgrading from the left rail", () => {
     const storage = memoryStorage({ [RAIL_KEY]: rail("artifacts", "artifacts") });
     const first = await load(storage);
     expect(first.panel).toMatchObject({ open: true, view: "artifacts" });
-    const { useToolSidebarStore } = await import("./toolSidebarStore");
     vi.stubGlobal("document", { activeElement: null });
     vi.stubGlobal("HTMLElement", Object);
     useToolSidebarStore.getState().dispatch({ type: "close" });
@@ -99,7 +111,6 @@ describe("upgrading from the left rail", () => {
   it("stores Checklist and Activity under the ids older builds know and reads them back", async () => {
     const storage = memoryStorage({});
     await load(storage);
-    const { useToolSidebarStore } = await import("./toolSidebarStore");
     vi.stubGlobal("document", { activeElement: null });
     vi.stubGlobal("HTMLElement", Object);
     useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" });
@@ -179,6 +190,5 @@ it.each([
   await load(storage);
   expect(read(storage.values.get(SIDE_KEY))?.state.hidden).toEqual(expected);
   await load(storage);
-  const { useToolSidebarStore } = await import("./toolSidebarStore");
   expect(useToolSidebarStore.getState().hidden).toEqual(expected);
 });
