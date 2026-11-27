@@ -73,8 +73,8 @@ export interface SideAreaState {
   readonly maximized: boolean;
   /** The last thread view shown, which the thread views shortcut opens. */
   readonly threadView: ThreadViewId;
-  /** A thread being navigated to whose arrival must not dismiss the view opened for it. */
-  readonly arrival: string | null;
+  /** A thread a view was opened for while navigating to it; arriving there keeps it open. */
+  readonly arrival: ScopedThreadRef | null;
 }
 
 export const INITIAL_SIDE_AREA: SideAreaState = {
@@ -88,6 +88,12 @@ export const INITIAL_SIDE_AREA: SideAreaState = {
   arrival: null,
 };
 
+/** The route's thread and the thread the side area follows there, such as a focused side chat. */
+export interface SideAreaContext {
+  readonly route: ScopedThreadRef | null;
+  readonly selected: ScopedThreadRef | null;
+}
+
 export type SideAreaAction =
   | { type: "toggle" }
   /**
@@ -98,12 +104,13 @@ export type SideAreaAction =
       type: "show";
       view: ViewId;
       thread?: ScopedThreadRef;
-      lock?: boolean;
       /** Set while navigating to `thread`, so arriving there keeps the view open. */
       arriving?: boolean;
+      /** Where the request was made: the route's thread and the thread the panel follows there. */
+      context?: SideAreaContext;
     }
   /** The route moved to another thread: closes unless pinned or this is an awaited arrival. */
-  | { type: "routeChanged"; threadKey: string | null }
+  | { type: "routeChanged"; context: SideAreaContext }
   /** Opens on the last thread view, or closes when a thread view is showing. */
   | { type: "toggleThreadViews" }
   /** Opens on `view` for `thread`, or closes when it already shows that. */
@@ -217,12 +224,16 @@ export function adoptRetiredRail(state: SideAreaState, rail: RetiredRailSelectio
   return { ...state, open: true, view: shown, threadView };
 }
 
-function threadKey(ref: ScopedThreadRef | null) {
-  return ref ? `${ref.environmentId}:${ref.threadId}` : null;
-}
-
 function sameThread(a: ScopedThreadRef | null, b: ScopedThreadRef | null) {
   return a?.environmentId === b?.environmentId && a?.threadId === b?.threadId;
+}
+
+/**
+ * The lock that shows `thread`: none when the side area already follows it, otherwise `thread`
+ * itself, so the header names the thread a view was opened for.
+ */
+function targetFor(thread: ScopedThreadRef, selected: ScopedThreadRef | null) {
+  return sameThread(selected, thread) ? null : thread;
 }
 
 function withView(state: SideAreaState, view: ViewId): SideAreaState {
@@ -234,25 +245,19 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
     case "toggle":
       return { ...state, open: !state.open, maximized: false };
     case "show": {
-      const { thread } = action;
-      const locked =
-        thread === undefined
-          ? state.locked
-          : action.lock
-            ? thread
-            : sameThread(state.locked, thread)
-              ? state.locked
-              : null;
-      return {
-        ...withView(state, action.view),
-        open: true,
-        locked,
-        arrival: thread !== undefined && action.arriving ? threadKey(thread) : state.arrival,
-      };
+      const opened = { ...withView(state, action.view), open: true };
+      const { thread, context } = action;
+      if (thread === undefined) return opened;
+      // Navigating there: the target is settled on arrival, against the thread followed there.
+      if (action.arriving && !sameThread(context?.route ?? null, thread)) {
+        return { ...opened, arrival: thread };
+      }
+      return { ...opened, locked: targetFor(thread, context?.selected ?? null), arrival: null };
     }
     case "routeChanged": {
-      if (state.arrival !== null && state.arrival === action.threadKey) {
-        return { ...state, arrival: null };
+      const { arrival } = state;
+      if (arrival !== null && sameThread(arrival, action.context.route)) {
+        return { ...state, locked: targetFor(arrival, action.context.selected), arrival: null };
       }
       const left = { ...state, arrival: null };
       return state.pinned ? left : { ...left, open: false, maximized: false };

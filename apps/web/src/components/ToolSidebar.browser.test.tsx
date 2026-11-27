@@ -97,8 +97,6 @@ function widthOf(selector: string) {
   return element!.getBoundingClientRect().width;
 }
 
-// First in the file: the title menu reads thread shells, and the fake shell stream keeps serving the
-// first mounted fixture's shells to later tests in the same file.
 it("shows the menu's thread in Checklist, locked, while a side chat of it is focused", async () => {
   const [main, side] = [threadWithHistory("menu-main", 1), threadWithHistory("menu-side", 1)];
   const { stack, screen } = await mountApp([main, side], 1280);
@@ -364,6 +362,29 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   expect(interrupted).toEqual([]);
   expect(maxThreadsInFlight).toBe(1);
   expect(useToolSidebarStore.getState().open).toBe(true);
+});
+
+it("shows the thread a view was opened for when its destination focuses another thread", async () => {
+  const [alpha, beta] = [threadWithHistory("target-alpha", 1), threadWithHistory("target-beta", 1)];
+  const { stack, router } = await mountApp([alpha, beta], 1280);
+  await using _app = stack;
+  const betaRef = scopeThreadRef(ENVIRONMENT_ID, beta.id);
+  // Beta's tiles focus a side chat of Alpha, so arriving there selects Alpha.
+  await act(() => useRightPanelStore.getState().openSideChat(betaRef, alpha.id));
+  await act(async () => {
+    useThreadContextSidebarStore
+      .getState()
+      .show("artifacts", { thread: betaRef, artifactId: "review", arriving: true });
+    await router.navigate({ to: `/${ENVIRONMENT_ID}/${beta.id}` });
+  });
+  const panel = page.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel.getByText(beta.title, { exact: true })).toBeVisible();
+  expect(useToolSidebarStore.getState()).toMatchObject({
+    open: true,
+    view: "artifacts",
+    locked: betaRef,
+    arrival: null,
+  });
 });
 
 it("keeps a view opened for another thread open when the navigation to it arrives", async () => {

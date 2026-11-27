@@ -95,36 +95,62 @@ describe("side area", () => {
     expect(lockedHere.open).toBe(false);
   });
 
-  it("opens a view about a thread following it, locked only on request", () => {
+  it("opens a view for a thread, following it when the side area does and locking otherwise", () => {
+    const followingA = { route: threadA, selected: threadA };
     const lockedB = run(INITIAL_SIDE_AREA, { type: "lock", thread: threadB });
-    expect(run(lockedB, { type: "show", view: "todos", thread: threadA })).toMatchObject({
+    const show = (
+      thread: typeof threadA,
+      context: { route: typeof threadA; selected: typeof threadA },
+    ) => ({ type: "show", view: "todos", thread, context }) as const;
+    expect(run(lockedB, show(threadA, followingA))).toMatchObject({
       open: true,
       view: "todos",
       locked: null,
     });
-    expect(run(lockedB, { type: "show", view: "links", thread: threadB }).locked).toEqual(threadB);
+    // The route shows A while a side chat of it, B, is focused: a view for A locks to A.
     expect(
-      run(INITIAL_SIDE_AREA, { type: "show", view: "todos", thread: threadA, lock: true }).locked,
+      run(INITIAL_SIDE_AREA, show(threadA, { route: threadA, selected: threadB })).locked,
     ).toEqual(threadA);
+    expect(run(INITIAL_SIDE_AREA, show(threadB, followingA)).locked).toEqual(threadB);
     expect(run(lockedB, { type: "show", view: "inbox" }).locked).toEqual(threadB);
   });
 
-  it("keeps a view opened for a thread being navigated to, once, and closes on other switches", () => {
+  it("settles a view opened while navigating on arrival, against the thread followed there", () => {
     const opened = run(INITIAL_SIDE_AREA, {
       type: "show",
       view: "artifacts",
       thread: threadB,
       arriving: true,
+      context: { route: threadA, selected: threadA },
     });
-    const arrived = run(opened, { type: "routeChanged", threadKey: "env:b" });
-    expect(arrived).toMatchObject({ open: true, view: "artifacts", arrival: null });
-    expect(run(arrived, { type: "routeChanged", threadKey: "env:a" }).open).toBe(false);
-    expect(run(opened, { type: "routeChanged", threadKey: "env:a" })).toMatchObject({
+    expect(opened).toMatchObject({ open: true, arrival: threadB, locked: null });
+    const arrived = run(opened, {
+      type: "routeChanged",
+      context: { route: threadB, selected: threadB },
+    });
+    expect(arrived).toMatchObject({ open: true, view: "artifacts", arrival: null, locked: null });
+    const intoSideChat = run(opened, {
+      type: "routeChanged",
+      context: { route: threadB, selected: threadA },
+    });
+    expect(intoSideChat).toMatchObject({ open: true, arrival: null, locked: threadB });
+    const elsewhere = { route: threadA, selected: threadA };
+    expect(run(arrived, { type: "routeChanged", context: elsewhere }).open).toBe(false);
+    expect(run(opened, { type: "routeChanged", context: elsewhere })).toMatchObject({
       open: false,
       arrival: null,
     });
+    // Already there: nothing to wait for, so it settles at once.
+    const here = run(INITIAL_SIDE_AREA, {
+      type: "show",
+      view: "artifacts",
+      thread: threadB,
+      arriving: true,
+      context: { route: threadB, selected: threadA },
+    });
+    expect(here).toMatchObject({ arrival: null, locked: threadB });
     const pinned = run(INITIAL_SIDE_AREA, { type: "show", view: "links" }, { type: "pin" });
-    expect(run(pinned, { type: "routeChanged", threadKey: "env:a" }).open).toBe(true);
+    expect(run(pinned, { type: "routeChanged", context: elsewhere }).open).toBe(true);
   });
 
   it("toggles thread views on the last one shown, skipping global views", () => {

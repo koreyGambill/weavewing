@@ -9,7 +9,7 @@ import {
 } from "./threadContextSidebar";
 import { applyTileAction, syncTileLayout } from "./threadTileLayout";
 import { useThreadContextSidebarStore } from "./threadContextSidebarStore";
-import { useToolSidebarStore } from "./toolSidebarStore";
+import { provideSideAreaContext, useToolSidebarStore } from "./toolSidebarStore";
 
 const owner = { environmentId: EnvironmentId.make("local"), threadId: ThreadId.make("owner") };
 const child = { environmentId: owner.environmentId, threadId: ThreadId.make("child") };
@@ -251,32 +251,33 @@ describe("thread views store", () => {
     useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
   };
 
-  const lockedElsewhere = { locked: owner };
-  // One row per entry point that opened a rail view: [entry, view, target, side panel before, after].
+  const lockedElsewhere = { locked: child };
+  // One row per entry point that opened a rail view: [entry, view, target, side panel before,
+  // after]. The owner thread's route is open and the side panel follows it.
   it.each([
     ["palette: open artifacts", "artifacts", {}, {}, { view: "artifacts", locked: null }],
     ["palette: open environments", "environments", {}, {}, { view: "environments" }],
-    ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: owner }],
+    ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: child }],
     ["palette: open automations", "automations", {}, {}, { view: "automations" }],
     ["palette: open evidence", "evidence", {}, {}, { view: "evidence" }],
     [
-      "thread menu: todos, open thread",
+      "title menu: todos, the followed thread",
       "todos",
-      { thread: child },
+      { thread: owner },
       lockedElsewhere,
       { view: "todos", locked: null },
     ],
     [
-      "thread menu: todos, other thread",
+      "title menu: todos, another thread",
       "todos",
-      { thread: child, lock: true },
+      { thread: child },
       {},
       { view: "todos", locked: child },
     ],
     [
-      "thread menu: automations, other thread",
+      "title menu: automations, another thread",
       "automations",
-      { thread: child, lock: true },
+      { thread: child },
       {},
       { view: "automations", locked: child },
     ],
@@ -289,32 +290,40 @@ describe("thread views store", () => {
       { view: "inbox" },
     ],
     [
-      "review reminder",
+      "review reminder, from another thread",
       "artifacts",
-      { thread: child, artifactId: "r1" },
+      { thread: child, artifactId: "r1", arriving: true },
+      {},
+      { view: "artifacts", locked: null, arrival: child },
+    ],
+    [
+      "review reminder, on its thread",
+      "artifacts",
+      { thread: owner, artifactId: "r1", arriving: true },
       lockedElsewhere,
-      { view: "artifacts", locked: null },
+      { view: "artifacts", locked: null, arrival: null },
     ],
     [
       "review panel, reviews button",
       "artifacts",
-      { thread: child },
-      { locked: child },
-      { view: "artifacts", locked: child },
+      { thread: owner },
+      lockedElsewhere,
+      { view: "artifacts", locked: null },
     ],
     [
-      "todos summary, waiting strip row",
+      "todos summary inside a locked panel",
       "todos",
       { thread: child },
-      {},
-      { view: "todos", locked: null },
+      lockedElsewhere,
+      { view: "todos", locked: child },
     ],
+    ["waiting strip row", "todos", { thread: owner }, {}, { view: "todos", locked: null }],
     ["evidence chat row", "evidence", {}, {}, { view: "evidence" }],
     [
       "links: open in environments",
       "environments",
       { thread: child, environmentId: "e" },
-      { locked: child },
+      lockedElsewhere,
       { view: "environments", locked: child },
     ],
   ] as const)("opens %s in the side panel", (_entry, view, target, before, after) => {
@@ -322,6 +331,9 @@ describe("thread views store", () => {
     // The side panel remembers what had focus when it opened.
     vi.stubGlobal("document", { activeElement: null });
     vi.stubGlobal("HTMLElement", Object);
+    using _context = {
+      [Symbol.dispose]: provideSideAreaContext(() => ({ route: owner, selected: owner })),
+    };
     useToolSidebarStore.setState(before);
     useThreadContextSidebarStore.getState().show(view, target);
     expect(useToolSidebarStore.getState()).toMatchObject({ open: true, ...after });

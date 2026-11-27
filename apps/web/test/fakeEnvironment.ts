@@ -417,6 +417,19 @@ const json = (body: unknown, status = 200) =>
 // Keyed by thread id: a live thread subscription's queue, for pushing events to it.
 const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStreamItem>>();
 let shellSubscriber: Queue.Queue<OrchestrationV2ShellStreamItem> | null = null;
+
+function shellSnapshot(): OrchestrationV2ShellStreamItem {
+  return {
+    kind: "snapshot",
+    snapshot: {
+      schemaVersion: 1,
+      snapshotSequence: sequence,
+      projects,
+      threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
+      archivedThreads: [],
+    },
+  };
+}
 let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
 let threads: ReadonlyArray<FakeThread> = [];
 let dispatched: OrchestrationV2Command[] = [];
@@ -476,19 +489,7 @@ const handlers: Record<string, (input: never) => unknown> = {
     }),
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () =>
     subscribe<OrchestrationV2ShellStreamItem>(
-      [
-        {
-          kind: "snapshot",
-          snapshot: {
-            schemaVersion: 1,
-            snapshotSequence: sequence,
-            projects,
-            threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
-            archivedThreads: [],
-          },
-        },
-        { kind: "synchronized" },
-      ],
+      [shellSnapshot(), { kind: "synchronized" }],
       (queue) => {
         shellSubscriber = queue;
         return () => {
@@ -631,6 +632,9 @@ export function installFakeEnvironment(
     })),
   ];
   holdCommand = options?.holdCommand ?? (() => false);
+  // A shell subscription from an earlier test outlives it in the app's atom registry; send it the
+  // new fixtures, or that test's threads keep answering for this one's.
+  if (shellSubscriber !== null) Effect.runSync(Queue.offer(shellSubscriber, shellSnapshot()));
   globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
     if (url.origin !== window.location.origin) return realFetch(input, init);

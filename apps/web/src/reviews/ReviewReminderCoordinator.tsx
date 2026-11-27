@@ -56,8 +56,6 @@ function EnvironmentReviewReminders({
   const settings = useClientSettings();
   const navigate = useNavigate();
   const active = useParams({ strict: false });
-  const activeEnvironmentId = active.environmentId;
-  const activeThreadId = active.threadId;
   const artifactSelection = useThreadContextSidebarStore((state) => state.artifactSelection);
   const side = useToolSidebarStore(
     useShallow(({ open, view, locked }) => ({ open, view, locked })),
@@ -84,12 +82,10 @@ function EnvironmentReviewReminders({
       gate.sync(due, looking ? shownReviewId : undefined, (review) => {
         const { notificationMode, inAppNotificationsEnabled } = settings;
         const open = () => {
-          const elsewhere =
-            activeEnvironmentId !== environmentId || activeThreadId !== review.threadId;
           useThreadContextSidebarStore.getState().show("artifacts", {
             thread: scopeThreadRef(environmentId, review.threadId),
             artifactId: review.id,
-            arriving: elsewhere,
+            arriving: true,
           });
           void navigate({
             to: "/$environmentId/$threadId",
@@ -152,16 +148,7 @@ function EnvironmentReviewReminders({
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", sync);
     };
-  }, [
-    activeEnvironmentId,
-    activeThreadId,
-    due,
-    environmentId,
-    gate,
-    navigate,
-    settings,
-    shownReviewId,
-  ]);
+  }, [due, environmentId, gate, navigate, settings, shownReviewId]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears native notifications and toasts on unmount or when notification preferences change
   useEffect(() => {

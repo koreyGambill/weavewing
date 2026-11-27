@@ -15,10 +15,11 @@ export type InboxSelection = {
 };
 
 export interface ShowTarget {
-  /** The thread the request is about; the view follows the selection unless `lock` is set. */
+  /**
+   * The thread the view is for. The side panel follows it when it already follows that thread,
+   * and otherwise locks to it.
+   */
   readonly thread?: ScopedThreadRef;
-  /** Locks the side panel to `thread`, for a thread other than the selected one. */
-  readonly lock?: boolean;
   /** The opener is navigating to `thread`; arriving there keeps the view open. */
   readonly arriving?: boolean;
   readonly artifactId?: string;
@@ -126,7 +127,6 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
           ...(target.thread
             ? {
                 thread: target.thread,
-                lock: target.lock === true,
                 arriving: target.arriving === true,
               }
             : {}),

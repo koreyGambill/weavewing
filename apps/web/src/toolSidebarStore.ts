@@ -9,6 +9,7 @@ import {
   type RetiredRailSelection,
   transitionSideArea,
   type SideAreaAction,
+  type SideAreaContext,
   type SideAreaState,
 } from "./components/ToolSidebar.logic";
 
@@ -27,6 +28,17 @@ let storedBeforeHandoff = false;
 // Counts requests to open a view, so a click that opened one is not also a click outside it.
 let openRequests = 0;
 
+// Where a request to open a view is made from; the mounted side area answers it.
+let readContext = (): SideAreaContext => ({ route: null, selected: null });
+
+/** Lets the side area say which route is open and which thread it follows; returns the undo. */
+export function provideSideAreaContext(reader: () => SideAreaContext): () => void {
+  readContext = reader;
+  return () => {
+    if (readContext === reader) readContext = () => ({ route: null, selected: null });
+  };
+}
+
 /** How many requests to open a view have been made; changes when an action opens or switches one. */
 export function sideAreaOpenRequests(): number {
   return openRequests;
@@ -43,7 +55,11 @@ export const useToolSidebarStore = create<SideAreaStore>()(
   persist(
     (set, get) => ({
       ...INITIAL_SIDE_AREA,
-      dispatch: (action) => {
+      dispatch: (request) => {
+        const action: SideAreaAction =
+          request.type === "show" && request.thread !== undefined && request.context === undefined
+            ? { ...request, context: readContext() }
+            : request;
         const wasOpen = get().open;
         const next = transitionSideArea(get(), action);
         if (action.type === "show" || action.type === "toggleView" || next.open !== wasOpen) {

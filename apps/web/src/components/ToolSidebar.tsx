@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useRouterState } from "@tanstack/react-router";
+import { useRouter, useRouterState } from "@tanstack/react-router";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
@@ -27,8 +27,10 @@ import { useThreadShell } from "../state/entities";
 import { DeferEnvironmentQueries } from "../state/query";
 import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { readSelectedThreadRef } from "../threadContextSidebar";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import {
+  provideSideAreaContext,
   sideAreaOpenRequests,
   takeSideAreaFocusRequest,
   useToolSidebarStore,
@@ -132,12 +134,18 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     select: (state) => threadKey(resolveThreadRouteRef(state.matches.at(-1)?.params ?? {})),
   });
   const seenThreadKey = useRef(routeThreadKey);
+  const router = useRouter();
+  // The route's thread, and the thread the side area follows there: a focused side chat's, say.
+  const readContext = useStableCallback(() => {
+    const route = resolveThreadRouteRef(router.state.matches.at(-1)?.params ?? {});
+    return { route, selected: readSelectedThreadRef(route) };
+  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area unless the view was opened for that arrival.
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
-    useToolSidebarStore.getState().dispatch({ type: "routeChanged", threadKey: routeThreadKey });
-  }, [routeThreadKey]);
+    useToolSidebarStore.getState().dispatch({ type: "routeChanged", context: readContext() });
+  }, [routeThreadKey, readContext]);
   const sidebar = useSidebar();
   // A shortcut that opens the side area on a phone shows it, so the thread drawer gives way.
   const openFromShortcut = useStableCallback((action: SideAreaAction) => {
@@ -151,6 +159,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
+    const stopContext = provideSideAreaContext(readContext);
     const toggle = () => openFromShortcut({ type: "toggle" });
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
@@ -194,6 +203,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       },
     );
     return () => {
+      stopContext();
       stopObserving();
       stopCommands();
       stopEscape();

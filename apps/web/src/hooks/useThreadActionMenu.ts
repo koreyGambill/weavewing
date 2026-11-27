@@ -1,6 +1,4 @@
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
-import { resolveThreadRouteRef } from "../threadRoutes";
-import { readSelectedThreadRef } from "../threadContextSidebar";
 import { openChangeThreadFolder } from "../components/chat/changeThreadFolderDialogState";
 import { nextThreadGlyphSeed } from "@t3tools/client-runtime/thread-glyphs";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -210,17 +208,7 @@ export function useThreadActionMenu(input: {
           return;
         case "todos":
         case "automations": {
-          const selected = readSelectedThreadRef(
-            resolveThreadRouteRef(router.state.matches.at(-1)?.params ?? {}),
-          );
-          // The side panel follows the selected thread, such as a focused side chat; for any
-          // other thread it locks, so its header names the thread it shows.
-          useThreadContextSidebarStore.getState().show(action, {
-            thread: threadRef,
-            lock:
-              selected?.environmentId !== threadRef.environmentId ||
-              selected.threadId !== threadRef.threadId,
-          });
+          useThreadContextSidebarStore.getState().show(action, { thread: threadRef });
           return;
         }
         case "changes":
