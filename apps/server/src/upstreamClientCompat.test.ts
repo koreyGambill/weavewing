@@ -29,6 +29,7 @@ import {
   TERMINAL_WORKSPACE_CHANGED_ERROR_CAPABILITY,
   TerminalCwdStatError,
   TerminalWorkspaceChangedError,
+  waitingTotal,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -42,6 +43,7 @@ import * as AST from "effect/SchemaAST";
 
 import * as Upstream from "./upstreamClientCompat.snapshot.js";
 import type * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import { trackedAnswerWireSamples } from "./upstreamClientCompat.trackedAnswers.ts";
 import {
   errorForClient,
   hidesScheduledTask,
@@ -781,6 +783,215 @@ describe("upstream client wire compatibility", () => {
       expect(mapped.message).toBe(`Failed to access terminal cwd: ${moved.message}`);
     }),
   );
+
+  describe("tracked answer payloads", () => {
+    const samples = trackedAnswerWireSamples();
+    const {
+      subscribeThread,
+      subscribeShell,
+      dispatchCommand,
+      getThreadProjection,
+      launchThread,
+      getTurnItem,
+    } = ORCHESTRATION_V2_WS_METHODS;
+    const { event, projection, trackedProjection } = samples;
+    const bareSnapshot = { snapshotSequence: 1, projection };
+    const trackedSnapshot = { ...bareSnapshot, projection: trackedProjection };
+
+    function expectUpstreamDecode(
+      name: string,
+      fork: Schema.Top,
+      upstream: Schema.Top,
+      enriched: unknown,
+      plain: unknown,
+    ) {
+      const sent = toWire(fork, enriched);
+      const baseline = toWire(fork, plain);
+      expect(sent, name).toBeDefined();
+      expect(baseline, name).toBeDefined();
+      expect(sent, name).not.toEqual(baseline);
+      const received = fromWire(upstream, sent);
+      expect(Exit.isSuccess(received), `${name}: ${String(received)}`).toBe(true);
+      expect(received, name).toEqual(fromWire(upstream, baseline));
+    }
+
+    function response(tag: string, enriched: unknown, plain: unknown) {
+      const map = responseMappers[tag];
+      expectUpstreamDecode(
+        tag,
+        successOf(forkRpcs.get(tag)!),
+        successOf(upstreamRpcs.get(tag)!),
+        map ? map(enriched as never, upstreamClient) : enriched,
+        map ? map(plain as never, upstreamClient) : plain,
+      );
+    }
+
+    function http(endpoint: string, enriched: unknown, plain: unknown) {
+      const key = `orchestration.${endpoint}`;
+      expectUpstreamDecode(
+        key,
+        anyOf(forkEndpoints.get(key)!.success),
+        anyOf(upstreamEndpoints.get(key)!.success),
+        enriched,
+        plain,
+      );
+    }
+
+    it("accepts a subscription from upstream and sends a snapshot without answer bodies", () => {
+      const request = { threadId: samples.threadId, requestCompletionMarker: true };
+      const wire = toWire(upstreamRpcs.get(subscribeThread)!.payloadSchema, request);
+      expect(wire).toEqual(request);
+      expect(fromWire(forkRpcs.get(subscribeThread)!.payloadSchema, wire)).toEqual(
+        Exit.succeed(request),
+      );
+      const snapshot = { kind: "snapshot" as const, ...trackedSnapshot };
+      const sent = toWire(
+        successOf(forkRpcs.get(subscribeThread)!),
+        responseForClient[subscribeThread](snapshot, upstreamClient),
+      );
+      expect(sent).not.toHaveProperty("projection.thread.trackedAsks");
+      response(subscribeThread, snapshot, { kind: "snapshot", ...bareSnapshot });
+      expect(
+        fromWire(successOf(upstreamRpcs.get(subscribeThread)!), { kind: "synchronized" }),
+      ).toEqual(Exit.succeed({ kind: "synchronized" }));
+    });
+
+    it("preserves the shell's legacy waiting total alongside one owed and one answered ask", () => {
+      const { shell, trackedShell } = samples;
+      const base = { kind: "thread.updated", location: "active", sequence: 2 };
+      response(subscribeShell, { ...base, thread: trackedShell }, { ...base, thread: shell });
+      expect(trackedShell.waitingAnswers?.map(({ state }) => state)).toEqual(["answered", "owed"]);
+      expect(trackedShell.waitingCounts).toMatchObject({ answer: 1, owed: 1, live: 1 });
+      expect(waitingTotal(trackedShell.waitingCounts)).toBe(1);
+    });
+
+    it("decodes answer bodies on the existing snapshot, completion marker, and tags event", () => {
+      const { trackedAsks } = samples;
+      const thread = { ...trackedProjection.thread, trackedAsks };
+      response(
+        subscribeThread,
+        { kind: "snapshot", ...trackedSnapshot, projection: { ...trackedProjection, thread } },
+        { kind: "snapshot", ...bareSnapshot },
+      );
+      response(subscribeThread, { kind: "synchronized", trackedAsks }, { kind: "synchronized" });
+      const tags = { ...event, type: "thread.tags-updated" };
+      const frame = { kind: "event", sequence: 2 };
+      response(
+        subscribeThread,
+        { ...frame, event: { ...tags, payload: trackedProjection.thread } },
+        { ...frame, event: { ...tags, payload: projection.thread } },
+      );
+      response(
+        subscribeThread,
+        { ...frame, event: { ...tags, payload: thread } },
+        { ...frame, event: { ...tags, payload: projection.thread } },
+      );
+    });
+
+    it("decodes the tracking mark and explicit clear in message and turn-item events", () => {
+      const frame = { kind: "event", sequence: 3 };
+      const messageEvent = { ...event, type: "message.updated" };
+      for (const [index, payload] of trackedProjection.messages.entries()) {
+        response(
+          subscribeThread,
+          { ...frame, event: { ...messageEvent, payload } },
+          { ...frame, event: { ...messageEvent, payload: projection.messages[index] } },
+        );
+      }
+      const turnItem = { ...event, type: "turn-item.updated" };
+      for (const [index, payload] of trackedProjection.turnItems.entries()) {
+        response(
+          subscribeThread,
+          { ...frame, event: { ...turnItem, payload } },
+          { ...frame, event: { ...turnItem, payload: projection.turnItems[index] } },
+        );
+      }
+    });
+
+    it("decodes tracking metadata and message contexts in the orchestration read model", () => {
+      response(getThreadProjection, trackedProjection, projection);
+      const launched = { threadId: samples.threadId, resumed: false };
+      response(
+        launchThread,
+        { ...launched, projection: trackedProjection },
+        { ...launched, projection },
+      );
+      for (const [index, item] of trackedProjection.turnItems.entries()) {
+        response(getTurnItem, { item }, { item: projection.turnItems[index] });
+      }
+      http("threadSnapshot", trackedSnapshot, bareSnapshot);
+      const bounded = { historyCursor: null, hasMoreHistory: false, latestLocalTurnOrdinal: null };
+      http(
+        "threadBoundedSnapshot",
+        { ...bounded, ...trackedSnapshot },
+        { ...bounded, ...bareSnapshot },
+      );
+      const transcript = {
+        threadId: samples.threadId,
+        title: projection.thread.title,
+        updatedAt: projection.updatedAt,
+      };
+      http(
+        "threadTranscript",
+        { ...transcript, items: trackedProjection.visibleTurnItems },
+        { ...transcript, items: projection.visibleTurnItems },
+      );
+      const history = { snapshotSequence: 1, nextCursor: null, hasMoreHistory: false };
+      http(
+        "threadHistoryPage",
+        { ...history, items: trackedProjection.visibleTurnItems },
+        { ...history, items: projection.visibleTurnItems },
+      );
+    });
+
+    it("accepts upstream message dispatch and queued edit commands without tracking fields", () => {
+      const upstream = upstreamRpcs.get(dispatchCommand)!;
+      for (const command of samples.commands) {
+        const wire = toWire(upstream.payloadSchema, command);
+        expect(wire).toEqual(command);
+        const expected =
+          command.type === "message.dispatch" ? { ...command, origin: { kind: "user" } } : command;
+        expect(fromWire(forkRpcs.get(dispatchCommand)!.payloadSchema, wire)).toEqual(
+          Exit.succeed(expected),
+        );
+      }
+    });
+
+    it("decodes provider availability in server config snapshots", () => {
+      const { config, trackedConfig } = samples;
+      const providerConfig = { ...config, providers: trackedConfig.providers };
+      response(WS_METHODS.serverGetConfig, providerConfig, config);
+      const snapshot = { version: 1, type: "snapshot" };
+      response(
+        WS_METHODS.subscribeServerConfig,
+        { ...snapshot, config: providerConfig },
+        { ...snapshot, config },
+      );
+    });
+
+    it("drops the fork keybinding and keeps the known binding", () => {
+      const { config, trackedConfig } = samples;
+      const keybindingConfig = { ...config, keybindings: trackedConfig.keybindings };
+      response(WS_METHODS.serverGetConfig, keybindingConfig, config);
+      const keys = { version: 1, type: "keybindingsUpdated" };
+      response(
+        WS_METHODS.subscribeServerConfig,
+        { ...keys, payload: { keybindings: trackedConfig.keybindings, issues: config.issues } },
+        { ...keys, payload: { keybindings: config.keybindings, issues: config.issues } },
+      );
+    });
+
+    it("decodes provider session availability events", () => {
+      for (const type of ["provider-session.attached", "provider-session.updated"]) {
+        const frame = { kind: "event", sequence: 4 };
+        response(
+          subscribeThread,
+          { ...frame, event: { ...event, type, payload: trackedProjection.providerSessions[0] } },
+          { ...frame, event: { ...event, type, payload: projection.providerSessions[0] } },
+        );
+      }
+    });
+  });
 
   it("sends upstream clients every assistant text part as a final answer", () => {
     const at = DateTime.makeUnsafe("2026-11-13T10:00:00Z");
