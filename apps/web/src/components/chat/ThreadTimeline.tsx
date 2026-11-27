@@ -10,10 +10,15 @@ import {
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
 import { useThreadEvidence } from "../../state/evidence";
-import { useThreadHasSubagents, useThreadWaitsOnQa } from "../../state/entities";
+import {
+  useThreadHasSubagents,
+  useThreadWaitingTaskRefs,
+  useThreadWaitsOnQa,
+} from "../../state/entities";
 import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
 import { placedLandingIds, timelineMayHoldQa, withLandingCards } from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
+import { withUnplacedTaskCards } from "../tasks/taskPlacement.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
 /**
@@ -73,10 +78,15 @@ export function ThreadTimeline({
       : null,
     placedLandingIds(plainEntries),
   );
+  const waitingTaskRefs = useThreadWaitingTaskRefs(threadDetailRef);
+  const withTasks =
+    entriesInput.waitingCards === true && waitingTaskRefs !== ""
+      ? withUnplacedTaskCards(plainEntries, waitingTaskRefs.split(","), historyComplete)
+      : plainEntries;
   const entries =
     evidence.data === null || threadDetailRef === null
-      ? plainEntries
-      : withLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
+      ? withTasks
+      : withLandingCards(threadDetailRef.threadId, withTasks, evidence.data.landings);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({

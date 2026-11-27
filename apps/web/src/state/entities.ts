@@ -270,6 +270,18 @@ export function useThreadWaitsOnQa(ref: ScopedThreadRef | null): boolean {
   );
 }
 
+/**
+ * The refs of the thread's user tasks the strip counts as waiting, joined by commas so the value
+ * stays equal while they do; empty for none.
+ */
+export function useThreadWaitingTaskRefs(ref: ScopedThreadRef | null): string {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_SHELL_ATOM : environmentThreadShells.quietThreadShellAtom(ref),
+    (shell) =>
+      (shell?.waiting ?? []).flatMap((item) => (item.kind === "task" ? [item.ref] : [])).join(","),
+  );
+}
+
 /** The detail's live visit mark, which the thread structure leaves out. */
 export function useThreadLastVisitedAt(ref: ScopedThreadRef | null): DateTime.Utc | null {
   return useAtomValue(
