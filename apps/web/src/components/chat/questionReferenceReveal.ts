@@ -69,6 +69,48 @@ export function useQuestionReferenceMark(
   );
 }
 
+/** The nearest ancestor of `element` that scrolls vertically, or null when none does. */
+function scrollingAncestor(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight)
+      return node;
+  }
+  return null;
+}
+
+/**
+ * Scrolls a row of a timeline that renders in another one's flow, such as an inline side chat,
+ * into view through its nearest scrolling ancestor, or its answer block when it has one. False
+ * when nothing can show it, so the caller reports the reveal as failed instead of marking a row
+ * the user cannot see.
+ */
+export function revealInFlowRow(
+  root: HTMLElement | null,
+  rowId: string,
+  target: QuestionReferenceTarget | null,
+  topOffset: number,
+): boolean {
+  const block =
+    target?.questionId === undefined
+      ? null
+      : root?.querySelector<HTMLElement>(
+          `[id="${CSS.escape(questionReferenceElementId(target.messageId, target.questionId))}"]`,
+        );
+  const element =
+    block ?? root?.querySelector<HTMLElement>(`[data-timeline-row-id="${CSS.escape(rowId)}"]`);
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  const scroller = scrollingAncestor(element);
+  if (scroller === null) return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  const view = scroller.getBoundingClientRect();
+  scroller.scrollTo({
+    top: scroller.scrollTop + rect.top - view.top - topOffset,
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+  });
+  return true;
+}
+
 /**
  * After the timeline scrolled a message row into view, brings its answer block into view too
  * when the row is taller than the viewport left room for. Does nothing for a block already shown.

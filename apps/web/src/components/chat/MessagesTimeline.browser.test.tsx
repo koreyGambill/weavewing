@@ -2076,6 +2076,76 @@ describe("MessagesTimeline Next reference", () => {
       }
     },
   );
+
+  it("scrolls the chat to a message an inline side chat's card refers to", async () => {
+    setup();
+    const sideKey = `environment-local:side-next-${Math.random().toString(36).slice(2)}`;
+    const reference = {
+      version: 1 as const,
+      kind: "waiting-item" as const,
+      contextId: ComposerContextId.make("waiting-item_task-T1"),
+      label: "T1 · discuss · Rotate the webhook secret",
+      itemKind: "task" as const,
+      key: "task-T1",
+      ref: "T1",
+      title: "Rotate the webhook secret",
+    };
+    const card = {
+      id: "side-entry-tasks",
+      kind: "thread-tasks",
+      createdAt: CREATED_AT,
+      runId: null,
+      taskRefs: ["T1"],
+    } as Entry;
+    const filler = Array.from({ length: 20 }, (_, index) =>
+      message(`Side filler ${index}\n\n${"More text. ".repeat(40)}`, {}, `side-filler-${index}`),
+    );
+    const about = message(
+      `${formatComposerContextReference(reference)} Rotated it.`,
+      { context: { version: 1, records: [reference] } },
+      "side-about",
+    );
+    const props = baseProps();
+    await using screen = await renderElement(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={[message("Parent reply", { role: "assistant" }, "parent-reply")]}
+        inlineSideChats={() =>
+          inlineSideChat(
+            <MessagesTimeline
+              {...baseProps()}
+              inFlow
+              routeThreadKey={sideKey}
+              timelineEntries={[card, ...filler, about]}
+            />,
+          )
+        }
+      />,
+    );
+    const root = props.listRef.current!.getScrollableNode()!;
+    const control = screen.getByRole("button", { name: "Next reference, 1 of 1" });
+    await expect.element(control).toBeInTheDocument();
+    (control.element() as HTMLElement).scrollIntoView({ block: "center" });
+    const bubble = () =>
+      document
+        .querySelector('[data-message-id="side-about"]')
+        ?.querySelector<HTMLElement>("[data-user-message-bubble]") ?? null;
+    const view = root.getBoundingClientRect();
+    expect(bubble()!.getBoundingClientRect().top).toBeGreaterThan(view.bottom);
+    const before = root.scrollTop;
+    (control.element() as HTMLElement).focus();
+
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => {
+      const element = bubble()!;
+      expect(element.hasAttribute("data-reference-marked")).toBe(true);
+      const rect = element.getBoundingClientRect();
+      expect(rect.top).toBeLessThan(view.bottom);
+      expect(rect.bottom).toBeGreaterThan(view.top);
+    });
+    expect(root.scrollTop).toBeGreaterThan(before);
+    await expect.element(control).toHaveFocus();
+  });
 });
 
 describe("MessagesTimeline attachments", () => {

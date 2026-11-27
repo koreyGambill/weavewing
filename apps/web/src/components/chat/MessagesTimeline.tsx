@@ -124,6 +124,7 @@ import { ThreadTasksTimelineRow } from "../tasks/ThreadTasksTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
 import { qaRevealLandingId, taskRevealRef } from "../questions/questionReveal";
 import {
+  revealInFlowRow,
   scrollQuestionReferenceIntoRow,
   useQuestionReferenceReveal,
 } from "./questionReferenceReveal";
@@ -937,12 +938,24 @@ const ConversationTimeline = memo(function ConversationTimeline({
   if (nextOpening !== listOpening) setListOpening(nextOpening);
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
+  // An in-flow timeline, such as an inline side chat, has no list of its own to scroll.
+  const inFlowTranscriptRef = useRef<HTMLDivElement | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
   const revealRow = (index: number, afterScroll?: () => void) => {
     if (index < 0) return false;
+    if (inFlow)
+      return revealInFlowRow(
+        inFlowTranscriptRef.current,
+        rows[index]!.id,
+        null,
+        TIMELINE_MINIMAP_TARGET_OFFSET,
+      );
+    // A list that is not mounted cannot show the row, so the reveal reports failure.
+    const list = listRef.current;
+    if (!list) return false;
     navigateTimeline();
-    void listRef.current
-      ?.scrollToIndex({
+    void list
+      .scrollToIndex({
         index,
         animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
         viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
@@ -963,12 +976,24 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ),
     );
   });
-  useQuestionReferenceReveal(routeThreadKey, rows.length, (target) =>
-    revealRow(
-      rows.findIndex((row) => row.kind === "message" && row.message.id === target.messageId),
-      () => scrollQuestionReferenceIntoRow(listRef.current, target, TIMELINE_MINIMAP_TARGET_OFFSET),
-    ),
-  );
+  useQuestionReferenceReveal(routeThreadKey, rows.length, (target) => {
+    const index = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === target.messageId,
+    );
+    if (inFlow)
+      return (
+        index >= 0 &&
+        revealInFlowRow(
+          inFlowTranscriptRef.current,
+          rows[index]!.id,
+          target,
+          TIMELINE_MINIMAP_TARGET_OFFSET,
+        )
+      );
+    return revealRow(index, () =>
+      scrollQuestionReferenceIntoRow(listRef.current, target, TIMELINE_MINIMAP_TARGET_OFFSET),
+    );
+  });
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
@@ -1632,7 +1657,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               />
             ) : null}
             {inFlow ? (
-              <div data-inline-side-chat-transcript>
+              <div data-inline-side-chat-transcript ref={inFlowTranscriptRef}>
                 {listHeader}
                 {rows.map((item) => (
                   <Fragment key={item.id}>{renderItem({ item })}</Fragment>
