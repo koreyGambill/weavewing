@@ -15,6 +15,7 @@ import {
   type ComposerThreadTarget,
   composerDraftHasUserContent,
   type DraftId,
+  type TrackedAnswerDraft,
   useComposerDraftStore,
 } from "../../composerDraftStore";
 import type { ComposerHandleRef } from "../../composerHandleContext";
@@ -119,6 +120,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
     const { attachments: attachmentsSnapshot, messageText } = sendSnapshot;
     const failedSelections: ModelSelection[] = [];
     let clearedDraft = false;
+    let trackedAnswer: TrackedAnswerDraft | undefined;
     let releasedComposer = false;
     let canRestoreDraft = () => false;
     let startedCount = 0;
@@ -138,6 +140,9 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
         attachments: attachmentsSnapshot,
       });
       promptRef.current = "";
+      trackedAnswer = useComposerDraftStore
+        .getState()
+        .getComposerDraft(composerDraftTarget)?.trackedAnswer;
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
       clearedDraft = true;
@@ -239,6 +244,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
       appAtomRegistry.set(fanoutSelectionsAtom, failedSelections);
       if (clearedDraft) {
         restoreComposerDraft(composerDraftTarget, sendSnapshot);
+        useComposerDraftStore.getState().setTrackedAnswer(composerDraftTarget, trackedAnswer);
         if (composerRef.current && currentRouteThreadKeyRef.current === routeThreadKey) {
           promptRef.current = sendSnapshot.draftText;
           composerRef.current.resetCursorState({
