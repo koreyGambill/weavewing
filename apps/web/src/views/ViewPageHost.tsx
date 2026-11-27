@@ -19,7 +19,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { isElectron } from "../env";
 import { observeResize } from "../lib/observeResize";
 import { VIEW_IDS } from "../components/ToolSidebar.logic";
-import { holdSideAreaThroughRoute, useToolSidebarStore } from "../toolSidebarStore";
+import { cancelSideAreaHandoff, requestSideAreaHandoff } from "../toolSidebarStore";
 import { resolveHostedViewLayout, resolveViewPage } from "./viewPage.logic";
 import {
   VIEW_DEFINITIONS,
@@ -114,12 +114,21 @@ export function HostedView({
   );
 }
 
+/**
+ * Goes back one history entry, or replaces this one with the start page when there is none, so
+ * Back never returns to the page just left. Returns the history index it lands on.
+ */
 function useGoBack() {
   const router = useRouter();
   const navigate = useNavigate();
   return () => {
-    if (router.history.canGoBack()) router.history.back();
-    else void navigate({ to: "/" });
+    const index = router.state.location.state.__TSR_index;
+    if (router.history.canGoBack()) {
+      router.history.back();
+      return index - 1;
+    }
+    void navigate({ to: "/", replace: true });
+    return index;
   };
 }
 
@@ -180,6 +189,7 @@ function ViewPageBody({
   focusHeading: (node: HTMLHeadingElement | null) => void;
 }) {
   const goBack = useGoBack();
+  const router = useRouter();
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [measure] = useState(() => (node: HTMLDivElement | null) => {
@@ -188,14 +198,18 @@ function ViewPageBody({
     return observeResize(node, () => setWidth(node.clientWidth));
   });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Leaving the page ends a hand-over to the side area; the release waits until the route change that unmounted it has run its effects.
-  useEffect(() => () => void window.setTimeout(() => holdSideAreaThroughRoute(false), 0), []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Leaving the page ends a pending handoff; the cancel waits until the route change that unmounted it has delivered the handoff.
+  useEffect(() => () => void window.setTimeout(cancelSideAreaHandoff, 0), []);
 
   const openInSidePanel = () => {
     if (!isSideAreaViewId(definition.id)) return;
-    useToolSidebarStore.getState().dispatch({ type: "show", view: definition.id });
-    holdSideAreaThroughRoute(true);
-    goBack();
+    const from = router.state.location.pathname;
+    requestSideAreaHandoff(definition.id, from, goBack());
+    // A navigation that resolves without leaving the page drops the handoff.
+    const stop = router.subscribe("onResolved", () => {
+      stop();
+      if (router.state.location.pathname === from) cancelSideAreaHandoff();
+    });
   };
   const { layout } = resolveHostedViewLayout(definition, { layout: "full", width });
 

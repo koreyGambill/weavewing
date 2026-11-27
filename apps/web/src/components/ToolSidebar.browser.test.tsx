@@ -323,7 +323,12 @@ it("opens a global view as a page from the side panel and hands it back", async 
 
   await userEvent.click(screen.getByRole("button", { name: "Open in side panel" }));
   await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
-  await expect.element(panel.getByRole("button", { name: /^View: Calendar/ })).toBeVisible();
+  await expect.element(panel.getByRole("button", { name: /^View: Calendar/ })).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(panel).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("button", { name: "Toggle side panel", exact: true }))
+    .toHaveFocus();
 
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "status" } }));
   await expect.element(screen.getByRole("heading", { name: "Status", level: 1 })).toHaveFocus();
