@@ -1575,6 +1575,7 @@ const make = Effect.gen(function* () {
         ? environmentLifecycle.discardLaunch({
             xwingEnvironmentId: prepared.xwingEnvironmentId,
             hold: { threadId: input.childThreadId, period: input.commandId },
+            newBranch: prepared.newBranch,
           })
         : Effect.void;
       const workspace = yield* developmentEnvironments

@@ -2834,6 +2834,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           status: "running",
           result: null,
         };
+        const newBranch = { sourcePath: "/repo", name: "t3code/build-it", tip: "abc123" };
         const checkout = {
           xwingEnvironmentId,
           repositorySource: "/repo",
@@ -2936,7 +2937,9 @@ describe("OrchestratorMcpService provider resolution", () => {
             prepareLaunch: (input) =>
               Effect.sync(() => {
                 prepared.push(input);
-                return { xwingEnvironmentId, created: options.reused !== true };
+                return options.reused === true
+                  ? { xwingEnvironmentId, created: false }
+                  : { xwingEnvironmentId, created: true, newBranch };
               }),
             discardLaunch: (input) => Effect.sync(() => void discarded.push(input)),
           }),
@@ -3008,7 +3011,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.deepEqual(
             discarded,
             (outcome === "rejected" && options.reused !== true) || outcome === "parent-stopping"
-              ? [{ xwingEnvironmentId, hold }]
+              ? [{ xwingEnvironmentId, hold, newBranch }]
               : [],
           );
         }).pipe(
