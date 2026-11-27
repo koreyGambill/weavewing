@@ -472,8 +472,13 @@ it.effect("claims nothing when the run, its commands or the thread rule a prompt
     const evidence = yield* EvidenceService.EvidenceService;
     const { repo, git, first, second } = yield* landedRepo;
     const merge = "git merge feature";
-    // Main moved by a reset, which no landing command leaves, inside a merge command's window.
-    yield* git(["reset", "-q", "--hard", first], "2026-02-01T00:10:00Z");
+    // Main moved forward by a reset, which no landing command leaves, inside a merge's window.
+    yield* git(["checkout", "-q", "-b", "elsewhere"]);
+    const extra = yield* git(["commit", "-q", "--allow-empty", "-m", "extra"]).pipe(
+      Effect.andThen(git(["rev-parse", "HEAD"])),
+    );
+    yield* git(["checkout", "-q", "main"]);
+    yield* git(["reset", "-q", "--hard", extra], "2026-02-01T00:10:00Z");
     const cases: ReadonlyArray<[string, OrchestrationV2DomainEvent]> = [
       ["failed run", ranTurn("failed", [{ input: merge }], { status: "failed" })],
       ["interrupted run", ranTurn("interrupted", [{ input: merge }], { status: "interrupted" })],
@@ -620,6 +625,7 @@ it("matches landing commands on what the shell runs", () => {
     "git commit -m 'git merge feature'",
     "cat <<END-OF-TEXT\ngit merge feature\nEND-OF-TEXT",
     "cat <<'EOF'\ngit push origin HEAD:main\nEOF",
+    "cat <<'END-OF-TEXT'\ngit merge feature\nEND-OF-TEXT",
     "# git merge feature",
   ];
   for (const [input, kind] of lands) assert.deepStrictEqual(kinds(input), [kind], input);
