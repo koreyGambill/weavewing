@@ -1845,6 +1845,71 @@ it.effect("names no message for a task outcome an agent relays after a later use
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("keeps the message a task outcome came from when the agent only clarifies its note", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const agent = { by: "agent", threadId } as const;
+    const filed = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
+      },
+      agent,
+    );
+    h.turnMessage.current = MessageId.make("message-done");
+    const settled = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: filed.revision,
+        changes: [{ id: "T1", state: "done", settledFromUser: true, note: "done, rotated it" }],
+      },
+      agent,
+    );
+    expect(settled.items[0]).toMatchObject({ settledFromMessageId: "message-done" });
+    // An unrelated later turn, its message the one since the task was filed as far as the read
+    // knows: a relay that keeps the outcome changes only the note.
+    h.turnMessage.current = MessageId.make("message-ci");
+    const clarified = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: settled.revision,
+        changes: [{ id: "T1", state: "done", settledFromUser: true, note: "rotated both keys" }],
+      },
+      agent,
+    );
+    expect(clarified.items[0]).toMatchObject({
+      state: "done",
+      settledBy: "agent",
+      settledFromMessageId: "message-done",
+      note: "rotated both keys",
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("keeps the message a question's answer came from when the agent records it again", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Which region?" }] });
+    const record = (notes: string) =>
+      h.service.questionUpdate(
+        { threadId, id: "Q1", state: "answered", answer: { notes } },
+        "agent",
+      );
+    h.turnMessage.current = MessageId.make("message-answer");
+    expect((yield* record("eu-west")).questions[0]).toMatchObject({
+      settledFromMessageId: "message-answer",
+    });
+    // A corrected note in an unrelated later turn is refused, and the answer keeps its message.
+    h.turnMessage.current = MessageId.make("message-ci");
+    expect((yield* failureOf(record("eu-west-1"))).code).toBe("invalid");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      answer: { notes: "eu-west" },
+      settledFromMessageId: "message-answer",
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("keeps the user's Done and dismissal note from an agent without the user's message", () =>
   Effect.gen(function* () {
     const h = yield* harness();

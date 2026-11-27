@@ -990,12 +990,16 @@ const make = Effect.gen(function* () {
             : current.ref;
         // A note given replaces the old one; none keeps it on the same state and clears it on a
         // change. A change still waiting from before reasons were kept stays marked once answered.
+        // The message an agent recorded an outcome from changes only with the outcome: an agent's
+        // update that keeps the state, such as a clarified note, keeps it.
         const [updated] = yield* sql<QaRow>`UPDATE evidence_qa SET
               note = coalesce(${input.note ?? null}, CASE WHEN state = ${input.state} THEN note ELSE '' END),
               raised_json = CASE WHEN raised_json IS NULL AND state = 'pending' THEN '["legacy"]'
                 WHEN ${promote ? 1 : 0} = 1 THEN json_insert(coalesce(raised_json, '[]'), '$[#]', 'needs_you')
                 ELSE raised_json END,
-              ref = ${ref}, state = ${input.state}, by = ${input.by}, message_id = ${input.messageId},
+              ref = ${ref}, state = ${input.state}, by = ${input.by},
+              message_id = CASE WHEN ${input.by} = 'agent' AND state = ${input.state} THEN message_id
+                ELSE ${input.messageId} END,
               discussed_message_id = NULL, updated_at = ${now}
             WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}
             RETURNING ${sql.literal(QA_COLUMNS)}`;
@@ -1019,20 +1023,22 @@ const make = Effect.gen(function* () {
     const [landing] = yield* sql<{
       readonly qa_thread_id: string | null;
       readonly thread_id: string;
-    }>`SELECT qa_thread_id, thread_id FROM evidence_landings WHERE landing_id = ${input.landingId}`;
+      readonly landed_at: string;
+    }>`SELECT qa_thread_id, thread_id, landed_at FROM evidence_landings WHERE landing_id = ${input.landingId}`;
     const qaThreadId = yield* resolveQaThread(input.threadId);
     if (landing !== undefined && (landing.qa_thread_id ?? landing.thread_id) !== qaThreadId)
       return yield* invalid(
         `Landing ${input.landingId} shows its QA in another thread; settle it there.`,
       );
-    // Name the message only when it is the one user message since the change's last state change,
-    // so an outcome the agent records late does not point at a later, unrelated message.
-    const [row] = yield* sql<{ readonly updated_at: string }>`SELECT updated_at FROM evidence_qa
-        WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}`;
+    // Name the message only when it is the one user message since the change landed, so an outcome
+    // the agent records late does not point at a later, unrelated message. The landing time never
+    // moves, unlike the row's last write, which a clarified note also changes.
     const source =
-      row === undefined
+      landing === undefined
         ? null
-        : yield* projections.getCurrentUserMessageId(input.threadId, { soleSince: row.updated_at });
+        : yield* projections.getCurrentUserMessageId(input.threadId, {
+            soleSince: landing.landed_at,
+          });
     return yield* writeQa({
       landingId: input.landingId,
       changeId: input.changeId,

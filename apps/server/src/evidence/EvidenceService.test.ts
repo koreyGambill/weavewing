@@ -1525,6 +1525,81 @@ it.effect(
     ).pipe(Effect.provide(testLayer)),
 );
 
+/** Ends the thread's running turn and starts the next one from `messageId`, created at `at`. */
+const nextTurn = (threadId: string, ordinal: number, messageId: string, at: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const runId = `run-${threadId}-${ordinal}`;
+    yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed' WHERE thread_id = ${threadId}`;
+    yield* sql`INSERT INTO orchestration_v2_projection_runs (run_id, thread_id, ordinal, provider, status, requested_at, payload_json)
+      VALUES (${runId}, ${threadId}, ${ordinal}, 'codex', 'running', ${at},
+        ${JSON.stringify({ userMessageId: messageId, inputMessageIds: [messageId] })})`;
+    yield* sql`INSERT INTO orchestration_v2_projection_messages (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
+      VALUES (${messageId}, ${threadId}, ${runId}, 'user', 0, ${at}, ${at}, ${JSON.stringify({ createdBy: "user" })})`;
+  });
+
+it.effect("keeps the message an agent settled QA from when it only clarifies the note", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const threadId = ThreadId.make("clarified");
+      yield* seedThread({ id: "clarified" });
+      yield* evidence.record(recordInput("landing-clarified", [change("a")], { threadId }));
+      const settle = (note: string) =>
+        evidence.agentSetQa({
+          threadId,
+          landingId: "landing-clarified",
+          changeId: "a",
+          state: "confirmed",
+          note,
+        });
+      yield* nextTurn("clarified", 1, "message-works", "2026-11-20T11:10:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:11:00.000Z"));
+      assert.strictEqual((yield* settle("Works")).messageId, "message-works");
+      // An unrelated turn, the one user message since the outcome was written: the agent only
+      // clarifies its note, so the outcome still comes from the user's earlier reply.
+      yield* nextTurn("clarified", 2, "message-ci", "2026-11-20T11:20:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:21:00.000Z"));
+      const clarified = yield* settle("Works on the phone width too");
+      assert.deepStrictEqual(
+        [clarified.state, clarified.note, clarified.messageId],
+        ["confirmed", "Works on the phone width too", "message-works"],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("names no message for a QA outcome recorded after a later unrelated message", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const threadId = ThreadId.make("late");
+      yield* seedThread({ id: "late" });
+      yield* evidence.record(recordInput("landing-late", [change("a")], { threadId }));
+      // The user confirms in A; the agent only notes it is checking, which writes the row after A.
+      yield* nextTurn("late", 1, "message-a", "2026-11-20T11:10:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:15:00.000Z"));
+      yield* evidence.agentSetQa({
+        threadId,
+        landingId: "landing-late",
+        changeId: "a",
+        state: "pending",
+        note: "Checking the toast",
+      });
+      // The agent records the confirmation only during B, an unrelated message.
+      yield* nextTurn("late", 2, "message-b", "2026-11-20T11:20:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:21:00.000Z"));
+      const late = yield* evidence.agentSetQa({
+        threadId,
+        landingId: "landing-late",
+        changeId: "a",
+        state: "confirmed",
+      });
+      assert.deepStrictEqual([late.state, late.messageId], ["confirmed", undefined]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("closes an agent's problem when a later landing names it in fixes", () =>
   withHome(() =>
     Effect.gen(function* () {

@@ -95,7 +95,14 @@ export function changeUserTask(
   if (userOutcome(old) && (stateChanged || !isTask) && !relayed) return USER_OUTCOME_NEEDS_USER;
   if (old?.owner === "you" && old.state === "open" && !isTask) return TASK_LEAVES_ONLY_CLOSED;
   if (!isTask) return base;
-  if (!stateChanged) return { ...base, ...(old === undefined ? {} : taskFields(old)) };
+  if (!stateChanged) {
+    const kept = old === undefined ? {} : taskFields(old);
+    // A relay that keeps the outcome, such as a clarified note, keeps the message it came from;
+    // it may replace the note the agent recorded, never one the user left.
+    return relayed && note !== undefined && old?.settledBy === "agent"
+      ? { ...base, ...kept, note }
+      : { ...base, ...kept };
+  }
   if (next.state === "handed_off") return TASK_NOT_HANDED_OFF;
   if (next.state === "done" && change.settledFromUser !== true) return TASK_DONE_NEEDS_USER;
   if (next.state === "dropped" && note === undefined) return TASK_DROP_NEEDS_NOTE;
