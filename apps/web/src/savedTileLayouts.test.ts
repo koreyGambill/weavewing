@@ -2,13 +2,18 @@ import {
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_TILE_LAYOUTS,
   ProjectId,
+  ServerSettings,
   type SavedTileNode,
+  type SavedTileViewNode,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildTileLayoutFromSaved,
   resolveDefaultTileLayout,
+  savedLayoutTree,
+  savedTileLayoutTrees,
   tileLayoutDeletePatch,
   toSavedTileNode,
 } from "./savedTileLayouts";
@@ -20,6 +25,43 @@ import {
   syncTileLayout,
   type ThreadTileLayout,
 } from "./threadTileLayout";
+
+// Builds without views know only these areas and no `viewRoot`.
+const olderNode: Schema.Codec<unknown> = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("group"),
+    areas: Schema.Array(
+      Schema.Literals([
+        "device",
+        "side-chat",
+        "pull-request",
+        "chat",
+        "browser",
+        "terminal",
+        "files",
+        "notes",
+        "diff",
+        "pull-requests",
+      ]),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("split"),
+    axis: Schema.Literals(["horizontal", "vertical"]),
+    ratio: Schema.Number,
+    first: Schema.suspend(() => olderNode),
+    second: Schema.suspend(() => olderNode),
+  }),
+]);
+const decodeOlderLayouts = Schema.decodeUnknownSync(
+  Schema.Struct({
+    tileLayouts: Schema.Array(
+      Schema.Struct({ id: Schema.String, name: Schema.String, root: olderNode }),
+    ),
+  }),
+);
+const encodeServerSettings = Schema.encodeSync(ServerSettings);
+const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 
 const sequentialIds = () => {
   let next = 0;
@@ -154,7 +196,7 @@ describe("saved tile layouts", () => {
         second: { kind: "group", areas: ["view:todos", "view:status"] },
       },
     });
-    const withRetired: SavedTileNode = {
+    const withRetired: SavedTileViewNode = {
       kind: "split",
       axis: "horizontal",
       ratio: 0.5,
@@ -172,6 +214,52 @@ describe("saved tile layouts", () => {
     expect(getTileGroups(filled)[1]?.tabs).toEqual(["view:todos", "view:status"]);
     expect(views?.tabs).toHaveLength(2);
     expect(filled.pendingAreas).toBeUndefined();
+  });
+
+  it("stores views beside a view-free tree that builds without views decode and keep", () => {
+    const tree: SavedTileViewNode = {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.4,
+      first: { kind: "group", areas: ["chat", "view:links"] },
+      second: {
+        kind: "split",
+        axis: "vertical",
+        ratio: 0.5,
+        first: { kind: "group", areas: ["view:todos"] },
+        second: { kind: "group", areas: ["terminal"] },
+      },
+    };
+    const saved = { id: "views", name: "With views", ...savedTileLayoutTrees(tree) };
+    const viewFree: SavedTileNode = {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.4,
+      first: { kind: "group", areas: ["chat"] },
+      second: { kind: "group", areas: ["terminal"] },
+    };
+    expect(saved).toEqual({ id: "views", name: "With views", root: viewFree, viewRoot: tree });
+    const stored = JSON.parse(
+      JSON.stringify(encodeServerSettings({ ...DEFAULT_SERVER_SETTINGS, tileLayouts: [saved] })),
+    );
+    // This build reads its views back.
+    const reread = decodeServerSettings(stored).tileLayouts[0]!;
+    expect(savedLayoutTree(reread)).toEqual(tree);
+    // Builds without views keep the view-free tree.
+    const older = decodeOlderLayouts(stored);
+    expect(older.tileLayouts).toEqual([{ id: "views", name: "With views", root: viewFree }]);
+    // An older build that saves settings drops `viewRoot`; this build then lays out the view-free tree.
+    const afterOlderSave = decodeServerSettings({
+      ...stored,
+      tileLayouts: older.tileLayouts,
+    }).tileLayouts[0]!;
+    expect(savedLayoutTree(afterOlderSave)).toEqual(viewFree);
+    // A layout of views alone keeps the chat as its view-free tree.
+    expect(savedTileLayoutTrees({ kind: "group", areas: ["view:status"] }).root).toEqual({
+      kind: "group",
+      areas: ["chat"],
+    });
+    expect(savedTileLayoutTrees(viewFree)).toEqual({ root: viewFree });
   });
 
   it("forgets a placeholder the user closed or replaced", () => {

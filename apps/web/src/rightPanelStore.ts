@@ -8,7 +8,7 @@ import {
   RunId,
   ThreadId,
   type LinkTileDestination,
-  type SavedTileNode,
+  type SavedTileViewNode,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { create } from "zustand";
@@ -159,7 +159,11 @@ export interface ThreadPanelVisibility {
 interface RightPanelStoreState {
   applyTileAction: (ref: ScopedThreadRef, action: TileAction) => void;
   /** As a default, applies once per thread and only while it shows nothing but its chat. */
-  applySavedTileLayout: (ref: ScopedThreadRef, saved: SavedTileNode, asDefault?: boolean) => void;
+  applySavedTileLayout: (
+    ref: ScopedThreadRef,
+    saved: SavedTileViewNode,
+    asDefault?: boolean,
+  ) => void;
   byThreadKey: Record<string, ThreadRightPanelState>;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;

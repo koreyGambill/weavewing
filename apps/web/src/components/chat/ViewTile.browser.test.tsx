@@ -21,6 +21,7 @@ import { getRouter } from "~/router";
 import { CONVERSATION_TAB_ID, getTileGroups } from "~/threadTileLayout";
 import { useDropdownTerminalStore } from "~/dropdownTerminalStore";
 import { useToolSidebarStore } from "~/toolSidebarStore";
+import { canPromoteToTile, viewDefinition } from "~/views/viewRegistry";
 import {
   ENVIRONMENT_ID,
   answerRpc,
@@ -143,6 +144,44 @@ it("promotes the side panel's view by keyboard into a tile beside the chat and f
   expect(groupsOf(thread)[1]?.tabs).toEqual(["view:details", "view:status"]);
   expect(useToolSidebarStore.getState().open).toBe(true);
   await vi.waitFor(() => expect(focusedTile()).toBe("view:status"));
+});
+
+it("offers tile controls for global panel views without carrying over the thread lock", async () => {
+  const { stack, screen } = await mountApp(THREADS);
+  await using _app = stack;
+  await act(() => {
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "links" });
+    useToolSidebarStore.getState().dispatch({ type: "lock", thread: refOf(elsewhere) });
+  });
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await userEvent.click(panel.getByRole("button", { name: /^View: Links/ }));
+  await expect.element(page.getByRole("menuitemradio", { name: "Inbox" })).toBeVisible();
+  expect(page.getByRole("menuitemradio", { name: "Pull requests" }).elements()).toHaveLength(0);
+  expect(canPromoteToTile(viewDefinition("pull-requests"))).toBe(false);
+  await userEvent.keyboard("{Escape}");
+
+  for (const [view, title] of [
+    ["inbox", "Inbox"],
+    ["calendar", "Calendar"],
+    ["status", "Status"],
+  ] as const) {
+    await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view }));
+    const promote = panel.getByRole("button", { name: "Open as tile" });
+    await expect.element(promote).toBeEnabled();
+    expect(panel.element().querySelector("[data-view-drag-grip]")).toHaveProperty(
+      "draggable",
+      true,
+    );
+    expect(
+      panel.getByRole("button", { name: /^(Lock to|Unlock from) thread$/ }).elements(),
+    ).toHaveLength(0);
+    await userEvent.click(promote);
+    await expect.element(screen.getByRole("tab", { name: title, exact: true })).toBeVisible();
+    expect(groupsOf(here).flatMap((group) => group.tabs)).toContain(`view:${view}`);
+    expect(
+      page.getByText(`Locked to ${elsewhere.title}`, { exact: false }).elements(),
+    ).toHaveLength(0);
+  }
 });
 
 it("keeps a view promoted from a panel locked elsewhere on that thread, then moves it back locked", async () => {
@@ -297,4 +336,72 @@ it("offers no split of a tile too narrow to divide when a view is dragged onto i
     ["view:todos"],
   ]);
   expect(useToolSidebarStore.getState().open).toBe(true);
+});
+
+const fullDetailsCards = () => [...document.querySelectorAll("[data-context-thread-details]")];
+
+/** Lays out the selected thread's Details and another thread's beside the chat, one hidden in the chat's tile. */
+function layOutTwoDetailsTiles(hidden: "own" | "other") {
+  const store = useRightPanelStore.getState();
+  store.openView(refOf(here), "details", null, "tile-2");
+  store.openView(refOf(here), "details", refOf(elsewhere), "tile-2");
+  const own = "view:details";
+  const other = `view:details:${ENVIRONMENT_ID}:${elsewhere.id}`;
+  const chatGroup = groupsOf(here).find((group) => group.tabs.includes(CONVERSATION_TAB_ID))!;
+  store.applyTileAction(refOf(here), {
+    type: "move",
+    tabId: hidden === "own" ? own : other,
+    targetGroupId: chatGroup.id,
+  });
+  store.applyTileAction(refOf(here), {
+    type: "activate",
+    groupId: chatGroup.id,
+    tabId: CONVERSATION_TAB_ID,
+  });
+  return { own, other };
+}
+
+it.each(["own", "other"] as const)(
+  "keeps the selected thread's full details card in its own tile when the %s Details tile shows second",
+  async (hidden) => {
+    let ids = { own: "", other: "" };
+    const { stack, screen } = await mountApp(THREADS, () => {
+      ids = layOutTwoDetailsTiles(hidden);
+    });
+    await using _app = stack;
+    const ownContent = () => document.querySelector(`[data-tile-content="${ids.own}"]`);
+    const shownFirst = hidden === "own" ? ids.other : ids.own;
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(`[data-tile-content="${shownFirst}"] [data-view-tile]`),
+      ).not.toBeNull(),
+    );
+    await userEvent.click(
+      screen.getByRole("tab", {
+        name: hidden === "own" ? "Details" : `Details · ${elsewhere.title}`,
+        exact: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(fullDetailsCards()).toHaveLength(1);
+      expect(ownContent()?.contains(fullDetailsCards()[0]!)).toBe(true);
+    });
+    const otherTile = document.querySelector(`[data-tile-content="${ids.other}"]`)!;
+    expect(otherTile.textContent).not.toContain("Full details are in");
+  },
+);
+
+it("names no place for the full details card when only another thread's Details is shown", async () => {
+  const { stack, screen } = await mountApp(THREADS, () => {
+    useRightPanelStore.getState().openView(refOf(here), "details", refOf(elsewhere), "tile-2");
+  });
+  await using _app = stack;
+  await act(() => {
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "details" });
+    useToolSidebarStore.getState().dispatch({ type: "lock", thread: refOf(elsewhere) });
+  });
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel.getByText("Open conversation details")).toBeVisible();
+  expect(panel.element().textContent).not.toContain("Full details are in");
+  expect(fullDetailsCards()).toHaveLength(0);
 });

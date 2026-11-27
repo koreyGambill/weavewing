@@ -237,15 +237,17 @@ describe("side area", () => {
     );
   });
 
-  it("gives the details card to the first host showing the selected thread", () => {
-    const first = { threadRef: threadA, element: "first", host: "tile" } as const;
-    const second = { threadRef: threadB, element: "second", host: "panel" } as const;
-    expect(resolveDetailsDestination([first, second], threadB)).toBe(second);
-    expect(resolveDetailsDestination([first, second], threadA)).toBe(first);
-    const secondOnA = { ...second, threadRef: threadA };
-    expect(resolveDetailsDestination([first, secondOnA], threadA)).toBe(first);
-    expect(resolveDetailsDestination([null, second], threadA)).toBeNull();
-    expect(resolveDetailsDestination([null, null], threadA)).toBeNull();
+  it("gives the selected thread's Details card to its first visible tile, then the panel", () => {
+    const tile = { threadRef: threadA, element: "tile", host: "tile" } as const;
+    const otherTile = { threadRef: threadB, element: "other", host: "tile" } as const;
+    const panel = { threadRef: threadA, element: "panel", host: "panel" } as const;
+    expect(resolveDetailsDestination([tile, otherTile, panel], threadA)).toBe(tile);
+    expect(resolveDetailsDestination([otherTile, tile, panel], threadA)).toBe(tile);
+    expect(resolveDetailsDestination([tile, otherTile, panel], threadB)).toBe(otherTile);
+    expect(resolveDetailsDestination([otherTile, panel], threadA)).toBe(panel);
+    expect(resolveDetailsDestination([otherTile], threadA)).toBeNull();
+    expect(resolveDetailsDestination([tile, panel], null)).toBeNull();
+    expect(resolveDetailsDestination([], threadA)).toBeNull();
   });
 
   it.each([

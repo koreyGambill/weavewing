@@ -2,6 +2,7 @@ import type {
   ProjectId,
   SavedTileLayout,
   SavedTileNode,
+  SavedTileViewNode,
   ServerSettings,
   ServerSettingsPatch,
   TileLayoutArea,
@@ -15,6 +16,7 @@ import {
   newTabId,
   surfaceTileArea,
   type ThreadTileLayout,
+  type TileArea,
   type TileNode,
 } from "./threadTileLayout";
 import { VIEW_TITLES } from "./components/ToolSidebar.logic";
@@ -31,25 +33,25 @@ export const TILE_LAYOUT_AREA_LABELS = {
   notes: "Notes",
   diff: "Diff",
   "pull-requests": "Pull requests",
-} as const satisfies Record<Exclude<TileLayoutArea, `view:${string}`>, string>;
+} as const satisfies Record<TileLayoutArea, string>;
 
 /** An area's name in layout menus and settings, or null for a view that no longer exists. */
-export function tileLayoutAreaLabel(area: TileLayoutArea): string | null {
+export function tileLayoutAreaLabel(area: TileArea): string | null {
   if (!isViewArea(area)) return TILE_LAYOUT_AREA_LABELS[area];
   const viewId = viewIdFromArea(area);
   return viewId ? VIEW_TITLES[viewId] : null;
 }
 
-const tabArea = (tabId: string): TileLayoutArea | null =>
+const tabArea = (tabId: string): TileArea | null =>
   tabId === CONVERSATION_TAB_ID ? "chat" : surfaceTileArea(tabId);
 
 /** The docked tree as a saved layout; `dropped` reports tabs or tiles a layout cannot keep. */
 export function toSavedTileNode(layout: ThreadTileLayout): {
-  root: SavedTileNode | null;
+  root: SavedTileViewNode | null;
   dropped: boolean;
 } {
   let dropped = false;
-  const convert = (node: TileNode): SavedTileNode | null => {
+  const convert = (node: TileNode): SavedTileViewNode | null => {
     if (node.kind === "group") {
       if (node.floating) {
         dropped = true;
@@ -77,7 +79,34 @@ export function toSavedTileNode(layout: ThreadTileLayout): {
   return { root, dropped };
 }
 
-export function savedTileGroupCount(node: SavedTileNode): number {
+/**
+ * A saved layout's fields for a tree: `root` without views, which builds without views can decode,
+ * and `viewRoot` with them when the tree has any. A tree of only views keeps the chat as its root.
+ */
+export function savedTileLayoutTrees(
+  tree: SavedTileViewNode,
+): Pick<SavedTileLayout, "root" | "viewRoot"> {
+  let hasViews = false;
+  const strip = (node: SavedTileViewNode): SavedTileNode | null => {
+    if (node.kind === "group") {
+      const areas = node.areas.filter((area): area is TileLayoutArea => !isViewArea(area));
+      if (areas.length < node.areas.length) hasViews = true;
+      return areas.length ? { kind: "group", areas } : null;
+    }
+    const first = strip(node.first);
+    const second = strip(node.second);
+    return first && second ? { ...node, first, second } : (first ?? second);
+  };
+  const root = strip(tree) ?? { kind: "group", areas: ["chat"] };
+  return hasViews ? { root, viewRoot: tree } : { root };
+}
+
+/** The tree to lay out: the one with views when this layout has them. */
+export function savedLayoutTree(layout: SavedTileLayout): SavedTileViewNode {
+  return layout.viewRoot ?? layout.root;
+}
+
+export function savedTileGroupCount(node: SavedTileViewNode): number {
   return node.kind === "group"
     ? 1
     : savedTileGroupCount(node.first) + savedTileGroupCount(node.second);
@@ -88,13 +117,13 @@ export function savedTileGroupCount(node: SavedTileNode): number {
  * get a placeholder that the workspace fills with a fresh surface. Leftover tabs join the chat tile.
  */
 export function buildTileLayoutFromSaved(
-  saved: SavedTileNode,
+  saved: SavedTileViewNode,
   openTabIds: readonly string[],
   makeId: () => string,
 ): ThreadTileLayout {
   const unused = [CONVERSATION_TAB_ID, ...openTabIds.filter((id) => id !== CONVERSATION_TAB_ID)];
-  const pendingAreas: Record<string, TileLayoutArea> = {};
-  const build = (node: SavedTileNode): TileNode => {
+  const pendingAreas: Record<string, TileArea> = {};
+  const build = (node: SavedTileViewNode): TileNode => {
     if (node.kind === "split")
       return {
         kind: "split",

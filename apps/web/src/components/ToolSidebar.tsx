@@ -43,6 +43,7 @@ import {
 import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
 import {
   PANEL_VIEW_DEFINITIONS,
+  canPromoteToTile,
   viewDefinition,
   type ViewDefinition,
   type ViewSlots,
@@ -361,7 +362,10 @@ function SideArea({
     select: (state) => resolveThreadRouteRef(state.matches.at(-1)?.params ?? {}),
   });
   const viewThread = definition.scope === "thread" ? threadRef : null;
-  const canPromote = tileOwner !== null && (definition.scope === "global" || threadRef !== null);
+  const canPromote =
+    canPromoteToTile(definition) &&
+    tileOwner !== null &&
+    (definition.scope === "global" || threadRef !== null);
   const viewDragging = useViewDragStore((state) => state.drag !== null);
   const lockedState = useLockedThreadState(locked);
   const unlock = () => dispatch({ type: "lock", thread: null });

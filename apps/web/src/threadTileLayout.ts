@@ -1,4 +1,7 @@
-import type { TileLayoutArea } from "@t3tools/contracts";
+import type { TileLayoutArea, ViewTileLayoutArea } from "@t3tools/contracts";
+
+/** An area a tile can wait for: one of the saved-layout areas, or a side panel view. */
+export type TileArea = TileLayoutArea | ViewTileLayoutArea;
 
 export const CONVERSATION_TAB_ID = "conversation";
 const NEW_TAB_PREFIX = "new-tab:";
@@ -18,7 +21,7 @@ const SURFACE_AREAS: Record<string, TileLayoutArea> = {
   "pull-requests": "pull-requests",
 };
 /** The saved-layout area a surface id belongs to; surfaces that need a target have none. */
-export const surfaceTileArea = (surfaceId: string): TileLayoutArea | null => {
+export const surfaceTileArea = (surfaceId: string): TileArea | null => {
   const [kind, view, ...thread] = surfaceId.split(":");
   // A view locked to another thread names it, which a layout for any thread cannot keep.
   if (kind === "view") return view && thread.length === 0 ? `view:${view}` : null;
@@ -145,7 +148,7 @@ export type ThreadTileLayout = {
   besideGroupId?: string | null;
   focusPairRatio?: number;
   /** Placeholder tabs from a saved layout, keyed by tab id, waiting for their area to open. */
-  pendingAreas?: Record<string, TileLayoutArea>;
+  pendingAreas?: Record<string, TileArea>;
 };
 export type TileAction =
   | { type: "float-group"; groupId: string; rect: FloatingTileRect }
@@ -183,7 +186,7 @@ export type TileAction =
   | { type: "close-group"; groupId: string }
   | { type: "close-tab"; tabId: string }
   | { type: "new-tab"; groupId: string; tabId: string }
-  | { type: "pending-area"; tabId: string; area: TileLayoutArea }
+  | { type: "pending-area"; tabId: string; area: TileArea }
   | { type: "merge-groups"; groupId: string; targetGroupId: string }
   | { type: "swap-groups"; firstGroupId: string; secondGroupId: string }
   | {
@@ -894,7 +897,7 @@ export function parseTileLayout(value: unknown): ThreadTileLayout | undefined {
                     (area.startsWith("view:") ||
                       Object.values(SURFACE_AREAS).includes(area as TileLayoutArea)),
                 ),
-              ) as Record<string, TileLayoutArea>,
+              ) as Record<string, TileArea>,
             }
           : {}),
         focusedGroupId: value.focusedGroupId,

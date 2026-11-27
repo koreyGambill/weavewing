@@ -38,7 +38,6 @@ import type {
   KeybindingCommand,
   ProjectId,
   SavedTileLayout,
-  TileLayoutArea,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -63,6 +62,7 @@ import {
   type FloatingTileRect,
   type ThreadTileLayout,
   type TileAction,
+  type TileArea,
   type TileGroup,
 } from "../../threadTileLayout";
 import {
@@ -126,6 +126,7 @@ import {
   savedTileGroupCount,
   TILE_LAYOUT_AREA_LABELS,
   tileLayoutAreaLabel,
+  savedLayoutTree,
   toSavedTileNode,
 } from "../../savedTileLayouts";
 import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
@@ -306,7 +307,9 @@ export function ThreadTileWorkspace(props: {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lays out a new draft once the environment's settings name a default layout
   useEffect(() => {
     if (defaultLayout)
-      useRightPanelStore.getState().applySavedTileLayout(props.threadRef, defaultLayout.root, true);
+      useRightPanelStore
+        .getState()
+        .applySavedTileLayout(props.threadRef, savedLayoutTree(defaultLayout), true);
   }, [defaultLayout, props.threadRef]);
   const [localDrag, setDragging] = useState<TileDrag | null>(null);
   // A view dragged from the side panel drops like a tab; terminal-only workspaces take none.
@@ -668,7 +671,7 @@ export function ThreadTileWorkspace(props: {
     "Side chat": [panel.sideChatAvailable === true, panel.onAddSideChat],
   };
   // A view area opens that view of this thread; one whose view no longer exists closes its tab.
-  const pendingRun = (tabId: string, area: TileLayoutArea): [boolean, () => void] => {
+  const pendingRun = (tabId: string, area: TileArea): [boolean, () => void] => {
     if (!isViewArea(area)) {
       const [enabled, run] = areaRuns[TILE_LAYOUT_AREA_LABELS[area]];
       return [enabled, () => run?.()];
@@ -750,7 +753,7 @@ export function ThreadTileWorkspace(props: {
     setSaveLayout({ ...toSavedTileNode(currentLayout()), replaceId });
   };
   const applySavedLayout = (layout: SavedTileLayout) => {
-    useRightPanelStore.getState().applySavedTileLayout(props.threadRef, layout.root);
+    useRightPanelStore.getState().applySavedTileLayout(props.threadRef, savedLayoutTree(layout));
     focus(currentLayout().focusedGroupId);
   };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers workspace commands, window keys and native browser menu actions for this mounted thread

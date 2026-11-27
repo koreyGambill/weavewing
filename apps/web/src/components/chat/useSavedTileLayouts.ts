@@ -1,4 +1,9 @@
-import type { EnvironmentId, ProjectId, SavedTileLayout, SavedTileNode } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  SavedTileLayout,
+  SavedTileViewNode,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 
 import {
@@ -7,7 +12,7 @@ import {
   useUpdateEnvironmentSettings,
 } from "../../hooks/useSettings";
 import { randomUUID } from "../../lib/utils";
-import { resolveDefaultTileLayout } from "../../savedTileLayouts";
+import { resolveDefaultTileLayout, savedTileLayoutTrees } from "../../savedTileLayouts";
 import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import { readProjects } from "../../state/entities";
 import { readEnvironments, readPrimaryEnvironmentId } from "../../state/environments";
@@ -60,7 +65,7 @@ export function useSavedTileLayouts(environmentId: EnvironmentId, projectId: Pro
         ? override.defaultTileLayoutId
         : undefined,
     effectiveDefault: resolveDefaultTileLayout(settings, projectId),
-    save: (name: string, root: SavedTileNode, replaceId: string | null = null) => {
+    save: (name: string, tree: SavedTileViewNode, replaceId: string | null = null) => {
       const existing = layouts.find((layout) =>
         replaceId === null ? layout.name === name : layout.id === replaceId,
       );
@@ -68,7 +73,7 @@ export function useSavedTileLayouts(environmentId: EnvironmentId, projectId: Pro
       const layout: SavedTileLayout = {
         id: existing?.id ?? randomUUID(),
         name: existing?.name ?? name,
-        root,
+        ...savedTileLayoutTrees(tree),
       };
       updateSettings({
         tileLayouts: existing

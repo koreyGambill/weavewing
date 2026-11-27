@@ -244,6 +244,11 @@ export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = [
 export const PANEL_VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition & { readonly id: ViewId }> =
   VIEW_IDS.map((id) => DEFINITIONS[id]).filter((entry) => viewSupportsHost(entry, "panel"));
 
+/** Whether a tile can host the side panel's view. */
+export function canPromoteToTile(definition: ViewDefinition): boolean {
+  return viewSupportsHost(definition, "tile");
+}
+
 export function viewDefinition<Id extends RegisteredViewId>(id: Id) {
   return DEFINITIONS[id];
 }

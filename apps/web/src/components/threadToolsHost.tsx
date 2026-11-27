@@ -38,6 +38,7 @@ type Slot = HTMLDivElement | null;
 const SideAreaDetails = createContext<(element: Slot) => void>(() => {});
 type TileDetails = { readonly threadRef: ScopedThreadRef; readonly element: HTMLDivElement };
 const TileDetails = createContext<(details: TileDetails | null, element: Slot) => void>(() => {});
+const NO_TILE_DETAILS: ReadonlyArray<TileDetails> = [];
 
 /** Gives the conversation's details card to the host whose Details view shows its thread. */
 export function ThreadToolsHost({ children }: { children: ReactNode }) {
@@ -46,16 +47,18 @@ export function ThreadToolsHost({ children }: { children: ReactNode }) {
   const sideOpen = useToolSidebarStore((state) => state.open);
   const sideView = useToolSidebarStore((state) => state.view);
   const [sideDetails, setSideDetails] = useState<Slot>(null);
-  const [tileDetails, setTileDetailsState] = useState<TileDetails | null>(null);
+  const [tileDetails, setTileDetailsState] = useState(NO_TILE_DETAILS);
   const [setTileDetails] = useState(
     () => (details: TileDetails | null, element: Slot) =>
-      setTileDetailsState((current) =>
-        details ? details : current?.element === element ? null : current,
-      ),
+      setTileDetailsState((current) => {
+        const removed = details ? details.element : element;
+        const rest = current.filter((entry) => entry.element !== removed);
+        return details ? [...rest, details] : rest.length < current.length ? rest : current;
+      }),
   );
   const destination = resolveDetailsDestination(
     [
-      tileDetails ? { ...tileDetails, host: "tile" } : null,
+      ...tileDetails.map((details) => ({ ...details, host: "tile" as const })),
       sideOpen && sideView === "details" && sideThreadRef && sideDetails
         ? { threadRef: sideThreadRef, element: sideDetails, host: "panel" }
         : null,
@@ -76,10 +79,7 @@ export function useSideAreaDetailsSetter() {
   return use(SideAreaDetails);
 }
 
-/**
- * A view tile's setter for its Details element: `(details, null)` registers it, and
- * `(null, element)` withdraws it when that element is still the registered one.
- */
+/** A view tile's setter for its Details element: `(details, null)` adds it, `(null, element)` removes it. */
 export function useTileDetailsSetter() {
   return use(TileDetails);
 }

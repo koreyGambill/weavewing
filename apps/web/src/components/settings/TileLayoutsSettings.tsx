@@ -1,9 +1,13 @@
-import { type SavedTileLayout } from "@t3tools/contracts";
+import { type SavedTileLayout, type SavedTileViewNode } from "@t3tools/contracts";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { savedTileGroupCount, tileLayoutDeletePatch } from "../../savedTileLayouts";
-import { tileLayoutAreaLabel } from "../../savedTileLayouts";
+import {
+  savedLayoutTree,
+  savedTileGroupCount,
+  tileLayoutAreaLabel,
+  tileLayoutDeletePatch,
+} from "../../savedTileLayouts";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -30,7 +34,7 @@ const NONE = "none";
 
 function areaSummary(layout: SavedTileLayout) {
   const areas: string[] = [];
-  const walk = (node: SavedTileLayout["root"]) => {
+  const walk = (node: SavedTileViewNode) => {
     if (node.kind === "group") {
       areas.push(...node.areas.flatMap((area) => tileLayoutAreaLabel(area) ?? []));
       return;
@@ -38,8 +42,9 @@ function areaSummary(layout: SavedTileLayout) {
     walk(node.first);
     walk(node.second);
   };
-  walk(layout.root);
-  const tiles = savedTileGroupCount(layout.root);
+  const tree = savedLayoutTree(layout);
+  walk(tree);
+  const tiles = savedTileGroupCount(tree);
   return `${tiles} ${tiles === 1 ? "tile" : "tiles"} · ${areas.join(", ")}`;
 }
 

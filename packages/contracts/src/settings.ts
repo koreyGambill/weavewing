@@ -147,63 +147,76 @@ export const DEFAULT_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
   { kind: "at", day: "monday", time: "09:00" },
 ];
 
+export const TileLayoutArea = Schema.Literals([
+  "device",
+  "side-chat",
+  "pull-request",
+  "chat",
+  "browser",
+  "terminal",
+  "files",
+  "notes",
+  "diff",
+  "pull-requests",
+]);
+export type TileLayoutArea = typeof TileLayoutArea.Type;
 /**
- * A view's area is `view:<id>`. The client owns the view ids and drops a tab whose id it no longer
- * knows, so a layout saved with a retired view still loads.
+ * A side panel view's area, `view:<id>`. The client owns the view ids and drops a tab whose id it
+ * no longer knows, so a layout saved with a retired view still loads.
  */
 export const ViewTileLayoutArea = Schema.TemplateLiteral([
   Schema.Literal("view:"),
   Schema.NonEmptyString.check(Schema.isMaxLength(64), Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)),
 ]);
-export const TileLayoutArea = Schema.Union([
-  Schema.Literals([
-    "device",
-    "side-chat",
-    "pull-request",
-    "chat",
-    "browser",
-    "terminal",
-    "files",
-    "notes",
-    "diff",
-    "pull-requests",
-  ]),
-  ViewTileLayoutArea,
-]);
-export type TileLayoutArea = typeof TileLayoutArea.Type;
-export type SavedTileNode =
-  | { readonly kind: "group"; readonly areas: ReadonlyArray<TileLayoutArea> }
+export type ViewTileLayoutArea = typeof ViewTileLayoutArea.Type;
+type SavedTileTree<Area> =
+  | { readonly kind: "group"; readonly areas: ReadonlyArray<Area> }
   | {
       readonly kind: "split";
       readonly axis: "horizontal" | "vertical";
       readonly ratio: number;
-      readonly first: SavedTileNode;
-      readonly second: SavedTileNode;
+      readonly first: SavedTileTree<Area>;
+      readonly second: SavedTileTree<Area>;
     };
-const SavedTileNodeRef = Schema.suspend((): Schema.Codec<SavedTileNode> => SavedTileNode);
-export const SavedTileNode = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("group"),
-    areas: Schema.Array(TileLayoutArea).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("split"),
-    axis: Schema.Literals(["horizontal", "vertical"]),
-    ratio: Schema.Number.check(Schema.isBetween({ minimum: 0.1, maximum: 0.9 })),
-    first: SavedTileNodeRef,
-    second: SavedTileNodeRef,
-  }),
-]);
+export type SavedTileNode = SavedTileTree<TileLayoutArea>;
+export type SavedTileViewNode = SavedTileTree<TileLayoutArea | ViewTileLayoutArea>;
 export const MAX_SAVED_TILE_GROUPS = 16;
-const countSavedTileGroups = (node: SavedTileNode): number =>
+const countSavedTileGroups = (node: SavedTileTree<unknown>): number =>
   node.kind === "group" ? 1 : countSavedTileGroups(node.first) + countSavedTileGroups(node.second);
+function savedTileTree<Area extends string>(
+  area: Schema.Codec<Area>,
+): Schema.Codec<SavedTileTree<Area>> {
+  const node: Schema.Codec<SavedTileTree<Area>> = Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literal("group"),
+      areas: Schema.Array(area).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("split"),
+      axis: Schema.Literals(["horizontal", "vertical"]),
+      ratio: Schema.Number.check(Schema.isBetween({ minimum: 0.1, maximum: 0.9 })),
+      first: Schema.suspend(() => node),
+      second: Schema.suspend(() => node),
+    }),
+  ]);
+  return node;
+}
+export const SavedTileNode = savedTileTree(TileLayoutArea);
+export const SavedTileViewNode = savedTileTree(Schema.Union([TileLayoutArea, ViewTileLayoutArea]));
+const withinGroupLimit = Schema.makeFilter(
+  (root: SavedTileTree<unknown>) => countSavedTileGroups(root) <= MAX_SAVED_TILE_GROUPS,
+);
 /** Tile tree, areas and split ratios only; applying one opens fresh surfaces. */
 export const SavedTileLayout = Schema.Struct({
   id: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
-  root: SavedTileNode.check(
-    Schema.makeFilter((root) => countSavedTileGroups(root) <= MAX_SAVED_TILE_GROUPS),
-  ),
+  /** The layout without side panel views, the only tree builds without views can decode. */
+  root: SavedTileNode.check(withinGroupLimit),
+  /**
+   * The same layout with its views, present only when it has some. Builds without views ignore
+   * it, and drop it when they save settings, which leaves `root`.
+   */
+  viewRoot: Schema.optionalKey(SavedTileViewNode.check(withinGroupLimit)),
 });
 export type SavedTileLayout = typeof SavedTileLayout.Type;
 export const SavedTileLayouts = Schema.Array(SavedTileLayout).check(Schema.isMaxLength(32));
