@@ -553,6 +553,8 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
       );
       const failure = yield* Effect.flip(service.generate(reference));
       assert.include(failure.message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+      assert.include(failure.message, "temporary checkout");
+      assert.notInclude(failure.message, "need a T3 worktree");
       assert.strictEqual(yield* Ref.get(generated), 0);
       const worktrees = yield* git(repositories.workspace, ["worktree", "list", "--porcelain"]);
       assert.strictEqual(worktrees.match(/^worktree /gm)?.length, 1);
