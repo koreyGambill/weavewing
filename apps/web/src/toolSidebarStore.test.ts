@@ -133,3 +133,27 @@ describe("upgrading from the left rail", () => {
     expect(loaded.views).toMatchObject({ todoFilter: "all", todoScope: "thread" });
   });
 });
+
+it.each([
+  [[], []],
+  [["related"], []],
+  [["links", "related"], ["links"]],
+  [["details", "environments", "context"], ["details"]],
+  [
+    ["inbox", "calendar", "status", "unrecognized"],
+    ["inbox", "calendar", "status"],
+  ],
+  [
+    ["todos", "artifacts", "links", "related", "timeline", "details", "environments", "inspect"],
+    ["artifacts", "links", "activity", "details"],
+  ],
+])("migrates and reloads picker visibility from the old rail list %j", async (hidden, expected) => {
+  const storage = memoryStorage({
+    [RAIL_KEY]: stored({ view: "threads", lastTool: "todos", hidden }, 2),
+  });
+  await load(storage);
+  expect(read(storage.values.get(SIDE_KEY))?.state.hidden).toEqual(expected);
+  await load(storage);
+  const { useToolSidebarStore } = await import("./toolSidebarStore");
+  expect(useToolSidebarStore.getState().hidden).toEqual(expected);
+});

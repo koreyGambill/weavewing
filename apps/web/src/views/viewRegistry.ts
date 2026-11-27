@@ -242,6 +242,6 @@ export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = [
 export const PANEL_VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition & { readonly id: ViewId }> =
   VIEW_IDS.map((id) => DEFINITIONS[id]).filter((entry) => viewSupportsHost(entry, "panel"));
 
-export function viewDefinition(id: RegisteredViewId): ViewDefinition {
+export function viewDefinition<Id extends RegisteredViewId>(id: Id) {
   return DEFINITIONS[id];
 }

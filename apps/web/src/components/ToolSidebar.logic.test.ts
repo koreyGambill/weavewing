@@ -183,6 +183,7 @@ describe("side area", () => {
       maximized: false,
       threadView: "links",
       threadSection: null,
+      hidden: [],
       revealSection: null,
       arrival: null,
     });

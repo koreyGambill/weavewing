@@ -46,6 +46,7 @@ const PersistedSideArea = Schema.Struct({
   pinned: Schema.Boolean,
   locked: Schema.NullOr(ScopedThreadRef),
   threadView: Schema.optionalKey(Schema.String),
+  hidden: Schema.optionalKey(Schema.Unknown),
 });
 
 /** The tools sidebar's stored shape before it became the side area. */
@@ -61,6 +62,7 @@ export interface SideAreaState {
   readonly width: number;
   /** Stays open through thread switches and outside clicks; the content still follows. */
   readonly pinned: boolean;
+  readonly hidden: ReadonlyArray<ViewId>;
   /** Holds thread views on this thread instead of the selected one. */
   readonly locked: ScopedThreadRef | null;
   readonly maximized: boolean;
@@ -79,6 +81,7 @@ export const INITIAL_SIDE_AREA: SideAreaState = {
   view: "details",
   width: 300,
   pinned: false,
+  hidden: [],
   locked: null,
   maximized: false,
   threadView: "details",
@@ -118,6 +121,7 @@ export type SideAreaAction =
   | { type: "close" }
   /** An outside click, Escape outside the side area or a thread switch: closes unless pinned. */
   | { type: "dismiss" }
+  | { type: "setHidden"; view: ViewId; hidden: boolean }
   | { type: "pin" }
   | { type: "lock"; thread: ScopedThreadRef | null }
   | { type: "maximize" }
@@ -163,6 +167,7 @@ export function restoreSideArea(value: unknown): SideAreaState {
       locked,
       maximized: false,
       arrival: null,
+      hidden: restoreHiddenViews(current.value.hidden),
       revealSection: shown.section ?? null,
       threadView: isThreadViewId(last.view) ? last.view : INITIAL_SIDE_AREA.threadView,
       threadSection: last.section ?? null,
@@ -246,10 +251,42 @@ export function migrateViewId(value: unknown): ViewId | null {
   return migrateViewTarget(value)?.view ?? null;
 }
 
+/** Hiding the final thread view would leave the picker without a thread destination. */
+export function canHideView(view: ViewId, hidden: ReadonlyArray<ViewId>): boolean {
+  return isGlobalViewId(view) || THREAD_VIEW_IDS.some((id) => id !== view && !hidden.includes(id));
+}
+
+function restoreHiddenViews(value: unknown): ReadonlyArray<ViewId> {
+  if (!Array.isArray(value)) return [];
+  const hidden = VIEW_IDS.filter((id) => value.includes(id));
+  return THREAD_VIEW_IDS.every((id) => hidden.includes(id))
+    ? hidden.filter((id) => id !== THREAD_VIEW_IDS[0])
+    : hidden;
+}
+
+function migrateRailHidden(value: unknown): ReadonlyArray<ViewId> {
+  if (!Array.isArray(value)) return [];
+  const old = new Set(value);
+  const mapped = new Set(value.map(migrateViewId));
+  // An alias counts for its old view, and each member of a merged view must have been hidden.
+  if (!(old.has("links") || old.has("marks") || old.has("ticket")) || !old.has("related")) {
+    mapped.delete("links");
+  }
+  if (
+    !old.has("details") ||
+    !old.has("environments") ||
+    !(old.has("inspect") || old.has("context"))
+  ) {
+    mapped.delete("details");
+  }
+  return restoreHiddenViews([...mapped]);
+}
+
 /** The left rail's stored selection: the view it showed and the last tool it remembered. */
 export interface RetiredRailSelection {
   readonly view?: unknown;
   readonly lastTool?: unknown;
+  readonly hidden?: unknown;
 }
 
 /**
@@ -264,10 +301,12 @@ export function adoptRetiredRail(state: SideAreaState, rail: RetiredRailSelectio
     last && isThreadViewId(last.view)
       ? { threadView: last.view, threadSection: last.section ?? null }
       : {};
-  if (shown === null || state.open) return { ...state, ...remembered };
+  const hidden = migrateRailHidden(rail.hidden);
+  if (shown === null || state.open) return { ...state, ...remembered, hidden };
   return {
     ...state,
     ...remembered,
+    hidden,
     open: true,
     view: shown.view,
     revealSection: shown.section ?? null,
@@ -342,6 +381,19 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
       return { ...state, open: false, maximized: false };
     case "dismiss":
       return state.pinned ? state : { ...state, open: false, maximized: false };
+    case "setHidden": {
+      const { view, hidden } = action;
+      if (!hidden) return { ...state, hidden: state.hidden.filter((id) => id !== view) };
+      if (state.hidden.includes(view) || !canHideView(view, state.hidden)) return state;
+      const nextHidden = [...state.hidden, view];
+      const fallback = THREAD_VIEW_IDS.find((id) => !nextHidden.includes(id)) ?? THREAD_VIEW_IDS[0];
+      if (view === state.view) return { ...withView(state, fallback), hidden: nextHidden };
+      return {
+        ...state,
+        hidden: nextHidden,
+        ...(view === state.threadView ? { threadView: fallback, threadSection: null } : {}),
+      };
+    }
     case "pin":
       return { ...state, pinned: !state.pinned };
     case "lock":

@@ -118,6 +118,11 @@ conversation and names it. **Automations** opened from a thread lists that threa
 automations; remove the **This thread** chip to list them all. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
+To hide a view from the picker, open the view, reopen the picker, then choose
+**Hide** with the view's name. Use **Show** under **Hidden views** to put it
+back. Shortcuts and links still open hidden views. At least one thread view
+stays in the picker. These choices are saved in this browser.
+
 Calendar, Status and Pull requests also open as full pages beside the thread list.
 In the side panel, the expand button next to **Pin** opens Calendar or Status as a
 page; for a thread view it maximizes the panel instead. The command palette offers

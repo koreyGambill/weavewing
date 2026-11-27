@@ -488,6 +488,9 @@ it("keeps a page-only view out of the side panel's picker", async () => {
   await userEvent.click(panel.getByRole("button", { name: /^View: Calendar/ }));
   await expect.element(page.getByRole("menuitemradio", { name: "Status" })).toBeVisible();
   expect(page.getByRole("menuitemradio", { name: "Pull requests" }).elements()).toHaveLength(0);
+  expect(
+    page.getByRole("menuitem", { name: /^(Hide|Show) Pull requests$/ }).elements(),
+  ).toHaveLength(0);
   await userEvent.keyboard("{Escape}");
 });
 
@@ -497,7 +500,7 @@ it("shows a way back for a view id with no page", async () => {
   await using _app = stack;
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "checklist" } }));
   await expect.element(screen.getByRole("heading", { name: "View not found" })).toHaveFocus();
-  await expect.element(screen.getByText("Todos has no page")).toBeVisible();
+  await expect.element(screen.getByText("Checklist has no page")).toBeVisible();
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "no-such-view" } }));
   await expect.element(screen.getByText("There is no view here")).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Return to previous page" }));
@@ -778,4 +781,29 @@ it("lists bookmark to-dos in Checklist All and keeps plain bookmarks in the thre
   expect(checklist.getByText("Saved only").query()).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: /^View: Checklist/ }));
   await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*1/ })).toBeVisible();
+});
+
+it("hides the current view from the picker, opens it explicitly, and restores it by keyboard", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("picker-visibility", 1)], 390);
+  await using _app = stack;
+  await act(() => openInbox());
+  const picker = screen.getByRole("button", { name: /^View: / });
+  await expect.element(picker).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  const hide = page.getByRole("menuitem", { name: "Hide Inbox" });
+  await expect.element(hide).toBeVisible();
+  hide.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(screen.getByRole("button", { name: /^View: Checklist/ })).toHaveFocus();
+  await act(() => openInbox());
+  await expect.element(screen.getByRole("button", { name: /^View: Inbox/ })).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  expect(page.getByRole("menuitemradio", { name: /^Inbox/ }).query()).toBeNull();
+  const show = page.getByRole("menuitem", { name: "Show Inbox" });
+  await expect.element(show).toBeVisible();
+  show.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(picker).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByRole("menuitemradio", { name: /^Inbox/ })).toBeVisible();
 });

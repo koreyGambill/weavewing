@@ -191,18 +191,22 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       // v0 stored the retired right panel's { open, view }; v1 and v2 the left rail's view and last
       // tool. The side panel shows views now, so it takes the selection and the rail's fields go.
       migrate: (persisted, version) => {
-        const {
-          view,
-          lastTool,
-          hidden: _hidden,
-          ...rest
-        } = (persisted ?? {}) as {
+        const { view, lastTool, hidden, ...rest } = (persisted ?? {}) as {
           view?: unknown;
           lastTool?: unknown;
           hidden?: unknown;
         };
         adoptRetiredRailSelection(
-          version === 0 ? { lastTool: view ?? "checklist" } : { view, lastTool },
+          version === 0
+            ? { lastTool: view ?? "checklist" }
+            : {
+                view,
+                lastTool,
+                hidden:
+                  version === 1 && Array.isArray(hidden)
+                    ? hidden.map((id) => (id === "status" ? "inbox" : id))
+                    : hidden,
+              },
         );
         return rest as Partial<ThreadContextSidebarState>;
       },

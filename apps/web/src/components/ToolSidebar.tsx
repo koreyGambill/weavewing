@@ -51,6 +51,7 @@ import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { useRouteDraft, useSideAreaDetailsSetter, useSideAreaThreadRef } from "./threadToolsHost";
 import {
   SIDE_AREA_WIDE_MEDIA_QUERY,
+  canHideView,
   describeLockedThread,
   resolveSideAreaWidth,
   resolveViewLayout,
@@ -65,6 +66,7 @@ import {
   Menu,
   MenuGroup,
   MenuGroupLabel,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -700,7 +702,13 @@ function SideAreaBody({
   );
 }
 
-function ViewPicker({ definition, target }: { definition: ViewDefinition; target: ViewTarget }) {
+function ViewPicker({
+  definition,
+  target,
+}: {
+  definition: (typeof PANEL_VIEW_DEFINITIONS)[number];
+  target: ViewTarget;
+}) {
   const [open, setOpen] = useState(false);
   const drawerMounted = useMobileSidebarSheetMounted();
   const requests = useToolSidebarStore(sideAreaOpenRequests);
@@ -710,16 +718,14 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
     if (!drawerMounted && takeSideAreaFocusRequest(requests))
       trigger.current?.focus({ preventScroll: true });
   }, [drawerMounted, requests]);
+  const hidden = useToolSidebarStore((state) => state.hidden);
+  const dispatch = useToolSidebarStore((state) => state.dispatch);
+  const visibleViews = PANEL_VIEW_DEFINITIONS.filter((entry) => !hidden.includes(entry.id));
+  const hiddenViews = PANEL_VIEW_DEFINITIONS.filter((entry) => hidden.includes(entry.id));
   const Icon = definition.icon;
   const groups = [
-    {
-      label: "This thread",
-      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread"),
-    },
-    {
-      label: "Everywhere",
-      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "global"),
-    },
+    { label: "This thread", views: visibleViews.filter((entry) => entry.scope === "thread") },
+    { label: "Everywhere", views: visibleViews.filter((entry) => entry.scope === "global") },
   ];
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -744,42 +750,71 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
           value={definition.id}
           onValueChange={(value) => {
             const next = PANEL_VIEW_DEFINITIONS.find((entry) => entry.id === value);
-            if (next) useToolSidebarStore.getState().dispatch({ type: "show", view: next.id });
+            if (next) dispatch({ type: "show", view: next.id });
           }}
         >
-          {groups.map((group, index) => (
-            <Fragment key={group.label}>
-              {index > 0 ? <MenuSeparator /> : null}
-              <MenuGroup>
-                <MenuGroupLabel>{group.label}</MenuGroupLabel>
-                {group.views.map((entry) => (
-                  <Tooltip key={entry.id}>
-                    <TooltipTrigger
-                      render={
-                        <MenuRadioItem
-                          value={entry.id}
-                          closeOnClick
-                          aria-description={entry.about}
-                        />
-                      }
-                    >
-                      <span className="flex items-center gap-2">
-                        <entry.icon className="text-muted-foreground" />
-                        {entry.title}
-                        {open && entry.PickerCount ? (
-                          <DeferEnvironmentQueries value>
-                            <entry.PickerCount target={target} />
-                          </DeferEnvironmentQueries>
-                        ) : null}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipPopup side="right">{entry.about}</TooltipPopup>
-                  </Tooltip>
-                ))}
-              </MenuGroup>
-            </Fragment>
-          ))}
+          {groups
+            .filter((group) => group.views.length > 0)
+            .map((group, index) => (
+              <Fragment key={group.label}>
+                {index > 0 ? <MenuSeparator /> : null}
+                <MenuGroup>
+                  <MenuGroupLabel>{group.label}</MenuGroupLabel>
+                  {group.views.map((entry) => (
+                    <Tooltip key={entry.id}>
+                      <TooltipTrigger
+                        render={
+                          <MenuRadioItem
+                            value={entry.id}
+                            closeOnClick
+                            aria-description={entry.about}
+                          />
+                        }
+                      >
+                        <span className="flex items-center gap-2">
+                          <entry.icon className="text-muted-foreground" />
+                          {entry.title}
+                          {open && entry.PickerCount ? (
+                            <DeferEnvironmentQueries value>
+                              <entry.PickerCount target={target} />
+                            </DeferEnvironmentQueries>
+                          ) : null}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipPopup side="right">{entry.about}</TooltipPopup>
+                    </Tooltip>
+                  ))}
+                </MenuGroup>
+              </Fragment>
+            ))}
         </MenuRadioGroup>
+        {hidden.includes(definition.id) ? null : (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              disabled={!canHideView(definition.id, hidden)}
+              onClick={() => dispatch({ type: "setHidden", view: definition.id, hidden: true })}
+            >
+              Hide {definition.title}
+            </MenuItem>
+          </>
+        )}
+        {hiddenViews.length > 0 ? (
+          <>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Hidden views</MenuGroupLabel>
+              {hiddenViews.map((entry) => (
+                <MenuItem
+                  key={entry.id}
+                  onClick={() => dispatch({ type: "setHidden", view: entry.id, hidden: false })}
+                >
+                  Show {entry.title}
+                </MenuItem>
+              ))}
+            </MenuGroup>
+          </>
+        ) : null}
       </MenuPopup>
     </Menu>
   );
