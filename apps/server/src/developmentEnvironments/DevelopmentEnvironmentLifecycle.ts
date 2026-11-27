@@ -57,6 +57,8 @@ export { DevelopmentEnvironmentLifecycleError };
 
 type Failure<A> = Effect.Effect<A, DevelopmentEnvironmentLifecycleError>;
 
+const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
 /** A branch `prepareLaunch` created in the project's repository, and the commit it started at. */
 export interface LaunchBranch {
   readonly sourcePath: string;
@@ -100,7 +102,8 @@ export class DevelopmentEnvironmentLifecycle extends Context.Service<
      * The environment for one isolated thread launch, named from its stable launch key: a retry
      * finds the environment an earlier attempt made, and separate launches each get their own.
      * `startFromOrigin` bases a new branch on the base branch's remote-tracking ref.
-     * `newBranch` names the branch this call created, for `discardLaunch`.
+     * `newBranch` names the branch this call created from a full commit SHA `baseRef`, for
+     * `discardLaunch`; a ref base reports none, so its branch is kept.
      */
     readonly prepareLaunch: (input: {
       readonly projectId: ProjectId;
@@ -722,13 +725,13 @@ const make = Effect.gen(function* () {
         .pipe(Effect.ignore({ log: true }));
       return yield* lifecycleError("attach", result.failure.reason, created.id);
     }
-    // The commit Xwing started the branch from, so a commit a checkout hook or setup made during
-    // the attach keeps the branch.
-    const tip = branchWasAbsent ? result.repository?.baseRevision : undefined;
+    // Only a commit base names the branch's first commit before Xwing runs; a ref base can resolve
+    // differently inside Xwing, and a hook or setup can commit during the attach.
+    const tip = branchWasAbsent && COMMIT_SHA.test(input.baseRef) ? input.baseRef : undefined;
     return {
       xwingEnvironmentId: created.id,
       created: true,
-      ...(tip === undefined || tip === "" ? {} : { newBranch: { sourcePath, name: branch, tip } }),
+      ...(tip === undefined ? {} : { newBranch: { sourcePath, name: branch, tip } }),
     };
   });
 
