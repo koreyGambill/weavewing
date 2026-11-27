@@ -36,6 +36,7 @@ import {
 } from "../../provider/Drivers/ClaudeExecutable.ts";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import { claudeTaskOutputRoot } from "./ClaudeTaskOutputTail.ts";
+import { withoutClaudeInstructionNotice } from "./ClaudeInstructionUpdates.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderInstallationGate from "../../provider/ProviderInstallationGate.ts";
 import { ProviderAdapterDriverCreateError } from "@t3tools/provider-core/server/adapterDriver";
@@ -319,6 +320,59 @@ function normalizeReplayFrame(value: unknown): unknown {
   );
 }
 
+/** An instruction-update notice the adapter put ahead of a prompt, and the frame it was on. */
+export interface ClaudeReplayInstructionNotice {
+  readonly label: string | undefined;
+  readonly text: string;
+}
+
+type PromptContent = SDKUserMessage["message"]["content"];
+
+/**
+ * Takes T3's instruction-update notice out of an outbound prompt. The notice carries the current
+ * instruction text, so recorded prompts leave it out and stay valid when that text changes; the
+ * adapter tests assert the notice itself. The adapter turns a string prompt into blocks to put the
+ * notice first, so a lone remaining text block goes back to a string when the recording has one.
+ */
+function withoutInstructionNotices(
+  frame: unknown,
+  expected: unknown,
+): { readonly frame: unknown; readonly notices: ReadonlyArray<string> } {
+  const message =
+    typeof frame === "object" && frame !== null && Reflect.get(frame, "type") === "prompt.offer"
+      ? (Reflect.get(frame, "message") as SDKUserMessage | undefined)
+      : undefined;
+  const content = message?.message?.content;
+  if (message === undefined || !Array.isArray(content)) return { frame, notices: [] };
+  const notices: Array<string> = [];
+  const kept = content.flatMap((block) => {
+    if (block.type !== "text") return [block];
+    const text = withoutClaudeInstructionNotice(block.text);
+    if (text === block.text) return [block];
+    notices.push(block.text);
+    return text === "" ? [] : [{ ...block, text }];
+  });
+  if (notices.length === 0) return { frame, notices };
+  const expectedMessage =
+    typeof expected === "object" && expected !== null
+      ? (Reflect.get(expected, "message") as SDKUserMessage | undefined)
+      : undefined;
+  const lone = kept.length === 1 ? kept[0] : undefined;
+  const restored: PromptContent =
+    typeof expectedMessage?.message?.content === "string" &&
+    lone?.type === "text" &&
+    Object.keys(lone).length === 2
+      ? lone.text
+      : kept;
+  return {
+    frame: {
+      ...frame,
+      message: { ...message, message: { ...message.message, content: restored } },
+    },
+    notices,
+  };
+}
+
 function sameFrame(left: unknown, right: unknown): boolean {
   return (
     stableStringify(normalizeReplayFrame(left)) === stableStringify(normalizeReplayFrame(right))
@@ -491,7 +545,10 @@ function makeClaudeSessionForkFrame(
 
 function makeReplayQueryRunner(
   transcript: ClaudeAgentSdkReplayTranscript,
-  replayOptions: { readonly replayGate?: ProviderReplayGate } = {},
+  replayOptions: {
+    readonly replayGate?: ProviderReplayGate;
+    readonly onInstructionNotice?: (notice: ClaudeReplayInstructionNotice) => void;
+  } = {},
 ): ClaudeQueryRunner {
   let cursor = 0;
   let failure: ClaudeAgentSdkReplayError | null = null;
@@ -707,7 +764,7 @@ function makeReplayQueryRunner(
     return { ...frame, message: rest };
   };
 
-  const assertNextOutboundFrame = (actual: ClaudeOutboundFrame) => {
+  const assertNextOutboundFrame = (outbound: ClaudeOutboundFrame) => {
     if (failure !== null) {
       throw failure;
     }
@@ -717,7 +774,7 @@ function makeReplayQueryRunner(
         new ClaudeReplayExhaustedError({
           scenario: transcript.scenario,
           cursor,
-          actual,
+          actual: outbound,
         }),
       );
     }
@@ -727,12 +784,14 @@ function makeReplayQueryRunner(
           scenario: transcript.scenario,
           cursor,
           expectedType: entry.type,
-          actual,
+          actual: outbound,
         }),
       );
     }
 
     const expected = entry.frame;
+    const { frame: actual, notices } = withoutInstructionNotices(outbound, expected);
+    for (const text of notices) replayOptions.onInstructionNotice?.({ label: entry.label, text });
     const expectedUuid = promptOfferUuid(expected);
     const actualUuid = promptOfferUuid(actual);
     if (
@@ -956,6 +1015,7 @@ function layerClaudeAgentSdkReplay(
   options: {
     readonly replayGate?: ProviderReplayGate;
     readonly queryRunner?: ClaudeQueryRunner;
+    readonly onInstructionNotice?: (notice: ClaudeReplayInstructionNotice) => void;
   } = {},
 ): Layer.Layer<ClaudeAdapterV2.ClaudeAgentSdkQueryRunner> {
   if (options.queryRunner !== undefined) {
@@ -1029,6 +1089,7 @@ function layerClaudeProviderAdapterRegistryReplay(
   options: {
     readonly replayGate?: ProviderReplayGate;
     readonly queryRunner?: ClaudeQueryRunner;
+    readonly onInstructionNotice?: (notice: ClaudeReplayInstructionNotice) => void;
   } = {},
 ) {
   const layerServerConfig = Layer.effect(
@@ -2840,6 +2901,22 @@ export const ClaudeOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarnes
   makeProviderAdapterRegistryLayer: (transcript, options) =>
     layerClaudeProviderAdapterRegistryReplay(transcript, options),
 };
+
+/** The Claude replay harness, keeping each instruction-update notice the adapter sent. */
+export function makeClaudeNoticeRecordingReplayHarness() {
+  const notices: Array<ClaudeReplayInstructionNotice> = [];
+  return {
+    notices,
+    harness: {
+      ...ClaudeOrchestratorReplayHarness,
+      makeProviderAdapterRegistryLayer: (transcript, options) =>
+        layerClaudeProviderAdapterRegistryReplay(transcript, {
+          ...options,
+          onInstructionNotice: (notice) => void notices.push(notice),
+        }),
+    } satisfies typeof ClaudeOrchestratorReplayHarness,
+  };
+}
 
 export function makeClaudeRestartReplayHarness(transcript: ClaudeAgentSdkReplayTranscript) {
   const queryRunner = makeReplayQueryRunner(transcript);

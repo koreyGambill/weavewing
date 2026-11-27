@@ -9,7 +9,10 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { ClaudeOrchestratorReplayHarness } from "../Adapters/ClaudeAdapterV2.testkit.ts";
+import {
+  ClaudeOrchestratorReplayHarness,
+  makeClaudeNoticeRecordingReplayHarness,
+} from "../Adapters/ClaudeAdapterV2.testkit.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "../Orchestrator.ts";
 import { userFacingDispatchErrorMessage } from "../UserFacingErrors.ts";
@@ -122,6 +125,33 @@ describe("Claude Agent SDK replay fixtures", () => {
       );
     }),
   );
+
+  // The replay compares prompts without T3's instruction-update notice, so this checks that the
+  // notice is still sent where it must be.
+  const rollbackFixture = findReplayFixture("thread_rollback");
+  const rollbackProvider = rollbackFixture?.providers.find(
+    (provider) => provider.driver === "claudeAgent",
+  );
+  if (rollbackFixture !== undefined && rollbackProvider !== undefined) {
+    it.effect(
+      "sends the complete current instructions with the first prompt after a rollback",
+      () =>
+        Effect.gen(function* () {
+          const recording = makeClaudeNoticeRecordingReplayHarness();
+          yield* runReplayFixture({
+            fixtureName: rollbackFixture.name,
+            buildInput: rollbackFixture.buildInput,
+            driver: rollbackProvider,
+            harness: recording.harness,
+          });
+          assert.deepEqual(
+            recording.notices.map((notice) => notice.label),
+            ["prompt.offer:3"],
+          );
+          assert.include(recording.notices[0]?.text, "here is the complete current set");
+        }),
+    );
+  }
 
   const afterRootFixture = findReplayFixture("claude_background_subagent_after_root");
   const afterRootProvider = afterRootFixture?.providers[0];
