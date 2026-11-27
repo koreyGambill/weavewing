@@ -153,20 +153,24 @@ it("puts the image in the composer with the answer and takes it out on Cancel", 
   await expect.element(note).toHaveValue("[Q1 image 1]");
 });
 
-it("turns Discuss into Cancel while the note is in the composer", async () => {
+it("discusses with a reference and leaves a typed note on the card, not in the composer", async () => {
   using _drafts = freshDrafts();
   // router: false because the card never navigates.
   await using screen = await render(<SavedQuestionCard />, { router: false });
   await userEvent.fill(screen.getByRole("textbox", { name: "Note for Q1" }), "Why a sidebar?");
-  const composerChips = () =>
-    (useComposerDraftStore.getState().getComposerDraft(threadRef)?.artifactAnswers ?? []).length;
+  const draft = () => useComposerDraftStore.getState().getComposerDraft(threadRef);
 
   await userEvent.tab();
-  await userEvent.click(screen.getByRole("button", { name: "Discuss" }));
-  await vi.waitFor(() => expect(composerChips()).toBe(1));
-  await expect.element(screen.getByRole("button", { name: "Discuss" })).not.toBeInTheDocument();
+  const discuss = screen.getByRole("button", { name: "Discuss Q1" });
+  await userEvent.click(discuss);
+  await vi.waitFor(() => expect(draft()?.waitingItems.map((record) => record.key)).toEqual(["Q1"]));
+  expect(draft()?.artifactAnswers ?? []).toEqual([]);
+  await expect.element(discuss).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .element(screen.getByRole("textbox", { name: "Note for Q1" }))
+    .toHaveValue("Why a sidebar?");
 
-  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await vi.waitFor(() => expect(composerChips()).toBe(0));
-  await expect.element(screen.getByRole("button", { name: "Discuss" })).toBeVisible();
+  await userEvent.click(discuss);
+  await vi.waitFor(() => expect(draft()?.waitingItems ?? []).toEqual([]));
+  await expect.element(discuss).toHaveAttribute("aria-pressed", "false");
 });
