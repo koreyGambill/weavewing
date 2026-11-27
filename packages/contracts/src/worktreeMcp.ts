@@ -18,7 +18,7 @@ export const WorktreeMcpHandoffInput = Schema.Struct({
   ),
   runSetupScript: Schema.optional(
     Schema.Boolean.annotate({
-      description: "Default true.",
+      description: "Default true. T3 worktrees only; an Xwing environment runs Xwing's installs.",
     }),
   ),
   continuationPrompt: Schema.optional(

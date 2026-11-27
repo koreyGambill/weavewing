@@ -318,6 +318,7 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
               threadId: request.threadId ?? request.commandId,
               period: request.commandId,
             },
+            newBranch: prepared.newBranch,
           })
         : Effect.void,
     ),

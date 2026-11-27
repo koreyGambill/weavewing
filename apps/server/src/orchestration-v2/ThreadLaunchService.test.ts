@@ -1397,6 +1397,7 @@ function xwingIntake(options: { readonly checkoutUnavailable?: boolean } = {}) {
           return {
             xwingEnvironmentId: XwingEnvironmentId.make("0123abcd"),
             created: prepared.filter((entry) => entry.launchKey === input.launchKey).length === 1,
+            newBranch: { sourcePath: "/repo", name: "t3/new-branch", tip: "0123abcd" },
           };
         }),
       discardLaunch: (input) => Effect.sync(() => void discarded.push(input)),
@@ -1583,6 +1584,8 @@ it.effect("removes the Xwing environment it made when the launch is not accepted
       {
         xwingEnvironmentId: XwingEnvironmentId.make("0123abcd"),
         hold: { threadId: "thread:launch:xwing-request", period: "command:launch:xwing-request" },
+        // Xwing keeps branches, so the branch this launch created goes with the environment.
+        newBranch: { sourcePath: "/repo", name: "t3/new-branch", tip: "0123abcd" },
       },
     ]);
   }).pipe(Effect.provide(intake.layer));
