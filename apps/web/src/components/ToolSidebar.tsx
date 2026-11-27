@@ -28,8 +28,9 @@ import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import {
+  completeSideAreaHandoff,
+  isSideAreaHandoffArriving,
   takeSideAreaFocusRequest,
-  takeSideAreaRouteHold,
   useToolSidebarStore,
 } from "../toolSidebarStore";
 import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
@@ -135,14 +136,34 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const routeThreadKey = useRouterState({
     select: (state) => threadKey(resolveThreadRouteRef(state.matches.at(-1)?.params ?? {})),
   });
+  // The resolved location changes together with the matches the thread key comes from.
+  const routePathname = useRouterState({ select: (state) => state.resolvedLocation?.pathname });
+  const routeIndex = useRouterState({
+    select: (state) => state.resolvedLocation?.state.__TSR_index,
+  });
   const seenThreadKey = useRef(routeThreadKey);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area.
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
-    if (takeSideAreaRouteHold()) return;
+    if (isSideAreaHandoffArriving({ pathname: routePathname, index: routeIndex })) return;
     useToolSidebarStore.getState().dispatch({ type: "dismiss" });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only a thread switch dismisses; the route position is read to recognise a handoff.
   }, [routeThreadKey]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A page handing its view over opens it here once the route arrives, then moves focus into the side area after the destination has placed its own focus.
+  useEffect(() => {
+    const route = { pathname: routePathname, index: routeIndex };
+    if (!completeSideAreaHandoff(route, toggleRef.current)) return;
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>("[data-side-area] header button")
+          ?.focus({ preventScroll: true });
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [routePathname, routeIndex]);
 
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -231,6 +252,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           <TooltipTrigger
             render={
               <Button
+                ref={toggleRef}
                 data-side-area-toggle
                 aria-label={
                   statusAlert && !open

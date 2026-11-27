@@ -8,6 +8,7 @@ import {
   transitionSideArea,
   type SideAreaAction,
   type SideAreaState,
+  type ViewId,
 } from "./components/ToolSidebar.logic";
 
 interface SideAreaStore extends SideAreaState {
@@ -25,21 +26,52 @@ export function takeSideAreaFocusRequest(): boolean {
   return requested;
 }
 
-let routeHold = false;
-
-/**
- * Keeps the side area open through the next route change, which closes an unpinned one, so a
- * page can hand its view to the side area and go back. The page releases it when it unmounts.
- */
-export function holdSideAreaThroughRoute(open: boolean) {
-  routeHold = open;
+/** A resolved location, its path and position in the session history; unset before the first. */
+export interface SideAreaRoute {
+  readonly pathname: string | undefined;
+  readonly index: number | undefined;
 }
 
-/** True once while a page's hand-over is pending. */
-export function takeSideAreaRouteHold(): boolean {
-  const held = routeHold;
-  routeHold = false;
-  return held;
+let handoff: {
+  readonly view: ViewId;
+  readonly from: string;
+  readonly toIndex: number;
+} | null = null;
+
+/**
+ * Opens `view` in the side area once the route leaves `from` for history entry `toIndex`, so a
+ * page can hand its view over as it goes back. That route change does not close the side area,
+ * and any other route change ignores the handoff.
+ */
+export function requestSideAreaHandoff(view: ViewId, from: string, toIndex: number) {
+  handoff = { view, from, toIndex };
+}
+
+export function cancelSideAreaHandoff() {
+  handoff = null;
+}
+
+function handoffArrived(route: SideAreaRoute) {
+  return handoff !== null && handoff.toIndex === route.index && handoff.from !== route.pathname;
+}
+
+/** True when a handoff is arriving on `route`, which must not close the side area. */
+export function isSideAreaHandoffArriving(route: SideAreaRoute): boolean {
+  return handoffArrived(route);
+}
+
+/**
+ * Opens the handed-over view on `route` and returns true, or false with no handoff for it.
+ * Closing the side area afterwards returns focus to `returnTo`, a control on this route.
+ */
+export function completeSideAreaHandoff(route: SideAreaRoute, returnTo: HTMLElement | null) {
+  if (!handoff || !handoffArrived(route)) return false;
+  const { view } = handoff;
+  handoff = null;
+  useToolSidebarStore.getState().dispatch({ type: "show", view });
+  returnFocus = returnTo;
+  focusOnOpen = false;
+  return true;
 }
 
 export const useToolSidebarStore = create<SideAreaStore>()(
