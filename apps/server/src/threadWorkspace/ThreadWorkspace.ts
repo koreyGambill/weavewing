@@ -18,10 +18,10 @@ import {
   taskWaitingItems,
   TrackedAnswerText,
   TrackedAnswerMore,
+  TrackedAsk,
   type RunId,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ThreadStreamItem,
-  type TrackedAsk,
   type TrackedAnswer,
   type TrackedAnswerWaitingRow,
   type TrackedAnswersPage,
@@ -317,6 +317,7 @@ const storage = (cause: unknown) =>
   });
 const Envelope = Schema.Struct({ formatVersion: Schema.Literal(3), workspace: Workspace });
 const decode = Schema.decodeEffect(Schema.fromJsonString(Envelope));
+const decodeStoredAsks = Schema.decodeUnknownEffect(Schema.Array(TrackedAsk));
 const encode = Schema.encodeEffect(Schema.fromJsonString(Envelope));
 const OldEnvelope = Schema.Struct({
   formatVersion: Schema.Literals([1, 2]),
@@ -814,6 +815,7 @@ const make = Effect.gen(function* () {
       threadId: ThreadId,
       questions: Schema.optional(Schema.Array(Schema.Unknown)),
       asksRevision: Schema.optional(Schema.Number),
+      asks: Schema.optional(Schema.Unknown),
       items: Schema.optional(
         Schema.Array(Schema.Struct({ owner: Schema.optional(Schema.String) })),
       ),
@@ -821,6 +823,7 @@ const make = Effect.gen(function* () {
   });
   const storedWorkspaces = Effect.fn("ThreadWorkspace.storedWorkspaces")(function* (
     unreadable: "fail" | "skip" = "fail",
+    includeAsks = false,
   ) {
     const files = yield* fs.readDirectory(directory).pipe(
       Effect.catchIf(
@@ -832,7 +835,7 @@ const make = Effect.gen(function* () {
     const stored: Array<{
       readonly threadId: ThreadId;
       readonly hasWaitingSources: boolean;
-      readonly hasAsks: boolean;
+      readonly asks: ReadonlyArray<TrackedAsk>;
     }> = [];
     for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
       const value = yield* fs.readFileString(path.join(directory, file)).pipe(
@@ -851,9 +854,13 @@ const make = Effect.gen(function* () {
         ),
       );
       if (value === undefined) continue;
+      const asks =
+        includeAsks && value.workspace.asks !== undefined
+          ? yield* decodeStoredAsks(value.workspace.asks).pipe(Effect.mapError(storage))
+          : [];
       stored.push({
         threadId: value.workspace.threadId,
-        hasAsks: value.workspace.asksRevision !== undefined,
+        asks,
         // Questions are never deleted, and a user task stays in the list once done.
         hasWaitingSources:
           (value.workspace.questions?.length ?? 0) > 0 ||
@@ -994,23 +1001,22 @@ const make = Effect.gen(function* () {
     get,
     recordTrackedMessages,
     asksRead: Effect.fn("ThreadWorkspace.asksRead")(function* (input) {
-      const ids =
-        "all" in input
-          ? (yield* storedWorkspaces("skip"))
-              .filter((stored) => stored.hasAsks)
-              .map((stored) => stored.threadId)
-          : [input.threadId];
+      const all = "all" in input;
+      // The history scan reads atomic file snapshots. Checklist repairs belong to the regular load.
+      const workspaces = all
+        ? (yield* storedWorkspaces("skip", true)).filter(({ asks }) => asks.length > 0)
+        : [{ threadId: input.threadId, asks: undefined }];
       const entries: Array<TrackedAnswersPage["entries"][number]> = [];
-      for (const threadId of ids) {
+      for (const { threadId, asks } of workspaces) {
         const thread = yield* requireThread(threadId).pipe(
           Effect.catchIf(
-            (error) => "all" in input && error.code === "not_found",
+            (error) => all && error.code === "not_found",
             () => Effect.succeed(null),
           ),
         );
         if (thread === null) continue;
-        const workspace = yield* load(threadId);
-        for (const ask of workspace.asks ?? []) {
+        const savedAsks = asks ?? (yield* load(threadId).pipe(lock.withPermit)).asks ?? [];
+        for (const ask of savedAsks) {
           entries.push({
             threadId,
             threadTitle: thread.title,
@@ -1024,7 +1030,7 @@ const make = Effect.gen(function* () {
         toRead: entries.filter(({ ask }) => ask.state === "answered").length,
         closed: entries.filter(({ ask }) => ask.state === "closed").length,
       };
-      if (!("all" in input)) return { entries, counts };
+      if (!all) return { entries, counts };
       const key = (entry: TrackedAnswersPage["entries"][number]) =>
         `${entry.ask.createdAt}/${entry.threadId}/${entry.ask.id}`;
       const cursor = input.cursor;
@@ -1037,7 +1043,7 @@ const make = Effect.gen(function* () {
         counts,
         ...(sorted.length > page.length ? { cursor: key(page[page.length - 1]!) } : {}),
       };
-    }, lock.withPermit),
+    }),
     trackMessage: Effect.fn("ThreadWorkspace.trackMessage")(function* (input) {
       const current = yield* read(input.threadId);
       if (current.asks?.some((ask) => ask.askedInMessageId === input.messageId))

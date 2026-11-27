@@ -25,7 +25,9 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -110,7 +112,10 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   const delegatedChildren = new Set<ThreadId>();
   // Like the orchestrator's command receipts: a repeated command id delivers nothing new.
   const delivered: ThreadManagement.ThreadManagementSendInput[] = [];
-  const hooks = { onSend: (): void => undefined };
+  const hooks = {
+    onSend: (): void => undefined,
+    beforeRead: (_id: ThreadId): Effect.Effect<void> => Effect.void,
+  };
   const messages: OrchestrationV2ConversationMessage[] = [];
   // The thread's own runs; another thread id reads as a delegated lane with one run.
   const threadRuns: OrchestrationV2Run[] = [];
@@ -158,28 +163,30 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
           return turnMessage.sole ? turnMessage.current : null;
         }),
       getThreadRecords: (id) =>
-        Effect.sync(() => ({
-          ...projection,
-          messages,
-          thread: {
-            ...projection.thread,
-            id,
-            waiting: mirror.waiting,
-            archivedAt: threadState.archivedAt,
-            ...(delegatedChildren.has(id)
-              ? {
-                  lineage: {
-                    parentThreadId: threadId,
-                    rootThreadId: threadId,
-                    relationshipToParent: "subagent" as const,
-                  },
-                }
-              : {}),
-          },
-          runs: id === threadId ? threadRuns : [run()],
-          attempts: id === threadId ? threadAttempts : [],
-          providerTurns: id === threadId ? threadProviderTurns : [],
-        })),
+        hooks.beforeRead(id).pipe(
+          Effect.map(() => ({
+            ...projection,
+            messages,
+            thread: {
+              ...projection.thread,
+              id,
+              waiting: mirror.waiting,
+              archivedAt: threadState.archivedAt,
+              ...(delegatedChildren.has(id)
+                ? {
+                    lineage: {
+                      parentThreadId: threadId,
+                      rootThreadId: threadId,
+                      relationshipToParent: "subagent" as const,
+                    },
+                  }
+                : {}),
+            },
+            runs: id === threadId ? threadRuns : [run()],
+            attempts: id === threadId ? threadAttempts : [],
+            providerTurns: id === threadId ? threadProviderTurns : [],
+          })),
+        ),
       streamDomainEvents: Stream.fromQueue(domainEvents),
       dispatch: (_command: OrchestrationV2ServerCommand) =>
         Effect.succeed({ sequence: 1, storedEvents: [] }),
@@ -421,6 +428,45 @@ it.effect("pages archived tracked answers with counts from the whole environment
     expect(next.cursor).toBeUndefined();
     expect(new Set([...first.entries, ...next.entries].map((row) => row.ask.id)).size).toBe(52);
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "lets a tracked answer write complete during an All scan and stops the scan on interrupt",
+  () =>
+    Effect.gen(function* () {
+      const { service, hooks } = yield* harness();
+      const historyThreads = Array.from({ length: 12 }, (_, index) =>
+        ThreadId.make(`history-${index}`),
+      );
+      for (const id of [...historyThreads, threadId]) {
+        yield* service.recordTrackedMessages(
+          id,
+          [{ ...trackedMessage("question"), threadId: id }],
+          true,
+        );
+      }
+      const scanPaused = yield* Deferred.make<void>();
+      const continuation = yield* Deferred.make<void>();
+      const readThreads: ThreadId[] = [];
+      hooks.beforeRead = (id) => {
+        if (id === threadId) return Effect.void;
+        readThreads.push(id);
+        return Deferred.succeed(scanPaused, undefined).pipe(
+          Effect.andThen(Deferred.await(continuation)),
+        );
+      };
+      const scan = yield* service.asksRead({ all: true }).pipe(Effect.forkScoped);
+      yield* Deferred.await(scanPaused);
+      const answer = yield* service.answerAsk({
+        threadId,
+        id: "A1",
+        text: "Reconnect.",
+        runId: null,
+      });
+      expect(answer.n).toBe(1);
+      yield* Fiber.interrupt(scan);
+      expect(readThreads).toHaveLength(1);
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("requires handed_off while a ticket is open and reads its live state", () =>
