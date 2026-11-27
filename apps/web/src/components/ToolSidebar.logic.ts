@@ -272,6 +272,9 @@ function migrateRailHidden(value: unknown): ReadonlyArray<ViewId> {
   if (!(old.has("links") || old.has("marks") || old.has("ticket")) || !old.has("related")) {
     mapped.delete("links");
   }
+  if (!old.has("timeline") || !old.has("evidence")) {
+    mapped.delete("activity");
+  }
   if (
     !old.has("details") ||
     !old.has("environments") ||

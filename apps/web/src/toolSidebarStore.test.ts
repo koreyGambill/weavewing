@@ -136,8 +136,19 @@ describe("upgrading from the left rail", () => {
 
 it.each([
   [[], []],
+  [["links"], []],
   [["related"], []],
   [["links", "related"], ["links"]],
+  [["timeline"], []],
+  [["evidence"], ["evidence"]],
+  [
+    ["timeline", "evidence"],
+    ["activity", "evidence"],
+  ],
+  [["environments", "inspect"], []],
+  [["details", "inspect"], []],
+  [["details", "environments"], []],
+  [["details", "environments", "inspect"], ["details"]],
   [["details", "environments", "context"], ["details"]],
   [
     ["inbox", "calendar", "status", "unrecognized"],
@@ -145,7 +156,21 @@ it.each([
   ],
   [
     ["todos", "artifacts", "links", "related", "timeline", "details", "environments", "inspect"],
-    ["artifacts", "links", "activity", "details"],
+    ["checklist", "artifacts", "links", "details"],
+  ],
+  [
+    [
+      "todos",
+      "artifacts",
+      "links",
+      "related",
+      "timeline",
+      "evidence",
+      "details",
+      "environments",
+      "inspect",
+    ],
+    ["artifacts", "links", "activity", "details", "evidence"],
   ],
 ])("migrates and reloads picker visibility from the old rail list %j", async (hidden, expected) => {
   const storage = memoryStorage({
