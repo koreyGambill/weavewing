@@ -1525,13 +1525,13 @@ function EnvironmentTasks({
   readonly onEdit: (task: ScheduledTask) => void;
 }) {
   const environmentId = environment.environmentId;
-  const hasRunHistory =
-    environment.serverConfig?.environment.capabilities.automationRunHistory === true;
+  const hasPerTaskRunHistory =
+    environment.serverConfig?.environment.capabilities.automations === true;
   const [historyTaskId, setHistoryTaskId] = useState<ScheduledTask["id"] | null>(null);
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
-  const historyTask = hasRunHistory
+  const historyTask = hasPerTaskRunHistory
     ? tasks.data?.tasks.find((task) => task.id === historyTaskId)
     : undefined;
   const visibleTasks = tasks.data?.tasks.filter(
@@ -1634,7 +1634,7 @@ function EnvironmentTasks({
             <Menu
               actions={[
                 { id: "edit", title: "Edit" },
-                ...(hasRunHistory ? [{ id: "history", title: "Run history" }] : []),
+                ...(hasPerTaskRunHistory ? [{ id: "history", title: "Run history" }] : []),
                 ...(task.threadId !== null && scheduledTaskThreadMode(task) !== "new_thread"
                   ? [{ id: "thread", title: "Open thread" }]
                   : []),
@@ -1656,7 +1656,7 @@ function EnvironmentTasks({
                 const action = nativeEvent.event;
                 if (action === "edit") {
                   onEdit(task);
-                } else if (action === "history" && hasRunHistory) {
+                } else if (action === "history" && hasPerTaskRunHistory) {
                   setHistoryTaskId(task.id);
                 } else if (action === "thread" && task.threadId !== null) {
                   selectDetail({
