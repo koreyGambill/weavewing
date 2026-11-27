@@ -10,8 +10,13 @@ export function withUnplacedAnswerCards(
       entry.kind === "thread-answer" ? [`${entry.answerRef.id}/${entry.answerRef.n}`] : [],
     ),
   );
+  const firstLoadedAt = Date.parse(entries[0]?.createdAt ?? "");
   const unplaced = asks.flatMap((ask): TimelineEntry[] => {
-    if (ask.state !== "answered") return [];
+    const recentlyClosed =
+      ask.state === "closed" &&
+      ask.closedAt !== null &&
+      (Number.isNaN(firstLoadedAt) || Date.parse(ask.closedAt) >= firstLoadedAt);
+    if (ask.state !== "answered" && ask.state !== "owed" && !recentlyClosed) return [];
     const answer = ask.answers.at(-1);
     if (!answer || placed.has(`${ask.id}/${answer.n}`)) return [];
     return [

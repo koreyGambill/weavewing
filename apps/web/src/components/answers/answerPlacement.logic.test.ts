@@ -29,5 +29,20 @@ it("puts the latest waiting answer at the loaded start when only its earlier cal
   expect(entries.map((entry) => entry.id)).toEqual(["tracked-answer-fallback:A2", "older-call"]);
   expect(entries[0]).toMatchObject({ answerRef: { id: "A2", n: 2 } });
   expect(withUnplacedAnswerCards(entries, [ask])).toBe(entries);
-  expect(withUnplacedAnswerCards([older], [{ ...ask, state: "closed" }])).toEqual([older]);
+  expect(withUnplacedAnswerCards([older], [{ ...ask, state: "closed", closedAt: at }])).toEqual(
+    entries,
+  );
+  expect(withUnplacedAnswerCards([older], [{ ...ask, state: "owed" }])).toEqual(entries);
+  expect(
+    withUnplacedAnswerCards(
+      [older],
+      [
+        {
+          ...ask,
+          state: "closed",
+          closedAt: "2026-10-01T12:00:00.000Z",
+        },
+      ],
+    ),
+  ).toEqual([older]);
 });

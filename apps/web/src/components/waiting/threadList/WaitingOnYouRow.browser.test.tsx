@@ -53,18 +53,18 @@ it("opens from the keyboard, moves with arrows, and hands focus back to the row 
 
   row.element().focus();
   await userEvent.keyboard("{Enter}");
-  const first = screen.getByRole("button", { name: "Retry toast: 1 change to check" });
+  const first = page.getByRole("button", { name: "Retry toast: 1 change to check" });
   await vi.waitFor(() => expect(document.activeElement).toBe(first.element()));
   await expect
-    .element(screen.getByRole("button", { name: "Release notes: 1 discussing" }))
+    .element(page.getByRole("button", { name: "Release notes: 1 discussing" }))
     .toBeVisible();
 
   await userEvent.keyboard("{ArrowDown}");
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Webhook backoff: 1 change to check" }).element(),
+    page.getByRole("button", { name: "Webhook backoff: 1 change to check" }).element(),
   );
   await userEvent.keyboard("{End}");
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: /Open Inbox/ }).element());
+  expect(document.activeElement).toBe(page.getByRole("button", { name: /Open Inbox/ }).element());
   await userEvent.keyboard("{ArrowDown}");
   expect(document.activeElement).toBe(first.element());
 
@@ -82,7 +82,7 @@ it("opens the Inbox view in the side panel from the list", async () => {
     </SidebarProvider>,
   );
   await userEvent.click(screen.getByRole("button", { name: /^Waiting on you/ }));
-  await userEvent.click(screen.getByRole("button", { name: /Open Inbox/ }));
+  await userEvent.click(page.getByRole("button", { name: /Open Inbox/ }));
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
 });
 

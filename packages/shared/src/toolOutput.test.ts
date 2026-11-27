@@ -11,6 +11,7 @@ import {
   sentMessageFromToolItem,
   toolOutputImages,
   toolOutputIndicatesFailure,
+  trackedAnswerFromToolItem,
 } from "./toolOutput.ts";
 
 describe("compactDynamicToolOutput", () => {
@@ -53,6 +54,19 @@ describe("compactDynamicToolOutput", () => {
     expect(
       compactDynamicToolOutput({ ids: ["Q1", "not a question"] }, "question_ask"),
     ).toBeUndefined();
+  });
+
+  it("preserves the answered revision through the tool output projection", () => {
+    const toolName = "mcp__t3-code__answer_give";
+    const output = compactDynamicToolOutput(
+      { structuredContent: { id: "A3", answer: 2, state: "answered" } },
+      toolName,
+    );
+    expect(trackedAnswerFromToolItem({ toolName, status: "completed", output })).toEqual({
+      id: "A3",
+      n: 2,
+    });
+    expect(trackedAnswerFromToolItem({ toolName, status: "failed", output })).toBeUndefined();
   });
 
   it("keeps the landing evidence_record stored so its QA cards can sit at the call", () => {

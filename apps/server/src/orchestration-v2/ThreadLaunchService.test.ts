@@ -3164,7 +3164,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
         layerFiles,
         Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
         Layer.mock(EvidenceService.EvidenceService)({}),
-        Layer.mock(ThreadWorkspace)({}),
+        Layer.mock(ThreadWorkspace)({ recordTrackedMessages: () => Effect.succeed([]) }),
       ),
     ),
   );

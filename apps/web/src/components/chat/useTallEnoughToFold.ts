@@ -4,12 +4,13 @@ import { observeResize } from "~/lib/observeResize";
 
 // The folds clip with `max-h-44`, which is 11rem.
 const FOLDED_HEIGHT_REM = 11;
+const DEFAULT_MINIMUM_HEIGHT_REM = FOLDED_HEIGHT_REM * 2;
 
 /**
  * Put `ref` on the unclipped content inside a fold. `tallEnough` is true when that content is at
  * least twice the default folded height. Other cards can provide their own minimum height.
  */
-export function useTallEnoughToFold(enabled = true, minimumHeightRem = FOLDED_HEIGHT_REM * 2) {
+export function useTallEnoughToFold(enabled = true, minimumHeightRem = DEFAULT_MINIMUM_HEIGHT_REM) {
   const ref = useRef<HTMLDivElement>(null);
   const [tallEnough, setTallEnough] = useState(false);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the fold depends on the rendered height, which only the DOM knows

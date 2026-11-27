@@ -15,6 +15,33 @@ import {
 } from "./orchestrationInstructions.ts";
 
 describe("T3 delegation instructions", () => {
+  it("keeps owed answers ahead of QA problems and counts the asks after the cap", () => {
+    const context = t3WaitingContext({
+      changes: [
+        { kind: "answer", ref: "A12", title: "Question?", change: "closed" },
+        { kind: "answer", ref: "A13", title: "What changed?", change: "withdrew" },
+      ],
+      waiting: [{ kind: "question", ref: "Q1", title: "A decision", state: "open" }],
+      owedAnswers: Array.from({ length: 11 }, (_, index) => ({
+        id: `A${index + 1}`,
+        question: "What resets the counter?",
+        followedUp: index === 0,
+      })),
+      problems: [{ ref: "QA1", title: "Incorrect counter", note: "It resets at startup." }],
+    });
+    const lines = context.split("\n");
+    const owed = lines[2] ?? "";
+    assert.equal(
+      lines[0],
+      "Since your last message the user closed A12; withdrew A13 (What changed?).",
+    );
+    assert.match(lines[1] ?? "", /^Waiting on the user.*Q1/);
+    assert.include(owed, 'A1 "What resets the counter?" (they followed up on your answer)');
+    assert.include(owed, 'A10 "What resets the counter?"; and 1 more.');
+    assert.notInclude(owed, "A11");
+    assert.match(lines[3] ?? "", /^QA problems you owe a fix for:/);
+  });
+
   it("exposes the same delegation context reference through each provider transport", () => {
     const state = { interactionMode: "default", hasT3Mcp: true, hasDeviceTools: false } as const;
     const instructions = [
