@@ -5,7 +5,8 @@ import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
 
-const harness = vi.hoisted(async () => {
+// Finish the Effect import before Vitest starts resolving the queued mocks.
+const harness = await vi.hoisted(async () => {
   const { Atom, AtomRegistry } = await import("effect/reactivity");
   return {
     registry: AtomRegistry.make(),
@@ -30,11 +31,11 @@ vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: () => null }));
 vi.mock("../../components/ui/AppText", () => ({
   AppText: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
 }));
-vi.mock("../../state/atom-registry", async () => ({
-  appAtomRegistry: (await harness).registry,
+vi.mock("../../state/atom-registry", () => ({
+  appAtomRegistry: harness.registry,
 }));
-vi.mock("../../state/server", async () => ({
-  serverEnvironment: { configValueAtom: (await harness).configValueAtom },
+vi.mock("../../state/server", () => ({
+  serverEnvironment: { configValueAtom: harness.configValueAtom },
 }));
 
 import { RemoteMediaGate } from "./RemoteMediaGate";
@@ -47,13 +48,13 @@ import {
 import { messageImageGallery } from "./messageImageGallery";
 import type { MarkdownImageSourceResolver } from "../../native/SelectableMarkdownText.types";
 
-async function setAutoLoad(environmentId: EnvironmentId, autoLoadRemoteMedia: boolean) {
-  const { registry, configValueAtom } = await harness;
+function setAutoLoad(environmentId: EnvironmentId, autoLoadRemoteMedia: boolean) {
+  const { registry, configValueAtom } = harness;
   registry.set(configValueAtom(environmentId), { settings: { autoLoadRemoteMedia } });
 }
 
 async function renderGates(environmentId: EnvironmentId, uris: ReadonlyArray<string | null>) {
-  const { registry } = await harness;
+  const { registry } = harness;
   const container = document.createElement("div");
   const root = createRoot(container);
   await act(async () =>
@@ -95,7 +96,7 @@ it("shows the host instead of a remote image and loads only the tapped one", asy
 
 it("loads remote media directly when its environment allows automatic loading", async () => {
   const environmentId = EnvironmentId.make("env-auto");
-  await setAutoLoad(environmentId, true);
+  setAutoLoad(environmentId, true);
   const { container, root } = await renderGates(environmentId, ["https://cdn.example.com/c.png"]);
   expect(container.querySelector("button")).toBeNull();
   expect(container.querySelector("img")).not.toBeNull();
@@ -104,7 +105,7 @@ it("loads remote media directly when its environment allows automatic loading", 
 
 it("always loads local and server-resolved sources", async () => {
   const environmentId = EnvironmentId.make("env-local");
-  await setAutoLoad(environmentId, false);
+  setAutoLoad(environmentId, false);
   const { container, root } = await renderGates(environmentId, [
     "data:image/png;base64,AAAA",
     "docs/shot.png",
@@ -118,7 +119,7 @@ it("always loads local and server-resolved sources", async () => {
 });
 
 async function mountResolver(environmentId: EnvironmentId, inner?: MarkdownImageSourceResolver) {
-  const { registry } = await harness;
+  const { registry } = harness;
   let resolve: MarkdownImageSourceResolver | undefined;
   function Probe() {
     const resolver = useRemoteMediaImageSource(environmentId, inner);
@@ -169,7 +170,7 @@ it("holds natively rendered remote images until a tap or the setting allows them
   expect(resolver.settled).toEqual(["https://cdn.example.com/inline.png"]);
   expect(loadPendingRemoteMedia("https://cdn.example.com/unrequested.png")).toBe(false);
 
-  await setAutoLoad(environmentId, true);
+  setAutoLoad(environmentId, true);
   await act(async () => {});
   expect(resolver.settled).toEqual([
     "https://cdn.example.com/inline.png",
@@ -189,7 +190,7 @@ it("keeps another environment's images held when one environment allows automati
   allowing.hold("https://cdn.example.com/allowing.png");
   holding.hold("https://cdn.example.com/holding.png");
 
-  await setAutoLoad(EnvironmentId.make("env-allowing"), true);
+  setAutoLoad(EnvironmentId.make("env-allowing"), true);
   await act(async () => {});
   expect(allowing.settled).toEqual(["https://cdn.example.com/allowing.png"]);
   expect(holding.settled).toEqual([]);
