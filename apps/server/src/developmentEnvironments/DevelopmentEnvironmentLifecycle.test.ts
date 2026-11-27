@@ -79,7 +79,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
       | ((input: {
           readonly sourcePath: string;
           readonly branch: string;
-          readonly base?: string;
+          readonly base?: string | undefined;
         }) => void)
       | undefined,
     onDelete: undefined as (() => void) | undefined,
