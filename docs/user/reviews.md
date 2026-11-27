@@ -124,10 +124,13 @@ so you can reopen it if the agent misread you. An agent can close your task
 only from your own message in its current turn; it cannot mark one done on its
 own, and it must say why when it cancels one.
 
-The agent sees what waits on you with each of your messages, and what you
-changed since your last one, so a short reply such as "done, rotated it" is
-enough. Changes you reported a problem with are listed to it on every turn until
-a fix lands. A thread with items waiting shows one count in the thread
+With each message you type, the agent sees what still waits on you and what you
+changed since your last message, so a short reply such as "done, rotated it" is
+enough. Questions are listed only where the agent has the question tools; tasks
+and changes to check are listed in every thread. Changes with a problem the
+agent owes a fix for are also listed on turns you did not start, such as a
+scheduled run. Compaction, goal commands and a resumed turn carry none of
+this; the next ordinary turn does. A thread with items waiting shows one count in the thread
 list; hover it to see them by kind. **Waiting on you** at the top of the thread
 list gathers every such thread in one place (see
 [Working with threads](thread-sidebar.md)). Such a thread stays out of automatic

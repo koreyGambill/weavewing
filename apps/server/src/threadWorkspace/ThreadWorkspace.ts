@@ -80,15 +80,18 @@ export class ThreadWorkspace extends Context.Service<
     readonly listRead: (
       input: ThreadListReadInput,
     ) => Effect.Effect<ReadonlyArray<ThreadListEntry>, ThreadWorkspaceError>;
-    /** The agent closes a user task only from the user's message in its turn; see `userTasks.ts`. */
+    /**
+     * The agent closes a user task only from the user's message in its own thread's turn, which
+     * the service reads itself; see `userTasks.ts`. Returns what the write changed and filed.
+     */
     readonly update: (
       input: ThreadListUpdateInput,
-      actor: ListActor,
-    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+      caller: ListCaller,
+    ) => Effect.Effect<ListWrite, ThreadWorkspaceError>;
     readonly rewrite: (
       input: ThreadListRewriteInput,
-      actor: ListActor,
-    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+      caller: ListCaller,
+    ) => Effect.Effect<ListWrite, ThreadWorkspaceError>;
     readonly artifactWrite: (
       input: ThreadArtifactWriteInput,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
@@ -162,6 +165,19 @@ export class ThreadWorkspace extends Context.Service<
   }
 >()("t3/threadWorkspace/ThreadWorkspace") {}
 
+/** Who writes the list: the user, or an agent calling from the thread whose turn it is. */
+export type ListCaller =
+  | { readonly by: "user" }
+  | { readonly by: "agent"; readonly threadId: ThreadId | undefined };
+
+/** A list write's result: the saved list, the items it wrote and the user tasks it filed. */
+export interface ListWrite {
+  readonly workspace: Workspace;
+  readonly changedIds: ReadonlyArray<string>;
+  /** Refs of the items this write made the user's tasks, by creating them or handing them over. */
+  readonly filedTasks: ReadonlyArray<string>;
+}
+
 export const emptyWorkspace = (threadId: ThreadId): Workspace => ({
   threadId,
   revision: 0,
@@ -173,6 +189,23 @@ export const emptyWorkspace = (threadId: ThreadId): Workspace => ({
   updatedAt: null,
 });
 const invalid = (message: string) => new ThreadWorkspaceError({ code: "invalid", message });
+/** What a write changed, and the items it made the user's tasks, from the saved list. */
+const listWrite = (
+  before: Workspace,
+  workspace: Workspace,
+  changedIds: ReadonlySet<string>,
+): ListWrite => ({
+  workspace,
+  changedIds: [...changedIds],
+  filedTasks: workspace.items.flatMap((item) =>
+    changedIds.has(item.id) &&
+    item.owner === "you" &&
+    item.ref !== undefined &&
+    before.items.find((entry) => entry.id === item.id)?.owner !== "you"
+      ? [item.ref]
+      : [],
+  ),
+});
 const missingQuestion = (id: string) =>
   new ThreadWorkspaceError({ code: "not_found", message: `${id} does not exist in this thread.` });
 
@@ -569,6 +602,18 @@ const make = Effect.gen(function* () {
       }),
     });
   });
+  // Reads the turn's user message only when a change claims it, from the caller's own thread.
+  const actorOf = Effect.fnUntraced(function* (
+    caller: ListCaller,
+    changes: ThreadListUpdateInput["changes"],
+  ) {
+    if (caller.by === "user") return caller satisfies ListActor;
+    const userMessageId =
+      caller.threadId === undefined || !changes.some((change) => change.settledFromUser === true)
+        ? null
+        : yield* orchestrator.getCurrentUserMessageId(caller.threadId).pipe(Effect.mapError(storage));
+    return { by: "agent", userMessageId } satisfies ListActor;
+  });
   const apply = Effect.fnUntraced(function* (
     current: Workspace,
     changes: ThreadListUpdateInput["changes"],
@@ -578,6 +623,7 @@ const make = Effect.gen(function* () {
     previous: ReadonlyArray<ListItem> = current.items,
   ) {
     const items = [...current.items];
+    const changedIds = new Set<string>();
     for (const requested of changes) {
       // A user task's ref, such as T2, names it as well as its id.
       const resolved = resolveListItemId(previous, requested.id);
@@ -612,8 +658,9 @@ const make = Effect.gen(function* () {
       if (typeof task === "string") return yield* invalid(task);
       if (index < 0) items.push(task);
       else items[index] = task;
+      changedIds.add(task.id);
     }
-    return items;
+    return { items, changedIds };
   });
   // The orchestrator dedupes a command id, so a retry after a failed save with the same key
   // replays the send instead of posting a second message.
@@ -721,14 +768,15 @@ const make = Effect.gen(function* () {
   }, lock.withPermit);
   return ThreadWorkspace.of({
     get,
-    update: Effect.fn("ThreadWorkspace.update")(function* (input, actor) {
+    update: Effect.fn("ThreadWorkspace.update")(function* (input, caller) {
       const current = yield* read(input.threadId);
-      let items = yield* apply(
+      const applied = yield* apply(
         current,
         input.changes,
         DateTime.formatIso(yield* DateTime.now),
-        actor,
+        yield* actorOf(caller, input.changes),
       );
+      let items = applied.items;
       if (input.order !== undefined) {
         if (
           new Set(input.order).size !== items.length ||
@@ -739,7 +787,7 @@ const make = Effect.gen(function* () {
         const order = input.order;
         items = items.toSorted((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       }
-      return yield* commit(
+      const workspace = yield* commit(
         current,
         {
           ...current,
@@ -749,8 +797,9 @@ const make = Effect.gen(function* () {
         },
         input.expectedRevision,
       );
+      return listWrite(current, workspace, applied.changedIds);
     }, lock.withPermit),
-    rewrite: Effect.fn("ThreadWorkspace.rewrite")(function* (input, actor) {
+    rewrite: Effect.fn("ThreadWorkspace.rewrite")(function* (input, caller) {
       const current = yield* read(input.threadId);
       const retained = current.items.filter((item) => item.state !== "open");
       for (const change of input.items) {
@@ -760,13 +809,15 @@ const make = Effect.gen(function* () {
           return yield* invalid("Rewrite cannot change finished or handed-off history.");
       }
       // A task kept by id keeps its number.
-      const replacements = (yield* apply(
+      const actor = yield* actorOf(caller, input.items);
+      const rewritten = yield* apply(
         { ...current, items: [] },
         input.items,
         DateTime.formatIso(yield* DateTime.now),
         actor,
         current.items,
-      )).map((item) => {
+      );
+      const replacements = rewritten.items.map((item) => {
         const ref = current.items.find((entry) => entry.id === item.id)?.ref;
         return ref === undefined || item.ref !== undefined ? item : { ...item, ref };
       });
@@ -783,11 +834,12 @@ const make = Effect.gen(function* () {
           parentId = current.items.find((entry) => entry.id === parentId)?.parentId ?? null;
         return parentId === item.parentId ? item : { ...item, parentId };
       });
-      return yield* commit(
+      const workspace = yield* commit(
         current,
         { ...current, items: [...history, ...replacements] },
         input.expectedRevision,
       );
+      return listWrite(current, workspace, rewritten.changedIds);
     }, lock.withPermit),
     waitingWork: Effect.fn("ThreadWorkspace.waitingWork")(function* (threadId) {
       const workspace = yield* read(threadId);

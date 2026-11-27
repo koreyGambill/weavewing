@@ -1384,14 +1384,13 @@ function makeLocalCommandHarness(input: {
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(McpProviderSessions.McpProviderSessions)({
+          // Every T3 session has the list and evidence tools; questions follow the setting.
           read: () =>
-            Effect.succeed(
-              input.questionTools === true
-                ? ({
-                    capabilities: new Set(["questions"]),
-                  } as Partial<McpProviderSessionConfig> as McpProviderSessionConfig)
-                : undefined,
-            ),
+            Effect.succeed({
+              capabilities: new Set(
+                input.questionTools === true ? ["orchestration", "questions"] : ["orchestration"],
+              ),
+            } as Partial<McpProviderSessionConfig> as McpProviderSessionConfig),
         }),
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
@@ -2470,11 +2469,6 @@ const WAITING_PREFIX =
 effectIt.effect.each([
   { name: "a user message", enabled: true, expected: true },
   {
-    name: "a user message in a session without the questions capability",
-    enabled: false,
-    expected: false,
-  },
-  {
     name: "a scheduled task",
     enabled: true,
     expected: false,
@@ -2503,6 +2497,28 @@ effectIt.effect.each([
         ),
       );
     else expect(text).not.toContain("Waiting on the user");
+  }),
+);
+
+effectIt.effect("lists tasks and QA problems in a session without the question tools", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      questionTools: false,
+      waitingWork: { questions: [waitingQuestion("Q1")], tasks: [userTask("T1")] },
+      qa: [qaChange("QA3", { state: "problem", note: "count overlaps the close button" })],
+    });
+    yield* harness.start;
+    expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
+      withInlineContext(
+        [
+          `${WAITING_PREFIX}T1 T1 task`,
+          'QA problems you owe a fix for: QA3 QA3 change: "count overlaps the close button"',
+        ].join("\n"),
+        "My own prompt",
+      ),
+    );
   }),
 );
 

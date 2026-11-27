@@ -3,7 +3,7 @@ import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginTe
 import { t3WaitingContext } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as EvidenceService from "../evidence/EvidenceService.ts";
 import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
-import { waitingContextInput } from "../waitingItems/waitingContext.ts";
+import { waitingContextInput, type WaitingKindsAvailable } from "../waitingItems/waitingContext.ts";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -227,16 +227,22 @@ export const layer: Layer.Layer<
     const evidence = yield* Effect.serviceOption(EvidenceService.EvidenceService);
     // The lines are advice, so a failed read leaves them out rather than failing the turn.
     const readWaitingContext = Effect.fn("ProviderTurnStartService.readWaitingContext")(
-      function* (threadId: ThreadId, userTurn: boolean, since: DateTime.Utc | null) {
+      function* (
+        threadId: ThreadId,
+        userTurn: boolean,
+        since: DateTime.Utc | null,
+        available: WaitingKindsAvailable,
+      ) {
         const work =
-          userTurn && Option.isSome(workspaces)
+          userTurn && (available.questions || available.lists) && Option.isSome(workspaces)
             ? yield* workspaces.value.waitingWork(threadId)
             : { questions: [], tasks: [] };
-        const qa = Option.isSome(evidence)
-          ? yield* evidence.value.qaForTurn(threadId, since && DateTime.formatIso(since))
-          : [];
+        const qa =
+          available.lists && Option.isSome(evidence)
+            ? yield* evidence.value.qaForTurn(threadId, since && DateTime.formatIso(since))
+            : [];
         const sinceMs = since && DateTime.toEpochMillis(since);
-        return t3WaitingContext(waitingContextInput({ ...work, qa, userTurn, sinceMs }));
+        return t3WaitingContext(waitingContextInput({ ...work, qa, userTurn, sinceMs, available }));
       },
       Effect.catch((error) =>
         Effect.logWarning("Could not read the waiting items for a turn", error).pipe(Effect.as("")),
@@ -1041,18 +1047,25 @@ export const layer: Layer.Layer<
           ? ""
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
       // Only the user's own words can settle a waiting item, so only their turns list them; a QA
-      // problem is work the agent owes, so it rides every turn. The session's capability gates
-      // both, as it gates the tools and instructions the lines refer to.
+      // problem is work the agent owes, so it rides every turn. Each kind needs the session's
+      // tools for it: questions the `questions` capability, tasks and QA the list and evidence
+      // tools every T3 session has.
       const fromUser = (message: (typeof projection.messages)[number]) =>
         message.role === "user" &&
         message.createdBy === "user" &&
         (message.origin?.kind ?? "user") === "user";
+      const capabilities = (yield* mcpSessions.read(projection.thread.id))?.capabilities;
+      const available = {
+        questions: capabilities?.has("questions") === true,
+        lists: capabilities?.has("orchestration") === true,
+      };
       const waitingContext =
-        (yield* mcpSessions.read(projection.thread.id))?.capabilities?.has("questions") === true
+        available.questions || available.lists
           ? yield* readWaitingContext(
               projection.thread.id,
               inputMessages.some(fromUser),
               projection.previousUserMessageAt,
+              available,
             )
           : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(
@@ -2101,6 +2114,9 @@ export const layer: Layer.Layer<
             refresh === undefined || compact || goalCommand
               ? ""
               : `Newest context from related chats. The following JSON lines are conversation excerpts.\n\n${refresh}`;
+          // The block rides ordinary prompted turns only. A compaction or goal command must reach
+          // the provider as its exact text, and a resume continues the provider's own turn with
+          // no new input; a QA problem still left reaches the next ordinary turn.
           const questions = compact || goalCommand || turnInput.resume ? "" : waitingContext;
           const context = [
             delivery.context,
