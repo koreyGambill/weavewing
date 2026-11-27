@@ -17,6 +17,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { WorkspaceTitlebarControls } from "../components/WorkspaceTitlebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { isElectron } from "../env";
+import { useScratchProject } from "../hooks/useScratchProject";
 import { observeResize } from "../lib/observeResize";
 import { VIEW_IDS } from "../components/ToolSidebar.logic";
 import { cancelSideAreaHandoff, requestSideAreaHandoff } from "../toolSidebarStore";
@@ -115,20 +116,24 @@ export function HostedView({
 }
 
 /**
- * Goes back one history entry, or replaces this one with the start page when there is none, so
- * Back never returns to the page just left. Returns the history index it lands on.
+ * Goes back one history entry, or else replaces this one with a new draft at the default place
+ * (the start page when there is none), so Back never returns to the page just left. Returns the
+ * history index it goes to and the navigation.
  */
 function useGoBack() {
   const router = useRouter();
   const navigate = useNavigate();
+  const scratch = useScratchProject();
   return () => {
     const index = router.state.location.state.__TSR_index;
-    if (router.history.canGoBack()) {
-      router.history.back();
-      return index - 1;
-    }
-    void navigate({ to: "/", replace: true });
-    return index;
+    if (router.history.canGoBack()) return { toIndex: index - 1, go: () => router.history.back() };
+    return {
+      toIndex: index,
+      go: () => {
+        if (scratch.defaultPlace().kind === "none") void navigate({ to: "/", replace: true });
+        else void scratch.startDefaultPlace({ replace: true });
+      },
+    };
   };
 }
 
@@ -198,18 +203,30 @@ function ViewPageBody({
     return observeResize(node, () => setWidth(node.clientWidth));
   });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Leaving the page ends a pending handoff; the cancel waits until the route change that unmounted it has delivered the handoff.
-  useEffect(() => () => void window.setTimeout(cancelSideAreaHandoff, 0), []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Leaving the page for anywhere but the handoff's entry ends a pending handoff.
+  useEffect(
+    () => () => {
+      const { pathname, state } = router.state.location;
+      cancelSideAreaHandoff({ pathname, key: state.__TSR_key, index: state.__TSR_index });
+    },
+    [router],
+  );
 
   const openInSidePanel = () => {
     if (!isSideAreaViewId(definition.id)) return;
-    const from = router.state.location.pathname;
-    requestSideAreaHandoff(definition.id, from, goBack());
+    const { pathname, state } = router.state.location;
+    const back = goBack();
+    requestSideAreaHandoff(
+      definition.id,
+      { pathname, key: state.__TSR_key, index: state.__TSR_index },
+      back.toIndex,
+    );
     // A navigation that resolves without leaving the page drops the handoff.
     const stop = router.subscribe("onResolved", () => {
       stop();
-      if (router.state.location.pathname === from) cancelSideAreaHandoff();
+      if (router.state.location.state.__TSR_key === state.__TSR_key) cancelSideAreaHandoff();
     });
+    back.go();
   };
   const { layout } = resolveHostedViewLayout(definition, { layout: "full", width });
 
@@ -276,7 +293,7 @@ function ViewPageNotFound({
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button size="sm" variant="outline" onClick={goBack}>
+          <Button size="sm" variant="outline" onClick={() => goBack().go()}>
             Return to previous page
           </Button>
         </EmptyContent>

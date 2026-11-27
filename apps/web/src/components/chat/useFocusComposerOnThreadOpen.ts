@@ -21,6 +21,8 @@ export function useFocusComposerOnThreadOpen(
         frame = window.requestAnimationFrame(() => {
           // Double-clicking a sidebar row opens its thread and its rename field in one gesture.
           if (document.activeElement?.matches("[data-sidebar-row] input")) return;
+          // Focus the side panel took, such as a page handing its view over, stays there.
+          if (document.activeElement?.closest("[data-side-area]")) return;
           focusComposer();
         });
       },

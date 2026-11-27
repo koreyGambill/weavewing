@@ -26,51 +26,51 @@ export function takeSideAreaFocusRequest(): boolean {
   return requested;
 }
 
-/** A resolved location, its path and position in the session history; unset before the first. */
+/** A resolved history entry: its path, key and position; unset before the first resolves. */
 export interface SideAreaRoute {
   readonly pathname: string | undefined;
+  readonly key: string | undefined;
   readonly index: number | undefined;
 }
 
 let handoff: {
-  readonly view: ViewId;
-  readonly from: string;
+  readonly from: SideAreaRoute;
   readonly toIndex: number;
 } | null = null;
 
 /**
- * Opens `view` in the side area once the route leaves `from` for history entry `toIndex`, so a
- * page can hand its view over as it goes back. That route change does not close the side area,
- * and any other route change ignores the handoff.
+ * Opens `view` in the side area now and keeps it open while the page that asked navigates from
+ * history entry `from` to entry `toIndex`: that route change does not close the side area, and
+ * focus stays in it. Any other route change ignores the handoff.
  */
-export function requestSideAreaHandoff(view: ViewId, from: string, toIndex: number) {
-  handoff = { view, from, toIndex };
+export function requestSideAreaHandoff(view: ViewId, from: SideAreaRoute, toIndex: number) {
+  handoff = { from, toIndex };
+  useToolSidebarStore.getState().dispatch({ type: "show", view });
 }
 
-export function cancelSideAreaHandoff() {
-  handoff = null;
+/** Drops a pending handoff unless `route` is the entry it goes to. */
+export function cancelSideAreaHandoff(route?: SideAreaRoute) {
+  if (route === undefined || !isSideAreaHandoffArriving(route)) handoff = null;
 }
 
-function handoffArrived(route: SideAreaRoute) {
-  return handoff !== null && handoff.toIndex === route.index && handoff.from !== route.pathname;
-}
-
-/** True when a handoff is arriving on `route`, which must not close the side area. */
+/** True when `route` is the entry a pending handoff goes to, which must not close the side area. */
 export function isSideAreaHandoffArriving(route: SideAreaRoute): boolean {
-  return handoffArrived(route);
+  return (
+    handoff !== null &&
+    handoff.toIndex === route.index &&
+    handoff.from.key !== route.key &&
+    handoff.from.pathname !== route.pathname
+  );
 }
 
 /**
- * Opens the handed-over view on `route` and returns true, or false with no handoff for it.
+ * Ends the handoff arriving on `route` and returns true, or false when none arrives there.
  * Closing the side area afterwards returns focus to `returnTo`, a control on this route.
  */
 export function completeSideAreaHandoff(route: SideAreaRoute, returnTo: HTMLElement | null) {
-  if (!handoff || !handoffArrived(route)) return false;
-  const { view } = handoff;
+  if (!isSideAreaHandoffArriving(route)) return false;
   handoff = null;
-  useToolSidebarStore.getState().dispatch({ type: "show", view });
   returnFocus = returnTo;
-  focusOnOpen = false;
   return true;
 }
 
