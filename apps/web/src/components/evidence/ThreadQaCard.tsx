@@ -17,6 +17,7 @@ import { evidenceSetQa } from "../../state/evidence";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
+  CardReasonForm,
   HelpButton,
   ThreadCard,
   ThreadCardClosedLine,
@@ -24,7 +25,6 @@ import {
 } from "../questions/ThreadCardShell";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CaptureTile } from "./CaptureTile";
 import { CHECKS, checkLabel, reviewDisplay } from "./evidence.logic";
@@ -352,38 +352,15 @@ export function ThreadQaCard({
         ) : null}
       </div>
       {reason !== null ? (
-        <form
-          className="space-y-1.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveReason();
-          }}
-          // On the form, so Escape closes it from the textarea, Cancel or Save alike.
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              closeReason();
-            }
-          }}
-        >
-          <Textarea
-            size="sm"
-            aria-label={`Why ${ref} was dismissed`}
-            placeholder="Why dismiss it? (optional)"
-            value={reason}
-            maxLength={2000}
-            autoFocus
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <div className="flex justify-end gap-1">
-            <Button size="xs" variant="ghost" type="button" onClick={closeReason}>
-              Cancel
-            </Button>
-            <Button size="xs" type="submit" disabled={!usable}>
-              Save reason
-            </Button>
-          </div>
-        </form>
+        <CardReasonForm
+          label={`Why ${ref} was dismissed`}
+          value={reason}
+          maxLength={2000}
+          disabled={!usable}
+          onChange={setReason}
+          onCancel={closeReason}
+          onSave={() => void saveReason()}
+        />
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-1">
           {waiting ? (

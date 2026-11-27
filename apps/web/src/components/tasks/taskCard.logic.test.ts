@@ -8,7 +8,7 @@ describe("taskCardStatus", () => {
     expect(taskCardStatus({ state: "done", settledBy: "user" }, false)).toBe("done-by-you");
     expect(taskCardStatus({ state: "done" }, false)).toBe("done-by-you");
     expect(taskCardStatus({ state: "done", settledBy: "agent" }, false)).toBe("recorded");
-    expect(taskCardStatus({ state: "dropped", settledBy: "agent" }, false)).toBe("cancelled");
+    expect(taskCardStatus({ state: "dropped", settledBy: "agent" }, false)).toBe("dismissed");
   });
 
   it("shows a reference in this composer before a sent discussion", () => {

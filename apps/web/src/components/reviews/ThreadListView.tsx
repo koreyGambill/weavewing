@@ -511,7 +511,9 @@ function TodoRow({
             {item.text}
           </button>
           {item.state === "dropped" ? (
-            <span className="ml-1 text-3xs text-muted-foreground">dropped</span>
+            <span className="ml-1 text-3xs text-muted-foreground">
+              {item.owner === "you" ? "dismissed" : "dropped"}
+            </span>
           ) : item.state === "handed_off" ? (
             <span className="ml-1 text-3xs text-muted-foreground">handed off</span>
           ) : null}

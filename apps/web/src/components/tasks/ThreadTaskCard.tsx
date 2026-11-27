@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { ListItem, ScopedThreadRef } from "@t3tools/contracts";
+import { LIST_ITEM_NOTE_MAX_LENGTH, type ListItem, type ScopedThreadRef } from "@t3tools/contracts";
 import { type ReactNode, useRef, useState } from "react";
 
 import { threadTaskUpdate } from "../../state/threadQuestions";
@@ -8,6 +8,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import { threadTaskElementId } from "../questions/questionReveal";
 import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
+  CardReasonForm,
   HelpButton,
   ThreadCard,
   ThreadCardClosedLine,
@@ -27,6 +28,7 @@ const HELP = {
   discussOff: "Take the reference to this task out of the composer.",
   done: "You did it. Nothing is sent to the agent; it hears with your next message.",
   reopen: "Open this again. Nothing is sent to the agent.",
+  reason: "Say why you dismissed it. The agent reads it with your next message.",
 };
 
 const STATUS: Record<
@@ -58,13 +60,13 @@ const STATUS: Record<
     variant: "success-outline",
     help: "The agent recorded this as done from your message. Reopen it if the agent misread you.",
   },
-  cancelled: { label: "Cancelled", variant: "outline", help: "Closed without doing it." },
+  dismissed: { label: "Dismissed", variant: "outline", help: "Closed without doing it." },
 };
 
 /** A task's badge, with the recorded note as its meaning when the agent or user left one. */
 export function TaskStatusBadge({ status, note }: { status: TaskCardStatus; note: string }) {
   const { label, variant, help } = STATUS[status];
-  const noted = note !== "" && (status === "recorded" || status === "cancelled");
+  const noted = note !== "" && (status === "recorded" || status === "dismissed");
   return <CardStatusBadge label={label} variant={variant} help={noted ? note : help} />;
 }
 
@@ -100,7 +102,8 @@ export function ThreadTaskCard({
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
   // Where focus goes once the card changes shape under the button that was pressed.
-  const focusNext = useRef<"line" | "card" | null>(null);
+  const focusNext = useRef<"line" | "card" | "reason" | null>(null);
+  const [reason, setReason] = useState<string | null>(null);
   const status = taskCardStatus(task, inComposer);
   const waiting = task.state === "open";
   const usable = canAct && !busy;
@@ -110,19 +113,23 @@ export function ThreadTaskCard({
   const record = () =>
     waitingItemDiscussRecord({ itemKind: "task", key: task.id, ref: task.ref, title: task.text });
 
-  const setState = async (state: "open" | "done" | "dropped") => {
+  const write = async (change: {
+    readonly state?: "open" | "done" | "dropped";
+    readonly note?: string;
+  }) => {
     setBusy(true);
     const result = await update({
       environmentId: threadRef.environmentId,
       input: {
         threadId: threadRef.threadId,
         expectedRevision: revision,
-        changes: [{ id: task.id, state }],
+        changes: [{ id: task.id, ...change }],
       },
     });
     setBusy(false);
     return result._tag === "Success";
   };
+  const setState = (state: "open" | "done" | "dropped") => write({ state });
   const settle = async (state: "done" | "dropped") => {
     focusNext.current = "line";
     // Only once the server took it: a refused write leaves the task open with its draft intact.
@@ -135,8 +142,18 @@ export function ThreadTaskCard({
     setExpanded(false);
     if (!(await setState("open"))) focusNext.current = null;
   };
+  // The reason form replaces the button that opened it, so closing it hands focus back there.
+  const closeReason = () => {
+    focusNext.current = "reason";
+    setReason(null);
+  };
+  const saveReason = async () => {
+    if (reason === null) return;
+    if (reason.trim() !== note && !(await write({ note: reason.trim() }))) return;
+    closeReason();
+  };
   // The task can change before the write returns, so a button mounted while busy waits until enabled.
-  const focusOnMount = (target: "line" | "card") => (node: HTMLButtonElement | null) => {
+  const focusOnMount = (target: "line" | "card" | "reason") => (node: HTMLButtonElement | null) => {
     if (node === null || node.disabled || focusNext.current !== target) return;
     focusNext.current = null;
     node.focus();
@@ -172,6 +189,7 @@ export function ThreadTaskCard({
     );
   }
 
+  const userDismissed = task.state === "dropped" && task.settledBy !== "agent";
   const linkLabels = task.links.map(
     (link) => task.linkStates?.find((state) => state.target === link.target)?.label ?? link.target,
   );
@@ -207,44 +225,69 @@ export function ThreadTaskCard({
           ) : null}
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center justify-end gap-1">
-        {waiting ? (
-          <>
-            <HelpButton
-              help={HELP.dismiss}
-              aria-label={`Dismiss ${task.ref}`}
-              disabled={!usable}
-              onClick={() => void settle("dropped")}
-            >
-              Dismiss
-            </HelpButton>
-            <HelpButton
-              help={inComposer ? HELP.discussOff : HELP.discuss}
-              aria-label={`Discuss ${task.ref}`}
-              aria-pressed={inComposer}
-              disabled={!canAct}
-              onClick={(event) =>
-                toggleWaitingItemDiscuss(threadRef, record(), event.currentTarget)
-              }
-            >
-              Discuss
-            </HelpButton>
-            <HelpButton
-              help={HELP.done}
-              aria-label={`Done: ${task.ref}`}
-              // A disabled primary button still reads as live, so it is primary only when usable.
-              variant={usable ? "default" : "contrast-outline"}
-              ref={focusOnMount("card")}
-              disabled={!usable}
-              onClick={() => void settle("done")}
-            >
-              Done
-            </HelpButton>
-          </>
-        ) : (
-          reopenButton
-        )}
-      </div>
+      {reason !== null ? (
+        <CardReasonForm
+          label={`Why ${task.ref} was dismissed`}
+          value={reason}
+          maxLength={LIST_ITEM_NOTE_MAX_LENGTH}
+          disabled={!usable}
+          onChange={setReason}
+          onCancel={closeReason}
+          onSave={() => void saveReason()}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          {waiting ? (
+            <>
+              <HelpButton
+                help={HELP.dismiss}
+                aria-label={`Dismiss ${task.ref}`}
+                disabled={!usable}
+                onClick={() => void settle("dropped")}
+              >
+                Dismiss
+              </HelpButton>
+              <HelpButton
+                help={inComposer ? HELP.discussOff : HELP.discuss}
+                aria-label={`Discuss ${task.ref}`}
+                aria-pressed={inComposer}
+                disabled={!canAct}
+                onClick={(event) =>
+                  toggleWaitingItemDiscuss(threadRef, record(), event.currentTarget)
+                }
+              >
+                Discuss
+              </HelpButton>
+              <HelpButton
+                help={HELP.done}
+                aria-label={`Done: ${task.ref}`}
+                // A disabled primary button still reads as live, so it is primary only when usable.
+                variant={usable ? "default" : "contrast-outline"}
+                ref={focusOnMount("card")}
+                disabled={!usable}
+                onClick={() => void settle("done")}
+              >
+                Done
+              </HelpButton>
+            </>
+          ) : (
+            <>
+              {userDismissed ? (
+                <HelpButton
+                  help={HELP.reason}
+                  aria-label={`${note ? "Edit" : "Add"} why ${task.ref} was dismissed`}
+                  ref={focusOnMount("reason")}
+                  disabled={!usable}
+                  onClick={() => setReason(task.note ?? "")}
+                >
+                  {note ? "Edit reason" : "Add reason"}
+                </HelpButton>
+              ) : null}
+              {reopenButton}
+            </>
+          )}
+        </div>
+      )}
     </ThreadCard>
   );
 }

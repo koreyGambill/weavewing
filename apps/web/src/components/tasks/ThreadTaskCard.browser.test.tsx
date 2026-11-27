@@ -44,11 +44,19 @@ vi.mock(import("../../state/use-atom-command"), () => ({
         refuseNext = false;
         return { _tag: "Failure", cause: new Error("List changed. Read it again before writing.") };
       }
-      const state = input.changes[0]?.state ?? task.state;
+      const change = input.changes[0];
+      const state = change?.state ?? task.state;
+      const note = change?.note === undefined ? task.note : change.note || undefined;
       task =
         state === "open"
           ? { ...filed, userChangedAt: "2026-11-25T11:00:00.000Z" }
-          : { ...filed, state, settledBy: "user", userChangedAt: "2026-11-25T11:00:00.000Z" };
+          : {
+              ...filed,
+              state,
+              settledBy: "user",
+              userChangedAt: "2026-11-25T11:00:00.000Z",
+              ...(note === undefined ? {} : { note }),
+            };
       for (const listener of listeners) listener();
       return { _tag: "Success", value: {} };
     }) as never,
@@ -148,7 +156,7 @@ it("puts one Discuss reference in the composer, and Dismiss takes it out", async
   await userEvent.click(screen.getByRole("button", { name: "Dismiss T2" }));
   expect(sent.at(-1)?.changes).toEqual([{ id: "task-rotate", state: "dropped" }]);
   await vi.waitFor(() => expect(records()).toEqual([]));
-  await expect.element(screen.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect.element(screen.getByText("Dismissed", { exact: true })).toBeVisible();
 });
 
 it("shows what the agent recorded, with the user's words", async () => {
@@ -173,4 +181,32 @@ it("keeps a drafted Discuss reference when the server refuses Done", async () =>
   expect(sent.at(-1)?.changes).toEqual([{ id: "task-rotate", state: "done" }]);
   await expect.element(screen.getByRole("button", { name: "Done: T2" })).toBeVisible();
   expect(records().map((record) => record.key)).toEqual(["task-rotate"]);
+});
+
+it("takes an optional reason after a one-click Dismiss, from the expanded card", async () => {
+  using _fresh = fresh();
+  await using screen = await render(<Card />);
+  await userEvent.click(screen.getByRole("button", { name: "Dismiss T2" }));
+  expect(sent.at(-1)?.changes).toEqual([{ id: "task-rotate", state: "dropped" }]);
+  await expect.element(screen.getByText("Dismissed", { exact: true })).toBeVisible();
+
+  await userEvent.click(
+    screen.getByRole("button", { name: /T2.*Rotate the staging webhook secret/ }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Add why T2 was dismissed" }));
+  const field = screen.getByRole("textbox", { name: "Why T2 was dismissed" });
+  await expect.element(field).toHaveFocus();
+  await userEvent.fill(field, "The vendor closed the account.");
+  await userEvent.click(screen.getByRole("button", { name: "Save reason" }));
+  expect(sent.at(-1)?.changes).toEqual([
+    { id: "task-rotate", note: "The vendor closed the account." },
+  ]);
+  await expect
+    .element(screen.getByRole("button", { name: "Edit why T2 was dismissed" }))
+    .toHaveFocus();
+
+  // Escape leaves the reason as it was.
+  await userEvent.click(screen.getByRole("button", { name: "Edit why T2 was dismissed" }));
+  await userEvent.keyboard("{Escape}");
+  expect(sent).toHaveLength(2);
 });

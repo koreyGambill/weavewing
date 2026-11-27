@@ -6,7 +6,7 @@ export type TaskCardStatus =
   | "discussing"
   | "done-by-you"
   | "recorded"
-  | "cancelled";
+  | "dismissed";
 
 /** Where a user task stands; `inComposer` is whether this device's composer holds its Discuss. */
 export function taskCardStatus(
@@ -17,7 +17,7 @@ export function taskCardStatus(
     case "done":
       return task.settledBy === "agent" ? "recorded" : "done-by-you";
     case "dropped":
-      return "cancelled";
+      return "dismissed";
     case "open":
     case "handed_off":
       if (inComposer) return "in-composer";

@@ -73,9 +73,14 @@ export function changeUserTask(
   if (actor.by === "user") {
     if (!isTask) return base;
     if (!stateChanged) {
-      // Any change of the user's own ends a chat about it.
-      const { discussedInMessageId: _, ...kept } = old === undefined ? {} : taskFields(old);
-      return { ...base, ...kept };
+      // Any change of the user's own ends a chat about it; a dismissed task takes a later reason.
+      const {
+        discussedInMessageId: _,
+        note: keptNote,
+        ...kept
+      } = old === undefined ? {} : taskFields(old);
+      const reason = change.note === undefined || next.state !== "dropped" ? keptNote : note;
+      return { ...base, ...kept, ...(reason === undefined ? {} : { note: reason }) };
     }
     return closed(next.state)
       ? { ...base, settledBy: "user", userChangedAt: now, ...(note ? { note } : {}) }
