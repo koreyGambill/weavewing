@@ -822,7 +822,7 @@ export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
   return (
     <div data-todos-view className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
       <ToggleGroup
-        aria-label="Todos scope"
+        aria-label="Checklist scope"
         size="segmented-compact"
         className="w-full *:flex-1"
         value={[scope]}

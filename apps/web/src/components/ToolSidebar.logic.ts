@@ -115,7 +115,7 @@ export type SideAreaAction =
   /** The route moved to another thread: closes unless pinned or this is an awaited arrival. */
   | { type: "routeChanged"; context: SideAreaContext }
   /** Opens on the last thread view, or closes when a thread view is showing. */
-  | { type: "toggleThreadViews" }
+  | { type: "toggleThreadViews"; collapsedSections: ReadonlyArray<ViewSectionId> }
   /** Opens on `view` for `thread`, or closes when it already shows that. */
   | { type: "toggleView"; view: ViewId; thread: ScopedThreadRef }
   | { type: "close" }
@@ -366,7 +366,15 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
     case "toggleThreadViews":
       return state.open && isThreadViewId(state.view)
         ? { ...state, open: false, maximized: false }
-        : { ...state, open: true, view: state.threadView, revealSection: state.threadSection };
+        : {
+            ...state,
+            open: true,
+            view: state.threadView,
+            revealSection:
+              state.threadSection && !action.collapsedSections.includes(state.threadSection)
+                ? state.threadSection
+                : null,
+          };
     case "toggleView":
       if (
         state.open &&

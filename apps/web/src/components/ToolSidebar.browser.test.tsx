@@ -772,7 +772,7 @@ it("lists bookmark to-dos in Checklist All and keeps plain bookmarks in the thre
   await userEvent.keyboard("{Escape}");
   await act(() => useThreadContextSidebarStore.getState().show("checklist"));
   const checklist = screen.getByRole("region", { name: "Checklist", exact: true });
-  const scope = checklist.getByRole("group", { name: "Todos scope" });
+  const scope = checklist.getByRole("group", { name: "Checklist scope" });
   await userEvent.click(scope.getByRole("button", { name: "All", exact: true }));
   await expect.element(checklist.getByRole("group", { name: /Filter bookmark/ })).toBeVisible();
   await expect
@@ -783,13 +783,26 @@ it("lists bookmark to-dos in Checklist All and keeps plain bookmarks in the thre
   await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*1/ })).toBeVisible();
 });
 
-it("hides the current view from the picker, opens it explicitly, and restores it by keyboard", async () => {
+it("hides any view, opens a hidden view explicitly, and restores it by keyboard", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("picker-visibility", 1)], 390);
   await using _app = stack;
   await act(() => openInbox());
   const picker = screen.getByRole("button", { name: /^View: / });
   await expect.element(picker).toHaveFocus();
   await userEvent.keyboard("{Enter}");
+  const hideMenu = page.getByRole("menuitem", { name: "Hide a view" });
+  await expect.element(hideMenu).toBeVisible();
+  hideMenu.element().focus();
+  await userEvent.keyboard("{ArrowRight}");
+  const hideLinks = page.getByRole("menuitem", { name: "Hide Links" });
+  await expect.element(hideLinks).toBeVisible();
+  hideLinks.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(screen.getByRole("button", { name: /^View: Inbox/ })).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  expect(page.getByRole("menuitemradio", { name: /^Links/ }).query()).toBeNull();
+  hideMenu.element().focus();
+  await userEvent.keyboard("{ArrowRight}");
   const hide = page.getByRole("menuitem", { name: "Hide Inbox" });
   await expect.element(hide).toBeVisible();
   hide.element().focus();
@@ -808,6 +821,45 @@ it("hides the current view from the picker, opens it explicitly, and restores it
   await expect.element(page.getByRole("menuitemradio", { name: /^Inbox/ })).toBeVisible();
 });
 
+it("explains why the last visible thread view cannot be hidden", async () => {
+  const { stack } = await mountApp([threadWithHistory("last-view", 1)], 1280);
+  await using _app = stack;
+  await act(() => {
+    const panel = useToolSidebarStore.getState();
+    for (const view of ["checklist", "artifacts", "links", "activity"] as const) {
+      panel.dispatch({ type: "setHidden", view, hidden: true });
+    }
+    openInbox();
+  });
+  await userEvent.keyboard("{Enter}");
+  const hideMenu = page.getByRole("menuitem", { name: "Hide a view" });
+  await expect.element(hideMenu).toBeVisible();
+  hideMenu.element().focus();
+  await userEvent.keyboard("{ArrowRight}");
+  const last = page.getByRole("menuitem", { name: "Hide Details" });
+  await expect.element(last).toBeDisabled();
+  await expect
+    .element(last)
+    .toHaveAccessibleDescription("Keep at least one thread view in the picker.");
+});
+
+it("respects a collapsed section when the thread views shortcut reopens its view", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("collapsed-restore", 1)], 1280);
+  await using _app = stack;
+  await act(() =>
+    useThreadContextSidebarStore.getState().show("details", { section: "details:environments" }),
+  );
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  const heading = panel.getByRole("button", { name: "Environments", exact: true });
+  await expect.element(heading).toBeVisible();
+  await userEvent.click(heading);
+  await expect.element(heading).toHaveAttribute("aria-expanded", "false");
+  await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
+  await expect.element(panel).not.toBeInTheDocument();
+  await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
+  await expect.element(heading).toHaveAttribute("aria-expanded", "false");
+});
+
 it.each([
   [390, false],
   [1280, false],
@@ -821,8 +873,11 @@ it.each([
       timestamp: "2026-01-01T00:00:00.000Z",
       description: `Synthetic link ${i}`,
     }));
-    const gate = Promise.withResolvers<typeof marks>();
-    using _marks = answerRpc(WS_METHODS.threadMarksGet, () => Effect.promise(() => gate.promise));
+    let releaseMarks!: (next: typeof marks) => void;
+    const delayedMarks = new Promise<typeof marks>((resolve) => {
+      releaseMarks = resolve;
+    });
+    using _marks = answerRpc(WS_METHODS.threadMarksGet, () => Effect.promise(() => delayedMarks));
     const { stack, screen } = await mountApp(
       [threadWithHistory("late-links", 1)],
       width,
@@ -851,7 +906,7 @@ it.each([
         scroller.scrollTop = 0;
       });
     }
-    await act(() => gate.resolve(marks));
+    await act(() => releaseMarks(marks));
     await expect.element(panel.getByText("Synthetic link 29")).toBeInTheDocument();
     if (userScroll) {
       await new Promise<void>((resolve) => {

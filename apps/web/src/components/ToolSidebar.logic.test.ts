@@ -152,7 +152,7 @@ describe("side area", () => {
   });
 
   it("toggles thread views on the last one shown, skipping global views", () => {
-    const toggle = { type: "toggleThreadViews" } as const;
+    const toggle = { type: "toggleThreadViews", collapsedSections: [] } as const;
     expect(run(INITIAL_SIDE_AREA, toggle)).toMatchObject({ open: true, view: "details" });
     const links = run(INITIAL_SIDE_AREA, { type: "show", view: "links" });
     expect(run(links, toggle).open).toBe(false);

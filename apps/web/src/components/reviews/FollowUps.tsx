@@ -425,7 +425,7 @@ function focusAfterRow(row: HTMLElement | null) {
     boxes[at - 1] ??
     row
       ?.closest("[data-todos-view]")
-      ?.querySelector<HTMLElement>('[aria-label="Todos scope"] [aria-pressed="true"]') ??
+      ?.querySelector<HTMLElement>('[aria-label="Checklist scope"] [aria-pressed="true"]') ??
     null
   );
 }

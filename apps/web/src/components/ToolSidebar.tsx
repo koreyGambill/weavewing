@@ -4,6 +4,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
   ChevronDownIcon,
+  EyeOffIcon,
   LockIcon,
   LockOpenIcon,
   Maximize2,
@@ -28,6 +29,7 @@ import { DeferEnvironmentQueries } from "../state/query";
 import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { readSelectedThreadRef } from "../threadContextSidebar";
+import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import {
   completeSideAreaHandoff,
@@ -71,6 +73,9 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "./ui/menu";
 import { useMobileSidebarSheetMounted, useSidebar } from "./ui/sidebar";
@@ -209,7 +214,10 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         "threadContext.toggle": (event) => {
           event.preventDefault();
           event.stopPropagation();
-          useToolSidebarStore.getState().dispatch({ type: "toggleThreadViews" });
+          useToolSidebarStore.getState().dispatch({
+            type: "toggleThreadViews",
+            collapsedSections: useThreadContextSidebarStore.getState().collapsedSections,
+          });
         },
       },
       { capture: true },
@@ -788,17 +796,31 @@ function ViewPicker({
               </Fragment>
             ))}
         </MenuRadioGroup>
-        {hidden.includes(definition.id) ? null : (
-          <>
-            <MenuSeparator />
-            <MenuItem
-              disabled={!canHideView(definition.id, hidden)}
-              onClick={() => dispatch({ type: "setHidden", view: definition.id, hidden: true })}
-            >
-              Hide {definition.title}
-            </MenuItem>
-          </>
-        )}
+        <MenuSeparator />
+        <MenuSub>
+          <MenuSubTrigger>
+            <EyeOffIcon aria-hidden />
+            Hide a view
+          </MenuSubTrigger>
+          <MenuSubPopup>
+            {visibleViews.map((entry) => {
+              const disabled = !canHideView(entry.id, hidden);
+              return (
+                <MenuItem
+                  key={entry.id}
+                  disabled={disabled}
+                  aria-description={
+                    disabled ? "Keep at least one thread view in the picker." : undefined
+                  }
+                  onClick={() => dispatch({ type: "setHidden", view: entry.id, hidden: true })}
+                >
+                  <entry.icon aria-hidden />
+                  Hide {entry.title}
+                </MenuItem>
+              );
+            })}
+          </MenuSubPopup>
+        </MenuSub>
         {hiddenViews.length > 0 ? (
           <>
             <MenuSeparator />
@@ -809,6 +831,7 @@ function ViewPicker({
                   key={entry.id}
                   onClick={() => dispatch({ type: "setHidden", view: entry.id, hidden: false })}
                 >
+                  <entry.icon aria-hidden />
                   Show {entry.title}
                 </MenuItem>
               ))}
