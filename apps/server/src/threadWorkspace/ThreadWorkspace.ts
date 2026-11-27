@@ -26,6 +26,7 @@ import {
   type ThreadArtifactSubmitInput,
   listItemNeedsHandoff,
   type ListItem,
+  LIST_FILED_TASKS_LIMIT,
   LIST_MAX_DEPTH,
   type ThreadWorkspaceGetInput,
   type ThreadListUpdateInput,
@@ -189,6 +190,19 @@ export const emptyWorkspace = (threadId: ThreadId): Workspace => ({
   updatedAt: null,
 });
 const invalid = (message: string) => new ThreadWorkspaceError({ code: "invalid", message });
+const TOO_MANY_FILED = `File at most ${LIST_FILED_TASKS_LIMIT} tasks for the user in one list write; split the rest into another call.`;
+/** How many items a write makes the user's tasks, by creating them or handing them over. */
+const filedCount = (
+  before: Workspace,
+  items: ReadonlyArray<ListItem>,
+  changedIds: ReadonlySet<string>,
+) =>
+  items.filter(
+    (item) =>
+      changedIds.has(item.id) &&
+      item.owner === "you" &&
+      before.items.find((entry) => entry.id === item.id)?.owner !== "you",
+  ).length;
 /** What a write changed, and the items it made the user's tasks, from the saved list. */
 const listWrite = (
   before: Workspace,
@@ -789,6 +803,8 @@ const make = Effect.gen(function* () {
         const order = input.order;
         items = items.toSorted((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       }
+      if (filedCount(current, items, applied.changedIds) > LIST_FILED_TASKS_LIMIT)
+        return yield* invalid(TOO_MANY_FILED);
       const workspace = yield* commit(
         current,
         {
@@ -836,6 +852,8 @@ const make = Effect.gen(function* () {
           parentId = current.items.find((entry) => entry.id === parentId)?.parentId ?? null;
         return parentId === item.parentId ? item : { ...item, parentId };
       });
+      if (filedCount(current, replacements, rewritten.changedIds) > LIST_FILED_TASKS_LIMIT)
+        return yield* invalid(TOO_MANY_FILED);
       const workspace = yield* commit(
         current,
         { ...current, items: [...history, ...replacements] },

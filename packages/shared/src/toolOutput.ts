@@ -1,6 +1,7 @@
 import {
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  LIST_FILED_TASKS_LIMIT,
 } from "@t3tools/contracts";
 import * as Predicate from "effect/Predicate";
 
@@ -287,17 +288,14 @@ export function compactDynamicToolOutput(
     ) {
       output.questionIds = questionIds;
     }
-    const filedTasks = data.filedTasks;
-    if (
-      toolName != null &&
-      LIST_WRITE_TOOL.test(toolName) &&
-      Array.isArray(filedTasks) &&
-      filedTasks.length > 0 &&
-      filedTasks.length <= MAX_THREADS &&
-      filedTasks.every((ref) => typeof ref === "string" && /^T\d{1,9}$/.test(ref))
-    ) {
+    // The list write files at most this many; an older or larger result keeps its first cards.
+    const filedTasks = Array.isArray(data.filedTasks)
+      ? data.filedTasks
+          .filter((ref): ref is string => typeof ref === "string" && /^T\d{1,9}$/.test(ref))
+          .slice(0, LIST_FILED_TASKS_LIMIT)
+      : [];
+    if (toolName != null && LIST_WRITE_TOOL.test(toolName) && filedTasks.length > 0)
       output.filedTasks = filedTasks;
-    }
     if (
       toolName != null &&
       EVIDENCE_RECORD_TOOL.test(toolName) &&

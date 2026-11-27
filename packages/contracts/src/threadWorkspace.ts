@@ -62,6 +62,8 @@ export const ListItem = Schema.Struct({
 });
 export type ListItem = typeof ListItem.Type;
 export const LIST_ITEM_NOTE_MAX_LENGTH = 500;
+/** The most user tasks one list write may file, so every one of them gets its card. */
+export const LIST_FILED_TASKS_LIMIT = 100;
 export const ThreadArtifactVersion = Schema.Struct({
   questions: Schema.Array(ArtifactQuestion),
   answers: Schema.Record(Schema.String, ArtifactAnswer),
