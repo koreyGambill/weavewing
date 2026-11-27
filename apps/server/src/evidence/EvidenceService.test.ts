@@ -1485,6 +1485,46 @@ it.effect("lets an agent settle QA only from a user's own message in its current
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect(
+  "names the message an agent settled QA from only when it is the one since the change",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        const sql = yield* SqlClient.SqlClient;
+        const settle = (threadId: string) =>
+          evidence.agentSetQa({
+            threadId: ThreadId.make(threadId),
+            landingId: `landing-${threadId}`,
+            changeId: "a",
+            state: "confirmed",
+          });
+        // One user message since the change was raised: the outcome came from it.
+        yield* seedThread({ id: "sole" });
+        yield* evidence.record(
+          recordInput("landing-sole", [change("a")], { threadId: ThreadId.make("sole") }),
+        );
+        yield* seedRunInput("sole", [{ id: "message-sole", payload: { createdBy: "user" } }]);
+        assert.strictEqual((yield* settle("sole")).messageId, "message-sole");
+        // The user answered, then asked for something else, and the agent records the answer in the
+        // later turn: the outcome may have come from either message, so none is named.
+        yield* seedThread({ id: "late" });
+        yield* evidence.record(
+          recordInput("landing-late", [change("a")], { threadId: ThreadId.make("late") }),
+        );
+        yield* sql`INSERT INTO orchestration_v2_projection_messages (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
+        VALUES ('message-answer', 'late', 'run-earlier', 'user', 0, '2026-11-20T10:00:00.000Z',
+          '2026-11-20T10:00:00.000Z', ${JSON.stringify({ createdBy: "user" })})`;
+        yield* seedRunInput("late", [{ id: "message-unrelated", payload: { createdBy: "user" } }]);
+        const late = yield* settle("late");
+        assert.deepStrictEqual(
+          [late.state, late.by, late.messageId],
+          ["confirmed", "agent", undefined],
+        );
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("closes an agent's problem when a later landing names it in fixes", () =>
   withHome(() =>
     Effect.gen(function* () {

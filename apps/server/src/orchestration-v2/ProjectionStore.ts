@@ -107,7 +107,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { currentUserMessage } from "./currentUserMessage.ts";
+import { currentUserMessage, type CurrentUserMessageOptions } from "./currentUserMessage.ts";
 import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
@@ -571,6 +571,7 @@ export interface ProjectionStoreV2Shape {
    */
   readonly getCurrentUserMessageId: (
     threadId: ThreadId,
+    options?: CurrentUserMessageOptions,
   ) => Effect.Effect<MessageId | null, ProjectionStoreV2Error>;
   /** Bytes of tool output a transcript export is sure to hold, or 0 when it can fit in `limit`. */
   readonly getTranscriptByteFloor: (
@@ -6692,8 +6693,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError(controlReadError(threadId)),
       );
 
-    const getCurrentUserMessageId: ProjectionStoreV2Shape["getCurrentUserMessageId"] = (threadId) =>
-      currentUserMessage(threadId).pipe(
+    const getCurrentUserMessageId: ProjectionStoreV2Shape["getCurrentUserMessageId"] = (
+      threadId,
+      options,
+    ) =>
+      currentUserMessage(threadId, options).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.mapError(controlReadError(threadId)),
       );

@@ -42,8 +42,13 @@ import fixture from "./testdata/legacy-workspace.json" with { type: "json" };
 const threadId = ThreadId.make("thread-test");
 const at = DateTime.makeUnsafe("2026-11-05T12:00:00.000Z");
 const harness = Effect.fn("test.workspaceHarness")(function* () {
-  // The user message of the thread's current turn, as the orchestrator reads it.
-  const turnMessage = { current: null as MessageId | null };
+  // The user message of the thread's current turn, as the orchestrator reads it. `sole` says
+  // whether it is the one user message since the anchor a caller passes, which `anchors` records.
+  const turnMessage = {
+    current: null as MessageId | null,
+    sole: true,
+    anchors: [] as Array<string>,
+  };
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "thread-workspace-test-" });
@@ -127,7 +132,12 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
         }),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
-      getCurrentUserMessageId: () => Effect.sync(() => turnMessage.current),
+      getCurrentUserMessageId: (_thread, options) =>
+        Effect.sync(() => {
+          if (options?.soleSince === undefined) return turnMessage.current;
+          turnMessage.anchors.push(options.soleSince);
+          return turnMessage.sole ? turnMessage.current : null;
+        }),
       getThreadRecords: (id) =>
         Effect.sync(() => ({
           ...projection,
@@ -1619,13 +1629,29 @@ it.effect("names the user message an agent recorded an answer from, and only tha
     });
     const record = (id: string, notes: string) =>
       h.service.questionUpdate({ threadId, id, state: "answered", answer: { notes } }, "agent");
-    // Answered in prose: the agent records it in the turn the user's message started.
+    // Answered in prose: the agent records it in the turn the user's message started, the one
+    // user message since the question was asked.
     h.turnMessage.current = MessageId.make("m-prose");
-    expect((yield* record("Q1", "Platform owns it")).questions[0]).toMatchObject({
+    const recorded = yield* record("Q1", "Platform owns it");
+    expect(recorded.questions[0]).toMatchObject({
       state: "answered",
       answeredBy: "agent",
       settledFromMessageId: "m-prose",
     });
+    expect(h.turnMessage.anchors).toEqual([recorded.questions[0]!.createdAt]);
+    // The user answered, then sent another message, and the agent records the answer in that
+    // later turn: two user messages since the question, so it names neither.
+    h.turnMessage.current = MessageId.make("m-unrelated");
+    h.turnMessage.sole = false;
+    expect((yield* record("Q3", "Later")).questions[2]).toMatchObject({
+      state: "answered",
+      answeredBy: "agent",
+    });
+    expect((yield* h.service.get({ threadId })).questions[2]).not.toHaveProperty(
+      "settledFromMessageId",
+    );
+    yield* h.service.questionUpdate({ threadId, id: "Q3", state: "open" }, "agent");
+    h.turnMessage.sole = true;
     // Reopened, the answer goes and so does the message it came from.
     const reopened = yield* h.service.questionUpdate(
       { threadId, id: "Q1", state: "open" },
@@ -1773,6 +1799,8 @@ it.effect(
         },
         { ref: "T2", state: "dropped", settledBy: "agent", note: "The vendor closed the account" },
       ]);
+      // The relayed message is checked against the user messages since T1 was filed.
+      expect(h.turnMessage.anchors).toEqual([created.items[0]!.createdAt]);
       expect(
         (yield* h.service.waitingItems(threadId)).filter((item) => item.kind === "task"),
       ).toEqual([]);
@@ -1781,6 +1809,40 @@ it.effect(
         "T2",
       ]);
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("names no message for a task outcome an agent relays after a later user message", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const agent = { by: "agent", threadId } as const;
+    const filed = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
+      },
+      agent,
+    );
+    // The user said it was done, then asked for something else; the agent relays the outcome in
+    // that later turn, so either message may have been its source.
+    h.turnMessage.current = MessageId.make("message-unrelated");
+    h.turnMessage.sole = false;
+    const late = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: filed.revision,
+        changes: [{ id: "T1", state: "done", settledFromUser: true, note: "done, rotated it" }],
+      },
+      agent,
+    );
+    expect(late.items[0]).toMatchObject({
+      state: "done",
+      settledBy: "agent",
+      note: "done, rotated it",
+    });
+    expect(late.items[0]).not.toHaveProperty("settledFromMessageId");
+    expect(h.turnMessage.anchors).toEqual([filed.items[0]!.createdAt]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
 it.effect("keeps the user's Done and dismissal note from an agent without the user's message", () =>

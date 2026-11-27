@@ -139,6 +139,7 @@ import {
 } from "./CommandPolicy.ts";
 import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 import { CommandReceiptStoreV2, type CommandReceiptV2 } from "./CommandReceiptStore.ts";
+import type { CurrentUserMessageOptions } from "./currentUserMessage.ts";
 import {
   ContextHandoffServiceV2,
   readForkHistoryItems,
@@ -550,6 +551,7 @@ export interface OrchestratorV2Shape {
   /** The user-authored input message of the thread's current run, or null. */
   readonly getCurrentUserMessageId: (
     threadId: ThreadId,
+    options?: CurrentUserMessageOptions,
   ) => Effect.Effect<MessageId | null, OrchestratorV2Error>;
   readonly getMessagesById: (
     threadId: ThreadId,
@@ -18734,9 +18736,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
     }),
     getCurrentUserMessageId: Effect.fn("OrchestratorV2.getCurrentUserMessageId")(
-      function (threadId) {
+      function (threadId, options) {
         return projectionStore
-          .getCurrentUserMessageId(threadId)
+          .getCurrentUserMessageId(threadId, options)
           .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
       },
     ),

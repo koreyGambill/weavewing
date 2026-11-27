@@ -1025,13 +1025,21 @@ const make = Effect.gen(function* () {
       return yield* invalid(
         `Landing ${input.landingId} shows its QA in another thread; settle it there.`,
       );
+    // Name the message only when it is the one user message since the change's last state change,
+    // so an outcome the agent records late does not point at a later, unrelated message.
+    const [row] = yield* sql<{ readonly updated_at: string }>`SELECT updated_at FROM evidence_qa
+        WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}`;
+    const source =
+      row === undefined
+        ? null
+        : yield* projections.getCurrentUserMessageId(input.threadId, { soleSince: row.updated_at });
     return yield* writeQa({
       landingId: input.landingId,
       changeId: input.changeId,
       state: input.state === "dismissed" ? "waived" : input.state,
       note: input.note,
       by: "agent",
-      messageId,
+      messageId: source,
     });
   }, Effect.mapError(passStorage));
 

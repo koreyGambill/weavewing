@@ -171,6 +171,13 @@ export type ListCaller =
   | { readonly by: "user" }
   | { readonly by: "agent"; readonly threadId: ThreadId | undefined };
 
+/** The task rules' actor, with the agent's own thread for reading its turn's messages. */
+type WriteActor =
+  | Extract<ListActor, { readonly by: "user" }>
+  | (Extract<ListActor, { readonly by: "agent" }> & { readonly threadId: ThreadId | undefined });
+
+const withoutRelaySource = ({ settledFromMessageId: _, ...task }: ListItem): ListItem => task;
+
 /** A list write's result: the saved list, the items it wrote and the user tasks it filed. */
 export interface ListWrite {
   readonly workspace: Workspace;
@@ -616,6 +623,14 @@ const make = Effect.gen(function* () {
       }),
     });
   });
+  // The message an agent relayed a task's outcome from, named only when it is the one user message
+  // since the task was filed; a late relay could otherwise point at a later, unrelated message.
+  const soleRelaySource = (actor: WriteActor, since: string) =>
+    actor.by === "agent" && actor.threadId !== undefined
+      ? orchestrator
+          .getCurrentUserMessageId(actor.threadId, { soleSince: since })
+          .pipe(Effect.mapError(storage))
+      : Effect.succeed(null);
   // Reads the turn's user message only when a change claims it, from the caller's own thread.
   const actorOf = Effect.fnUntraced(function* (
     caller: ListCaller,
@@ -628,13 +643,13 @@ const make = Effect.gen(function* () {
         : yield* orchestrator
             .getCurrentUserMessageId(caller.threadId)
             .pipe(Effect.mapError(storage));
-    return { by: "agent", userMessageId } satisfies ListActor;
+    return { by: "agent", userMessageId, threadId: caller.threadId } satisfies WriteActor;
   });
   const apply = Effect.fnUntraced(function* (
     current: Workspace,
     changes: ThreadListUpdateInput["changes"],
     now: string,
-    actor: ListActor,
+    actor: WriteActor,
     // A rewrite applies to an empty list but keeps the user-task fields of items it keeps by id.
     previous: ReadonlyArray<ListItem> = current.items,
   ) {
@@ -670,8 +685,14 @@ const make = Effect.gen(function* () {
           )
           .map((target) => ({ type: "ticket" as const, target })),
       ];
-      const task = changeUserTask(before, item, change, actor, now);
-      if (typeof task === "string") return yield* invalid(task);
+      const changed = changeUserTask(before, item, change, actor, now);
+      if (typeof changed === "string") return yield* invalid(changed);
+      const task =
+        changed.settledFromMessageId === undefined ||
+        changed.settledFromMessageId === before?.settledFromMessageId ||
+        (yield* soleRelaySource(actor, before?.createdAt ?? now)) === changed.settledFromMessageId
+          ? changed
+          : withoutRelaySource(changed);
       if (index < 0) items.push(task);
       else items[index] = task;
       changedIds.add(task.id);
@@ -1177,8 +1198,9 @@ const make = Effect.gen(function* () {
           if (!artifactAnswerFits(question, chosenOptionIds))
             return yield* invalid(`Answer choices must be options of ${question.id}.`);
           // The question tool acts on the agent's own thread, so this is the agent's current turn.
+          // Only the one user message since the question was asked can be the answer's source.
           const settledFromMessageId = yield* orchestrator
-            .getCurrentUserMessageId(input.threadId)
+            .getCurrentUserMessageId(input.threadId, { soleSince: question.createdAt })
             .pipe(Effect.mapError(storage));
           next = {
             ...question,
