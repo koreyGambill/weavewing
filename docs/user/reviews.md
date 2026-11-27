@@ -115,7 +115,7 @@ rotating a secret or approving an account, it files a task for you instead of
 asking in its reply. The task appears as a card in the chat where the agent
 filed it, numbered T1, T2 and so on, with **Dismiss**, **Discuss** and **Done**.
 Done and Dismiss start no turn; the agent hears with your next message. A task
-you add yourself in Todos joins the strip without a card. A closed task shrinks
+you add yourself in Checklist joins the strip without a card. A closed task shrinks
 to one line with **Reopen**.
 
 When you tell the agent in chat that a task is done or no longer needed, it
