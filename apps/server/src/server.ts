@@ -885,7 +885,11 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(TriageService.layer.pipe(Layer.provide(GitVcsDriver.layer))),
   Layer.provideMerge(
-    EvidenceService.layer.pipe(Layer.provide(layerPersistence), Layer.provide(GitVcsDriver.layer)),
+    EvidenceService.layer.pipe(
+      Layer.provide(ProjectionStoreV2.layer),
+      Layer.provide(layerPersistence),
+      Layer.provide(GitVcsDriver.layer),
+    ),
   ),
   Layer.provideMerge(NotificationService.layer.pipe(Layer.provide(layerPersistence))),
   Layer.provideMerge(MessageFollowUpService.layer.pipe(Layer.provide(layerPersistence))),
