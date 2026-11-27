@@ -26,8 +26,8 @@ export const sidebarWorkspaceGet = createEnvironmentRpcQueryAtomFamily(connectio
   idleTtlMs: 0,
 });
 /**
- * Refetches what shows a thread's list outside the chat after a write: the hidden sidebar's
- * attention dot and the open Checklist view.
+ * Refetches every view of a thread's list after a write: the hidden sidebar's attention dot, the
+ * open Checklist view, and the workspace the chat's cards read, so no card acts on a stale revision.
  */
 export function refreshTodos(
   registry: AtomRegistry.AtomRegistry,
@@ -40,6 +40,7 @@ export function refreshTodos(
   const { threadId } = target.input;
   registry.refresh(sidebarWorkspaceGet({ environmentId, input: { threadId } }));
   registry.refresh(threadListRead({ environmentId, input: { threadId, all: true } }));
+  registry.refresh(threadWorkspaceGet({ environmentId, input: { threadId } }));
 }
 export const threadListUpdate = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "list:update",

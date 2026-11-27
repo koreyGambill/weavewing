@@ -59,10 +59,9 @@ export const threadQuestionUpdate = createEnvironmentRpcCommand(connectionAtomRu
 export const threadTaskUpdate = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "task:update",
   tag: WS_METHODS.threadListUpdate,
-  onSuccess: (target, registry, workspace) =>
-    remember(target, registry, workspace).pipe(
-      Effect.andThen(Effect.sync(() => refreshTodos(registry, target))),
-    ),
+  onSuccess: (target, registry, workspace) => remember(target, registry, workspace),
+  // A refused write, such as one on a stale revision, refetches too, so the next press can land.
+  onSettled: (target, registry) => Effect.sync(() => refreshTodos(registry, target)),
 });
 export const threadQuestionDraft = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "question:draft",

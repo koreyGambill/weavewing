@@ -21,6 +21,7 @@ import {
   sidebarWorkspaceGet,
   threadListRead,
   threadListUpdate,
+  threadWorkspaceGet,
 } from "./threadWorkspace";
 
 it.effect("a list update refetches the workspace query, so the attention dot follows", () =>
@@ -41,7 +42,7 @@ it.effect("a list update refetches the workspace query, so the attention dot fol
   }),
 );
 
-it.effect("a card's write refetches the open Todos list as well as the badge", () =>
+it.effect("a list write refetches the badge, the open Todos list and the cards' workspace", () =>
   Effect.sync(() => {
     fetches.count = 0;
     const environmentId = EnvironmentId.make("env");
@@ -50,10 +51,12 @@ it.effect("a card's write refetches the open Todos list as well as the badge", (
     const unmount = [
       registry.mount(sidebarWorkspaceGet({ environmentId, input: { threadId } })),
       registry.mount(threadListRead({ environmentId, input: { threadId, all: true } })),
+      registry.mount(threadWorkspaceGet({ environmentId, input: { threadId } })),
     ];
-    expect(fetches.count).toBe(2);
+    expect(fetches.count).toBe(3);
+    // The chat's cards read the last one, so none acts on a stale revision after a write.
     refreshTodos(registry, { environmentId, input: { threadId } });
-    expect(fetches.count).toBe(4);
+    expect(fetches.count).toBe(6);
     for (const stop of unmount) stop();
     registry.dispose();
   }),
