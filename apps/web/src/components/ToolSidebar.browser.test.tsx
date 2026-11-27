@@ -1,5 +1,6 @@
 import { createMemoryHistory } from "@tanstack/react-router";
 import {
+  MessageId,
   ThreadId,
   WS_METHODS,
   type ThreadWorkspace,
@@ -98,7 +99,7 @@ async function mountApp(
   useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
   await restore?.();
   useRightPanelStore.setState({ byThreadKey: {} });
-  stack.use(installFakeEnvironment(threads));
+  stack.use(installFakeEnvironment(threads, { messageBookmarks: true }));
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -742,3 +743,39 @@ it.each(["panel", "rail", "shortcut"] as const)(
     );
   },
 );
+
+it("lists bookmark to-dos in Checklist All and keeps plain bookmarks in the thread menu", async () => {
+  const thread = threadWithHistory("checklist-bookmarks", 1);
+  const bookmark = {
+    threadId: thread.id,
+    threadTitle: thread.title,
+    role: "assistant" as const,
+    flaggedAt: "2026-01-01T00:00:00.000Z",
+    doneAt: null,
+  };
+  using _bookmarks = answerRpc(WS_METHODS.messageFollowUpsList, () =>
+    Effect.succeed([
+      { ...bookmark, messageId: MessageId.make("plain"), todo: false, excerpt: "Saved only" },
+      { ...bookmark, messageId: MessageId.make("todo"), todo: true, excerpt: "Follow up" },
+    ]),
+  );
+  const { stack, screen } = await mountApp([thread], 1280);
+  await using _app = stack;
+  await userEvent.click(screen.getByRole("button", { name: "Thread menu" }));
+  await userEvent.click(page.getByRole("menuitem", { name: /bookmark/i }));
+  await expect
+    .element(page.getByRole("dialog", { name: "Bookmarks" }).getByText("Saved only"))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await act(() => useThreadContextSidebarStore.getState().show("checklist"));
+  const checklist = screen.getByRole("region", { name: "Checklist", exact: true });
+  const scope = checklist.getByRole("group", { name: "Todos scope" });
+  await userEvent.click(scope.getByRole("button", { name: "All", exact: true }));
+  await expect.element(checklist.getByRole("group", { name: /Filter bookmark/ })).toBeVisible();
+  await expect
+    .element(checklist.getByRole("checkbox", { name: "Mark done: Follow up" }))
+    .toBeVisible();
+  expect(checklist.getByText("Saved only").query()).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: /^View: Checklist/ }));
+  await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*1/ })).toBeVisible();
+});

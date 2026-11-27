@@ -589,6 +589,7 @@ export function installFakeEnvironment(
   options?: {
     readonly acceptCommands?: boolean;
     readonly threadStop?: boolean;
+    readonly messageBookmarks?: boolean;
     readonly rewindToReply?: boolean;
     readonly vcsStatus?: typeof vcsStatusSnapshot;
     readonly keybindings?: ResolvedKeybindingsConfig;
@@ -608,13 +609,14 @@ export function installFakeEnvironment(
       ? {}
       : { scratchWorkspaceRoot: options.scratchWorkspaceRoot }),
   };
-  if (options?.threadStop || options?.rewindToReply) {
+  if (options?.threadStop || options?.rewindToReply || options?.messageBookmarks) {
     baseServerConfig = {
       ...baseServerConfig,
       environment: {
         ...baseServerConfig.environment,
         capabilities: {
           ...baseServerConfig.environment.capabilities,
+          ...(options.messageBookmarks ? { messageBookmarks: true } : {}),
           ...(options.threadStop ? { threadStop: true } : {}),
           ...(options.rewindToReply ? { rewindToReply: true } : {}),
         },

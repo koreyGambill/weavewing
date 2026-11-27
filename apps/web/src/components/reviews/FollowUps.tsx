@@ -446,7 +446,6 @@ function FollowUpRow({
   const nowMinute = useNowMinute();
   const rowRef = useRef<HTMLDivElement>(null);
   const focusAfterMenu = useRef<HTMLElement | null>(null);
-  const todo = isBookmarkTodo(item);
   const done = item.doneAt !== null;
   const text = item.excerpt || "Message without text";
   const elapsed = formatElapsedDurationLabel(item.flaggedAt, Date.parse(`${nowMinute}:00.000Z`));
@@ -459,20 +458,16 @@ function FollowUpRow({
       role="listitem"
       className="flex min-w-0 items-start gap-1.5 rounded-md py-1 pr-0.5 hover:bg-muted/40"
     >
-      {todo ? (
-        <Checkbox
-          className="mt-0.5"
-          aria-label={done ? `Reopen ${text}` : `Mark done: ${text}`}
-          checked={done}
-          disabled={!canWrite}
-          onCheckedChange={() => {
-            if (!done && hidesDone) focusAfterRow(rowRef.current)?.focus();
-            change(done ? "reopen" : "done");
-          }}
-        />
-      ) : (
-        <BookmarkIcon aria-hidden className="mt-1 size-3 shrink-0 fill-current text-warning" />
-      )}
+      <Checkbox
+        className="mt-0.5"
+        aria-label={done ? `Reopen ${text}` : `Mark done: ${text}`}
+        checked={done}
+        disabled={!canWrite}
+        onCheckedChange={() => {
+          if (!done && hidesDone) focusAfterRow(rowRef.current)?.focus();
+          change(done ? "reopen" : "done");
+        }}
+      />
       <div className="min-w-0 flex-1">
         <button
           type="button"
@@ -532,7 +527,7 @@ type BookmarkFilter = "all" | "todo" | "done";
 
 /**
  * With a thread, its open bookmark to-dos above the todo tree, absent while it has none. Without
- * one, every bookmark on the environment grouped by thread, filtered to to-dos when asked.
+ * one, bookmark to-dos across the environment, grouped by thread.
  */
 export function FollowUpSection({
   environmentId,
@@ -552,17 +547,15 @@ export function FollowUpSection({
   if (query.error) return <p role="alert">{query.error}</p>;
   const scoped = threadId !== undefined;
   const items =
-    query.data?.filter((item) =>
-      scoped
-        ? isBookmarkTodo(item) && (showDone || item.doneAt === null)
-        : filter === "all"
-          ? true
-          : isBookmarkTodo(item) && (filter === "done") === (item.doneAt !== null),
-    ) ?? [];
+    query.data?.filter((item) => {
+      if (!isBookmarkTodo(item)) return false;
+      if (scoped) return showDone || item.doneAt === null;
+      return filter === "all" || (filter === "done") === (item.doneAt !== null);
+    }) ?? [];
   const filterControl =
     scoped || !bookmarksSupported ? null : (
       <ToggleGroup
-        aria-label="Filter bookmarks"
+        aria-label="Filter bookmark to-dos"
         size="segmented-compact"
         className="w-full *:flex-1"
         value={[filter]}
@@ -586,7 +579,7 @@ export function FollowUpSection({
           </EmptyMedia>
           <EmptyDescription>
             {filter === "all"
-              ? "No bookmarks. Bookmark a message or a passage to come back to it later."
+              ? "No bookmark to-dos. Bookmark a message or passage as a to-do to add it here."
               : filter === "todo"
                 ? "No open bookmark to-dos."
                 : "No done bookmark to-dos."}
@@ -599,12 +592,12 @@ export function FollowUpSection({
   return (
     <section
       data-follow-ups
-      aria-label={scoped ? "Bookmarked" : "Bookmarks"}
+      aria-label={scoped ? "Bookmarked" : "Bookmark to-dos"}
       className="space-y-1 border-b border-border/60 pb-2"
     >
       <h3 className="flex items-center gap-1.5 px-0.5 text-3xs font-medium tracking-wide text-muted-foreground uppercase">
         <BookmarkIcon aria-hidden className="size-3" />
-        {scoped ? "Bookmarked" : "Bookmarks"}
+        {scoped ? "Bookmarked" : "Bookmark to-dos"}
         <span className="tabular-nums">
           {scoped ? items.filter((item) => item.doneAt === null).length : items.length}
         </span>

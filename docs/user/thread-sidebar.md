@@ -267,9 +267,10 @@ the message, hover its bar, or select its text again.
 
 In Checklist, the **Bookmarked** section at the top lists this thread's open bookmark
 to-dos, not its plain bookmarks. Click one to jump to it, or tick it once you're
-finished. **All** at the top of Checklist lists bookmarks across every thread on that thread's environment. Its filter
-shows every bookmark under **All**, open to-dos under **To-do** and finished ones under
-**Done**. Bookmarks are yours only: agents never see them. This is unrelated to
+finished. **All** at the top of Checklist lists bookmark to-dos across the
+environment. Its filter shows both open and finished to-dos under **All**, open
+ones under **To-do**, and finished ones under **Done**. Find plain bookmarks in
+**Bookmarks** in the thread menu under the composer. Bookmarks are yours only: agents never see them. This is unrelated to
 **Follow-up behavior** in Settings, which decides what a message sent while an
 agent is busy does.
 
