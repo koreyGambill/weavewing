@@ -93,11 +93,11 @@ Agents already running follow a change after they restart.
 
 Three kinds of item wait on you: an agent's questions, landed changes with
 something only you can check (QA cards, see [Thread sidebar](thread-sidebar.md)),
-and tasks only you can do, which are Todos items you own.
+and tasks only you can do, which are Checklist items you own.
 
 The **Waiting on you** strip above the composer counts each kind that has items
 waiting, and how many you are discussing with the agent. Click it to list them
-by kind. Each row's title shows its card in the chat, or Todos for a task, and
+by kind. Each row's title shows its card in the chat, or Checklist for a task, and
 its button is the one-click answer: **Answer** puts a question's drafted answer
 in your message box, **Looks good** confirms a change, and **Done** finishes a
 task. Looks good and Done start no turn. Escape closes the list. On a narrow
@@ -186,9 +186,9 @@ Workspace is available in web and desktop builds with workspace support. An
 older connected environment needs a build with support before it can serve the
 panel.
 
-## Inspect: loads and token usage
+## Context and usage: loads and tokens
 
-Choose **Inspect** in the side panel's view menu for Loads, Context and Tokens.
+Open **Details** in the side panel; its **Context and usage** part has Loads, Context and Tokens.
 
 Loads shows file reads, skill loads, and related tool activity observed in the
 conversation. Use Refresh to update these views while an agent is working. Reported events and events inferred from command text are labeled
@@ -210,7 +210,7 @@ instruction snapshot stay unavailable rather than inheriting today's prompt.
 **Settings › Agent context** shows everything that shapes what a new session
 receives for one provider and project: instruction files with their `@` imports,
 skills grouped by where they come from, and the compiled order under **View
-compiled**. **Edit in Settings** in the Inspect panel opens the same view for a
+compiled**. **Edit in Settings** in Context and usage opens the same view for a
 thread.
 
 Each row names the real file behind any link, its Git repository and whether it
@@ -231,7 +231,7 @@ its default model. The agent commits every change, moves, deletes or ignores
 files that should not be committed, and tells you which ones and why. It does
 not push. A repository that is not yet a project is added as one.
 
-**Load watchers** decide which tool calls Inspect's Loads view labels as
+**Load watchers** decide which tool calls the Loads tab labels as
 knowledge loads. A shell command watcher matches its words in order, such as
 `overwing search`. A tool watcher matches the tool name, where `*` matches any
 run of characters, such as `mcp__vault__*`.

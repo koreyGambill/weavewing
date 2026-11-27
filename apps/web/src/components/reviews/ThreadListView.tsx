@@ -800,10 +800,13 @@ export function ThreadListSummary({ threadRef }: { threadRef: ScopedThreadRef })
   return (
     <button
       className="flex w-full min-w-0 gap-2 px-3 py-2 text-left text-xs hover:bg-muted"
-      onClick={() => useThreadContextSidebarStore.getState().show("todos", { thread: threadRef })}
+      onClick={() =>
+        useThreadContextSidebarStore.getState().show("checklist", { thread: threadRef })
+      }
     >
       <span className="shrink-0">
-        Todos · {entry.items.filter((item) => item.state === "done").length}/{entry.items.length}
+        Checklist · {entry.items.filter((item) => item.state === "done").length}/
+        {entry.items.length}
       </span>
       <span className="truncate text-muted-foreground">· next: {next}</span>
     </button>

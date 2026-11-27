@@ -5,6 +5,7 @@ import {
   describeLockedThread,
   INITIAL_SIDE_AREA,
   migrateViewId,
+  migrateViewTarget,
   resolveDetailsDestination,
   resolveSideAreaThread,
   resolveSideAreaWidth,
@@ -23,19 +24,16 @@ const run = (state: SideAreaState, ...actions: SideAreaAction[]) =>
   actions.reduce(transitionSideArea, state);
 
 describe("side area", () => {
-  it("lists the thread views, then Inbox, Calendar and Status", () => {
+  it("lists five thread views, then the views that span threads", () => {
     expect(VIEW_IDS).toEqual([
-      "todos",
-      "evidence",
+      "checklist",
       "artifacts",
       "links",
-      "related",
-      "timeline",
+      "activity",
       "details",
-      "environments",
-      "inspect",
-      "automations",
       "inbox",
+      "evidence",
+      "automations",
       "calendar",
       "status",
     ]);
@@ -67,7 +65,7 @@ describe("side area", () => {
   it("locks to a thread independently of the pin and returns to following when unlocked", () => {
     const locked = run(
       INITIAL_SIDE_AREA,
-      { type: "show", view: "todos" },
+      { type: "show", view: "checklist" },
       { type: "lock", thread: threadA },
     );
     expect(resolveSideAreaThread(locked.locked, threadB)).toEqual(threadA);
@@ -101,10 +99,10 @@ describe("side area", () => {
     const show = (
       thread: typeof threadA,
       context: { route: typeof threadA; selected: typeof threadA },
-    ) => ({ type: "show", view: "todos", thread, context }) as const;
+    ) => ({ type: "show", view: "checklist", thread, context }) as const;
     expect(run(lockedB, show(threadA, followingA))).toMatchObject({
       open: true,
-      view: "todos",
+      view: "checklist",
       locked: null,
     });
     // The route shows A while a side chat of it, B, is focused: a view for A locks to A.
@@ -186,11 +184,11 @@ describe("side area", () => {
       threadView: "links",
       arrival: null,
     });
-    expect(restoreSideArea({ ...stored, view: "status", threadView: "inspect" })).toMatchObject({
+    expect(restoreSideArea({ ...stored, view: "status", threadView: "timeline" })).toMatchObject({
       view: "status",
-      threadView: "inspect",
+      threadView: "activity",
     });
-    expect(restoreSideArea({ ...stored, view: "context" }).view).toBe("inspect");
+    expect(restoreSideArea({ ...stored, view: "context" }).view).toBe("details");
     expect(restoreSideArea({ ...stored, width: 10 }).width).toBe(280);
     expect(restoreSideArea({ ...stored, view: "missing" })).toEqual(INITIAL_SIDE_AREA);
     expect(restoreSideArea({ ...stored, locked: { threadId: 3 } })).toEqual(INITIAL_SIDE_AREA);
@@ -248,52 +246,64 @@ describe("side area", () => {
   });
 
   it.each([
-    ["todos", "todos"],
-    ["evidence", "evidence"],
-    ["artifacts", "artifacts"],
-    ["links", "links"],
-    ["related", "related"],
-    ["timeline", "timeline"],
-    ["details", "details"],
-    ["environments", "environments"],
-    ["inspect", "inspect"],
-    ["automations", "automations"],
-    ["inbox", "inbox"],
-    ["calendar", "calendar"],
-    ["status", "status"],
-    ["marks", "links"],
-    ["ticket", "links"],
-    ["context", "inspect"],
+    ["todos", { view: "checklist" }],
+    ["evidence", { view: "evidence" }],
+    ["artifacts", { view: "artifacts" }],
+    ["links", { view: "links" }],
+    ["related", { view: "links", section: "links:threads" }],
+    ["timeline", { view: "activity", section: "activity:runs" }],
+    ["details", { view: "details" }],
+    ["environments", { view: "details", section: "details:environments" }],
+    ["inspect", { view: "details", section: "details:inspect" }],
+    ["automations", { view: "automations" }],
+    ["inbox", { view: "inbox" }],
+    ["calendar", { view: "calendar" }],
+    ["status", { view: "status" }],
+    ["checklist", { view: "checklist" }],
+    ["activity", { view: "activity" }],
+    ["marks", { view: "links", section: "links:links" }],
+    ["ticket", { view: "links", section: "links:links" }],
+    ["context", { view: "details", section: "details:inspect" }],
     ["threads", null],
+    ["toString", null],
     ["status-sources", null],
     [42, null],
     [undefined, null],
   ])("migrates the stored view id %o to %o", (stored, expected) => {
-    expect(migrateViewId(stored)).toBe(expected);
+    expect(migrateViewTarget(stored)).toEqual(expected);
+    expect(migrateViewId(stored)).toBe(expected?.view ?? null);
   });
 
   it.each([
     [
       { view: "evidence", lastTool: "evidence" },
-      { open: true, view: "evidence", threadView: "evidence" },
+      { open: true, view: "evidence" },
+    ],
+    [
+      { view: "todos", lastTool: "todos" },
+      { open: true, view: "checklist", threadView: "checklist" },
     ],
     [
       { view: "inbox", lastTool: "timeline" },
-      { open: true, view: "inbox", threadView: "timeline" },
+      { open: true, view: "inbox", threadView: "activity" },
+    ],
+    [
+      { view: "related", lastTool: "related" },
+      { open: true, view: "links", threadView: "links" },
     ],
     [
       { view: "threads", lastTool: "inspect" },
-      { open: false, view: "details", threadView: "inspect" },
+      { open: false, view: "details" },
     ],
     [
-      { view: "threads", lastTool: "context" },
-      { open: false, view: "details", threadView: "inspect" },
+      { view: "threads", lastTool: "automations" },
+      { open: false, view: "details" },
     ],
     [
       { view: "threads", lastTool: "gone" },
-      { open: false, view: "details", threadView: "details" },
+      { open: false, view: "details" },
     ],
-    [{}, { open: false, view: "details", threadView: "details" }],
+    [{}, { open: false, view: "details" }],
   ])("opens the left rail's stored %o in the side panel", (rail, expected) => {
     expect(adoptRetiredRail(INITIAL_SIDE_AREA, rail)).toEqual({
       ...INITIAL_SIDE_AREA,

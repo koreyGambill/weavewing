@@ -2,21 +2,10 @@ import { ScopedThreadRef } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 /** The views that show one thread, in the picker's order. */
-const THREAD_VIEW_IDS = [
-  "todos",
-  "evidence",
-  "artifacts",
-  "links",
-  "related",
-  "timeline",
-  "details",
-  "environments",
-  "inspect",
-  "automations",
-] as const;
+const THREAD_VIEW_IDS = ["checklist", "artifacts", "links", "activity", "details"] as const;
 
 /** The views that span threads, in the picker's order. */
-const GLOBAL_VIEW_IDS = ["inbox", "calendar", "status"] as const;
+const GLOBAL_VIEW_IDS = ["inbox", "evidence", "automations", "calendar", "status"] as const;
 
 export type ThreadViewId = (typeof THREAD_VIEW_IDS)[number];
 export type GlobalViewId = (typeof GLOBAL_VIEW_IDS)[number];
@@ -32,6 +21,10 @@ function isViewId(value: string): value is ViewId {
 
 function isThreadViewId(id: string): id is ThreadViewId {
   return THREAD_VIEW_IDS.some((entry) => entry === id);
+}
+
+export function isGlobalViewId(id: ViewId): id is GlobalViewId {
+  return GLOBAL_VIEW_IDS.some((entry) => entry === id);
 }
 
 export type ViewLayout = "compact" | "full";
@@ -183,21 +176,62 @@ export function restoreSideArea(value: unknown): SideAreaState {
   return INITIAL_SIDE_AREA;
 }
 
+/** Where each retired view went: the view that holds it now and, for a merged one, its section. */
+const RETIRED_VIEWS: Partial<
+  Record<string, { readonly view: ViewId; readonly section?: ViewSectionId }>
+> = {
+  todos: { view: "checklist" },
+  related: { view: "links", section: "links:threads" },
+  timeline: { view: "activity", section: "activity:runs" },
+  environments: { view: "details", section: "details:environments" },
+  inspect: { view: "details", section: "details:inspect" },
+  // The retired right panel's views.
+  marks: { view: "links", section: "links:links" },
+  ticket: { view: "links", section: "links:links" },
+  context: { view: "details", section: "details:inspect" },
+};
+
+/** A section of a merged view, named `<view>:<section>`. */
+export type ViewSectionId =
+  | "links:links"
+  | "links:threads"
+  | "activity:runs"
+  | "activity:landings"
+  | "details:thread"
+  | "details:environments"
+  | "details:inspect";
+
 /**
  * The current view for a view id stored by any earlier version: the left rail's views, the
- * retired right panel's and the side panel's own. Null for anything else.
+ * retired right panel's and the side panel's own, with the section that now holds a merged one.
+ * Null for anything else.
  */
-export function migrateViewId(value: unknown): ViewId | null {
+export function migrateViewTarget(
+  value: unknown,
+): { readonly view: ViewId; readonly section?: ViewSectionId } | null {
   if (typeof value !== "string") return null;
-  switch (value) {
-    case "marks":
-    case "ticket":
-      return "links";
-    case "context":
-      return "inspect";
+  const retired = Object.hasOwn(RETIRED_VIEWS, value) ? RETIRED_VIEWS[value] : undefined;
+  return retired ?? (isViewId(value) ? { view: value } : null);
+}
+
+/**
+ * The id to store for a view, so a build from before the five merged views reads it: Checklist
+ * and Activity keep the ids of the views they replaced, and `migrateViewTarget` maps them back.
+ */
+export function storedViewId(view: ViewId): string {
+  switch (view) {
+    case "checklist":
+      return "todos";
+    case "activity":
+      return "timeline";
     default:
-      return isViewId(value) ? value : null;
+      return view;
   }
+}
+
+/** The current view for a view id stored by any earlier version, or null; see `migrateViewTarget`. */
+export function migrateViewId(value: unknown): ViewId | null {
+  return migrateViewTarget(value)?.view ?? null;
 }
 
 /** The left rail's stored selection: the view it showed and the last tool it remembered. */

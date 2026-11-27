@@ -3,7 +3,12 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import type { TodoFilter } from "./components/reviews/todoList.logic";
-import { migrateViewId, type ViewId } from "./components/ToolSidebar.logic";
+import {
+  isGlobalViewId,
+  migrateViewId,
+  type ViewId,
+  type ViewSectionId,
+} from "./components/ToolSidebar.logic";
 import { adoptRetiredRailSelection, useToolSidebarStore } from "./toolSidebarStore";
 
 export type InboxTab = "inbox" | "snoozed" | "dismissed";
@@ -26,6 +31,8 @@ export interface ShowTarget {
   /** The thread the artifact belongs to, when the request is not about one thread. */
   readonly artifactThread?: ScopedThreadRef;
   readonly environmentId?: string;
+  /** The section of a merged view to expand and scroll to. */
+  readonly section?: ViewSectionId;
   /** Opens the inbox on this notification. */
   readonly notification?: { readonly environmentId: string; readonly id: string };
 }
@@ -48,7 +55,10 @@ interface ThreadContextSidebarState {
   inboxTab: InboxTab;
   inboxSelection: InboxSelection | null;
   automationSelection: AutomationSelection | null;
-  /** Null follows the context: Thread with a thread open, else All. */
+  /** The thread Automations lists only the automations of; null lists every automation. */
+  automationThread: ScopedThreadRef | null;
+  setAutomationThread: (thread: ScopedThreadRef | null) => void;
+  /** Evidence spans threads, so it starts on All; null follows the context, as older versions did. */
   evidenceScope: "thread" | "all" | null;
   evidenceNeedsQa: boolean;
   setEvidenceView: (view: { scope?: "thread" | "all"; needsQa?: boolean }) => void;
@@ -56,6 +66,12 @@ interface ThreadContextSidebarState {
   evidenceCoverageDismissed: Record<string, string>;
   dismissEvidenceCoverage: (key: string, head: string | null) => void;
   selectAutomation: (selection: AutomationSelection | null) => void;
+  /** Sections of merged views the viewer collapsed; every other section is expanded. */
+  collapsedSections: ReadonlyArray<ViewSectionId>;
+  toggleSection: (section: ViewSectionId) => void;
+  /** A section an opener asked to see, which scrolls into view once it renders. */
+  revealSection: ViewSectionId | null;
+  consumeRevealSection: (section: ViewSectionId) => void;
   /** Opens a view in the side panel on the item `target` names. */
   show: (view: ViewId, target?: ShowTarget) => void;
   selectArtifact: (thread: ScopedThreadRef, id: string | null) => void;
@@ -78,7 +94,19 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       inboxTab: "inbox",
       inboxSelection: null,
       automationSelection: null,
-      evidenceScope: null,
+      automationThread: null,
+      setAutomationThread: (automationThread) => set({ automationThread }),
+      collapsedSections: [],
+      toggleSection: (section) =>
+        set((state) => ({
+          collapsedSections: state.collapsedSections.includes(section)
+            ? state.collapsedSections.filter((entry) => entry !== section)
+            : [...state.collapsedSections, section],
+        })),
+      revealSection: null,
+      consumeRevealSection: (section) =>
+        set((state) => (state.revealSection === section ? { revealSection: null } : state)),
+      evidenceScope: "all",
       evidenceNeedsQa: false,
       evidenceCoverageDismissed: {},
       dismissEvidenceCoverage: (key, head) =>
@@ -93,7 +121,15 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
         })),
       selectAutomation: (automationSelection) => set({ automationSelection }),
       show: (view, target = {}) => {
-        set({
+        const { section } = target;
+        set((state) => ({
+          ...(section
+            ? {
+                revealSection: section,
+                collapsedSections: state.collapsedSections.filter((entry) => entry !== section),
+              }
+            : {}),
+          ...(view === "automations" ? { automationThread: target.thread ?? null } : {}),
           ...(view === "artifacts"
             ? {
                 artifactSelection: target.artifactId
@@ -112,7 +148,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
                 ...(target.notification ? { inboxTab: "inbox" as const } : {}),
               }
             : {}),
-          ...(view === "environments"
+          ...(section === "details:environments"
             ? {
                 environmentSelection:
                   target.thread && target.environmentId
@@ -120,11 +156,12 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
                     : null,
               }
             : {}),
-        });
+        }));
+        // A view that spans threads names a thread only to filter by it, not to show it.
         useToolSidebarStore.getState().dispatch({
           type: "show",
           view,
-          ...(target.thread
+          ...(target.thread && !isGlobalViewId(view)
             ? {
                 thread: target.thread,
                 arriving: target.arriving === true,
@@ -146,11 +183,18 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),
-      partialize: ({ todoFilter, todoShowClosed, todoScope, evidenceCoverageDismissed }) => ({
+      partialize: ({
         todoFilter,
         todoShowClosed,
         todoScope,
         evidenceCoverageDismissed,
+        collapsedSections,
+      }) => ({
+        todoFilter,
+        todoShowClosed,
+        todoScope,
+        evidenceCoverageDismissed,
+        collapsedSections,
       }),
       // v0 stored the retired right panel's { open, view }; v1 and v2 the left rail's view and last
       // tool. The side panel shows views now, so it takes the selection and the rail's fields go.
@@ -166,7 +210,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
           hidden?: unknown;
         };
         adoptRetiredRailSelection(
-          version === 0 ? { lastTool: migrateViewId(view) ?? "todos" } : { view, lastTool },
+          version === 0 ? { lastTool: migrateViewId(view) ?? "checklist" } : { view, lastTool },
         );
         return rest as Partial<ThreadContextSidebarState>;
       },

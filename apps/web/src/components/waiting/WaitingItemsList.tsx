@@ -67,7 +67,7 @@ const focusOnOpen = (element: HTMLDivElement | null) => element?.focus({ prevent
 
 /**
  * The waiting items above the composer, grouped by kind. A row's title shows its card in the
- * chat, or the Todos view for a task; its button is that kind's one-click answer. Under 600 px
+ * chat, or the Checklist view for a task; its button is that kind's one-click answer. Under 600 px
  * a row keeps only its title and answer.
  */
 export function WaitingItemsList({
@@ -135,9 +135,9 @@ export function WaitingItemsList({
           <Button
             variant="link"
             size="micro"
-            onClick={() => sidebar().show("todos", { thread: threadRef })}
+            onClick={() => sidebar().show("checklist", { thread: threadRef })}
           >
-            Todos
+            Checklist
           </Button>
         </p>
       ) : null}
@@ -159,7 +159,7 @@ function WaitingItemRow({
   const show = () => {
     if (item.kind === "question") revealQuestionInChat(threadKey, item.key);
     else if (item.kind === "qa") revealQaInChat(threadKey, item);
-    else useThreadContextSidebarStore.getState().show("todos", { thread: threadRef });
+    else useThreadContextSidebarStore.getState().show("checklist", { thread: threadRef });
   };
   return (
     <li

@@ -96,7 +96,7 @@ it("answers each kind in one click and leaves a problem to the agent", async () 
 it("says how many items the capped rows leave out and where to see them", async () => {
   await using screen = await render(<List width={800} unlisted={30} />);
   await expect.element(screen.getByText("30 more not listed here. See them in")).toBeVisible();
-  for (const name of ["Questions", "Evidence", "Todos"])
+  for (const name of ["Questions", "Evidence", "Checklist"])
     await expect.element(screen.getByRole("button", { name, exact: true })).toBeVisible();
 });
 

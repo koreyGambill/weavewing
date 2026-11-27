@@ -58,17 +58,17 @@ describe("upgrading from the left rail", () => {
     [
       "an open side panel saved on Status",
       { [RAIL_KEY]: rail("todos", "todos"), [SIDE_KEY]: basePanel(true, "status") },
-      { open: true, view: "status", width: 480, threadView: "todos" },
+      { open: true, view: "status", width: 480, threadView: "checklist" },
     ],
     [
       "the rail on the thread list",
       { [RAIL_KEY]: rail("threads", "environments"), [SIDE_KEY]: basePanel(false, "calendar") },
-      { open: false, view: "calendar", width: 480, threadView: "environments" },
+      { open: false, view: "calendar", width: 480, threadView: "details" },
     ],
     [
       "an unreadable side panel",
       { [RAIL_KEY]: rail("inbox", "timeline"), [SIDE_KEY]: "{not json" },
-      { open: true, view: "inbox", width: 300, threadView: "timeline" },
+      { open: true, view: "inbox", width: 300, threadView: "activity" },
     ],
   ])("carries the rail's selection over with %s", async (_case, entries, panel) => {
     const storage = memoryStorage(entries);
@@ -94,6 +94,32 @@ describe("upgrading from the left rail", () => {
     storage.values.set(RAIL_KEY, rail("links", "links"));
     const second = await load(storage);
     expect(second.panel).toMatchObject({ open: false, view: "artifacts", threadView: "artifacts" });
+  });
+
+  it("stores Checklist and Activity under the ids older builds know and reads them back", async () => {
+    const storage = memoryStorage({});
+    await load(storage);
+    const { useToolSidebarStore } = await import("./toolSidebarStore");
+    vi.stubGlobal("document", { activeElement: null });
+    vi.stubGlobal("HTMLElement", Object);
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" });
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "status" });
+    expect(read(storage.values.get(SIDE_KEY))?.state).toMatchObject({
+      view: "status",
+      threadView: "timeline",
+    });
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "checklist" });
+    vi.unstubAllGlobals();
+    expect(read(storage.values.get(SIDE_KEY))?.state).toMatchObject({
+      view: "todos",
+      threadView: "todos",
+    });
+    const reloaded = await load(storage);
+    expect(reloaded.panel).toMatchObject({
+      open: true,
+      view: "checklist",
+      threadView: "checklist",
+    });
   });
 
   it("starts both stores fresh from unreadable rail state", async () => {

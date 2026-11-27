@@ -6,6 +6,7 @@ import {
   SIDE_AREA_WIDE_MEDIA_QUERY,
   adoptRetiredRail,
   restoreSideArea,
+  storedViewId,
   type RetiredRailSelection,
   transitionSideArea,
   type SideAreaAction,
@@ -91,11 +92,11 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
       partialize: ({ open, view, width, pinned, locked, threadView }) => ({
         open,
-        view,
+        view: storedViewId(view),
         width,
         pinned,
         locked,
-        threadView,
+        threadView: storedViewId(threadView),
       }),
       // Before version 1 no handoff had happened; the shape is read by `restoreSideArea`.
       migrate: (persisted) => {

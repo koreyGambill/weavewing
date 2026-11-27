@@ -308,7 +308,7 @@ function CoverageNotice({
 }
 
 /** One page of landings; "Load older" chains the next page from this page's live cursor. */
-function LandingPage({
+export function LandingPage({
   environmentId,
   input,
   showThread,
