@@ -20,6 +20,7 @@ import {
   THREAD_QUESTIONS_ARTIFACT_ID,
   type WaitingItemSummary,
   waitingMirror,
+  type ThreadWorkspaceError,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
@@ -41,6 +42,8 @@ import fixture from "./testdata/legacy-workspace.json" with { type: "json" };
 const threadId = ThreadId.make("thread-test");
 const at = DateTime.makeUnsafe("2026-11-05T12:00:00.000Z");
 const harness = Effect.fn("test.workspaceHarness")(function* () {
+  // The user message of the thread's current turn, as the orchestrator reads it.
+  const turnMessage = { current: null as MessageId | null };
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "thread-workspace-test-" });
@@ -124,6 +127,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
         }),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
+      getCurrentUserMessageId: () => Effect.sync(() => turnMessage.current),
       getThreadRecords: (id) =>
         Effect.sync(() => ({
           ...projection,
@@ -187,7 +191,16 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
       }),
     );
   return {
-    service,
+    // The list writes return the saved list here; `writes` keeps what each write reported.
+    service: {
+      ...service,
+      update: (...args: Parameters<typeof service.update>) =>
+        service.update(...args).pipe(Effect.map((write) => write.workspace)),
+      rewrite: (...args: Parameters<typeof service.rewrite>) =>
+        service.rewrite(...args).pipe(Effect.map((write) => write.workspace)),
+    },
+    writes: service,
+    turnMessage,
     sends,
     delivered,
     hooks,
@@ -1645,7 +1658,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const h = yield* harness();
-      const agent = { by: "agent", userMessageId: null } as const;
+      const agent = { by: "agent", threadId } as const;
       const created = yield* h.service.update(
         {
           threadId,
@@ -1691,6 +1704,8 @@ it.effect(
           ),
       ).toContain("An open user task leaves the user's list only when closed");
       const message = MessageId.make("message-user");
+      // The agent's own thread is in a turn the user's message started.
+      h.turnMessage.current = message;
       const settled = yield* h.service.update(
         {
           threadId,
@@ -1701,7 +1716,7 @@ it.effect(
             { id: "approve", state: "dropped", note: "The vendor closed the account" },
           ],
         },
-        { by: "agent", userMessageId: message },
+        { by: "agent", threadId },
       );
       expect(settled.items).toMatchObject([
         {
@@ -1726,7 +1741,7 @@ it.effect(
 it.effect("keeps the user's Done and dismissal note from an agent without the user's message", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const agent = { by: "agent", userMessageId: null } as const;
+    const agent = { by: "agent", threadId } as const;
     const user = { by: "user" } as const;
     let workspace = yield* h.service.update(
       {
@@ -1767,7 +1782,7 @@ it.effect("shows a task discussed until the user changes it again", () =>
         expectedRevision: 0,
         changes: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
       },
-      { by: "agent", userMessageId: null },
+      { by: "agent", threadId },
     );
     yield* h.service.markDiscussed({
       threadId,
@@ -1833,10 +1848,42 @@ it.effect("never gives a dropped task's number to a new one", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("reports from the write itself which items it changed and which tasks it filed", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const agent = { by: "agent", threadId } as const;
+    const created = yield* h.writes.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [
+          { id: "checklist", text: "Write the migration", owner: "agent" },
+          { id: "rotate", text: "Rotate the staging webhook secret", owner: "you" },
+        ],
+      },
+      agent,
+    );
+    expect([created.changedIds, created.filedTasks]).toEqual([["checklist", "rotate"], ["T1"]]);
+    const handed = yield* h.writes.update(
+      {
+        threadId,
+        expectedRevision: created.workspace.revision,
+        changes: [
+          { id: "checklist", owner: "you" },
+          { id: "T1", text: "Rotate it today" },
+        ],
+      },
+      agent,
+    );
+    // Handing an item over files it; editing a task already filed does not.
+    expect([handed.changedIds, handed.filedTasks]).toEqual([["checklist", "rotate"], ["T2"]]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("names a task by its ref alone, and refuses an id that reads as another's ref", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const agent = { by: "agent", userMessageId: null } as const;
+    const agent = { by: "agent", threadId } as const;
     const created = yield* h.service.update(
       {
         threadId,
@@ -1848,7 +1895,7 @@ it.effect("names a task by its ref alone, and refuses an id that reads as anothe
       },
       agent,
     );
-    const refusal = (write: Effect.Effect<unknown, { readonly message: string }>) =>
+    const refusal = (write: Effect.Effect<unknown, ThreadWorkspaceError>) =>
       write.pipe(
         Effect.flip,
         Effect.map((error) => error.message),

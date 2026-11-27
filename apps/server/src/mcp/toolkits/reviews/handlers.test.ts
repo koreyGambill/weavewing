@@ -8,8 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { MessageId } from "@t3tools/contracts";
-import type { ListActor } from "../../../threadWorkspace/userTasks.ts";
+import type { ListCaller } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import { McpSchema, McpServer } from "effect/ai";
 import { ThreadWorkspace, emptyWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -106,10 +105,7 @@ const client = McpSchema.McpServerClient.of({
 });
 
 // Echoes what the handler resolved, so tests see the thread and project it passed.
-// The calling thread's current turn carries this user message, when set.
-let turnMessage: MessageId | null = null;
 const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
-  turnUserMessage: () => Effect.succeed(turnMessage),
   record: (input) =>
     Effect.succeed({
       landingId: input.id,
@@ -128,7 +124,20 @@ const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
     ),
 });
 
-const actors: ListActor[] = [];
+const callers: ListCaller[] = [];
+// What the service reports a write changed and filed, as the locked mutation does.
+const listWrite = (changes: Parameters<typeof mutationWorkspace>[0], threadId?: ThreadId) => {
+  const written = { ...mutationWorkspace(changes), ...(threadId ? { threadId } : {}) };
+  const requested = new Set(changes.flatMap((change) => (change.id ? [change.id] : [])));
+  const changed = written.items.filter(
+    (item) => requested.has(item.id) || item.id.startsWith("created-"),
+  );
+  return {
+    workspace: written,
+    changedIds: changed.map((item) => item.id),
+    filedTasks: changed.flatMap((item) => ("ref" in item && item.ref ? [item.ref] : [])),
+  };
+};
 const call = (
   name: string,
   args: Record<string, unknown>,
@@ -162,13 +171,13 @@ const call = (
                   childPreamble: "",
                 },
               ]),
-            update: ({ threadId, expectedRevision, changes }, actor) =>
-              (actors.push(actor), expectedRevision === 3)
-                ? Effect.succeed({ ...mutationWorkspace(changes), threadId })
+            update: ({ threadId, expectedRevision, changes }, caller) =>
+              (callers.push(caller), expectedRevision === 3)
+                ? Effect.succeed(listWrite(changes, threadId))
                 : Effect.fail(
                     new ThreadWorkspaceError({ code: "conflict", message: "Read again." }),
                   ),
-            rewrite: ({ items }) => Effect.succeed(mutationWorkspace(items)),
+            rewrite: ({ items }) => Effect.succeed(listWrite(items)),
             artifactWrite: () => Effect.succeed({ ...workspace, revision: 4 }),
             artifactList: () =>
               Effect.succeed([
@@ -374,31 +383,15 @@ it.effect.each(["list_update", "list_rewrite"])(
     }),
 );
 
-it.effect(
-  "settles a user task with the user message of the calling thread's turn, when it has one",
-  () =>
-    Effect.gen(function* () {
-      const settle = {
-        expectedRevision: 3,
-        changes: [{ id: "item-1", state: "done", settledFromUser: true }],
-      };
-      actors.length = 0;
-      turnMessage = null;
-      yield* call("list_update", settle);
-      turnMessage = MessageId.make("message-user");
-      yield* call("list_update", settle);
-      // The message is read only when a change claims it.
-      yield* call("list_update", {
-        expectedRevision: 3,
-        changes: [{ id: "item-1", text: "Edit" }],
-      });
-      turnMessage = null;
-      expect(actors).toEqual([
-        { by: "agent", userMessageId: null },
-        { by: "agent", userMessageId: "message-user" },
-        { by: "agent", userMessageId: null },
-      ]);
-    }),
+it.effect("passes the calling thread to the service, which reads that turn's user message", () =>
+  Effect.gen(function* () {
+    callers.length = 0;
+    yield* call("list_update", {
+      expectedRevision: 3,
+      changes: [{ id: "item-1", state: "done", settledFromUser: true }],
+    });
+    expect(callers).toEqual([{ by: "agent", threadId }]);
+  }),
 );
 
 it.effect("names the user tasks a call filed so their cards go at the call", () =>
