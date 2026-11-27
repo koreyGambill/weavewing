@@ -44,7 +44,7 @@ it.effect(
 );
 
 it.effect("a card's write refetches the open Todos list as well as the badge", () =>
-  Effect.gen(function* () {
+  Effect.sync(() => {
     fetches.count = 0;
     const environmentId = EnvironmentId.make("env");
     const threadId = ThreadId.make("thread");
