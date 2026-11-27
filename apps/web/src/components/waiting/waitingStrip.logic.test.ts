@@ -35,12 +35,12 @@ const counts = (partial: Partial<WaitingCounts>): WaitingCounts => ({
 });
 
 it("includes answered asks in the user total and keeps owed asks visible outside that total", () => {
-  expect(waitingStripSummary([], counts({ owed: 2, live: 2 }), 2)).toMatchObject({
+  expect(waitingStripSummary([], counts({ owed: 2, live: 0 }), 2)).toMatchObject({
     total: 0,
     owedAnswers: 2,
     unlisted: 0,
   });
-  expect(waitingStripSummary([], counts({ answer: 3, owed: 4, live: 7 }), 2)).toMatchObject({
+  expect(waitingStripSummary([], counts({ answer: 3, owed: 4, live: 0 }), 2)).toMatchObject({
     total: 3,
     owedAnswers: 4,
     answersToRead: 3,

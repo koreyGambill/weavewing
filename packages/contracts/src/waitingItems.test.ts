@@ -10,6 +10,7 @@ import {
   WaitingCounts,
   waitingDisplayRows,
   waitingMirror,
+  waitingTotal,
   type WaitingItemState,
   type WaitingItemSummary,
 } from "./waitingItems.ts";
@@ -32,7 +33,14 @@ describe("waitingMirror", () => {
       })),
     );
     expect(mirror.waiting.length + (mirror.waitingAnswers?.length ?? 0)).toBe(30);
-    expect(mirror.waitingCounts).toMatchObject({ answer: 31, owed: 9, task: 1, live: 41 });
+    expect(mirror.waitingCounts).toMatchObject({ answer: 31, owed: 9, task: 1, live: 1 });
+    expect(waitingTotal(mirror.waitingCounts)).toBe(1);
+    const answerOnly = waitingMirror(
+      [],
+      [{ ref: "A1", title: "Tracked question", state: "answered" }],
+    ).waitingCounts;
+    expect(answerOnly).toMatchObject({ answer: 1, owed: 0, live: 0 });
+    expect(waitingTotal(answerOnly)).toBe(0);
   });
   it("counts only open items nobody has sent an answer for, and keeps the rest exact", () => {
     const { waitingCounts } = waitingMirror([

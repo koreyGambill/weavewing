@@ -35,7 +35,6 @@ import {
   type EnvironmentId,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
-  waitingTotal,
 } from "@t3tools/contracts";
 
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -109,6 +108,7 @@ import {
   setFileDragActive,
 } from "../Sidebar.logic";
 import { ThreadWaitingCountChip } from "../waiting/ThreadWaitingCountChip";
+import { waitingTotalWithAnswers } from "../waiting/waitingStrip.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
@@ -824,7 +824,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       isSelected,
     });
   const waitingChip =
-    waitingCounts !== undefined && waitingTotal(waitingCounts) > 0 ? (
+    waitingCounts !== undefined && waitingTotalWithAnswers(waitingCounts) > 0 ? (
       <ThreadWaitingCountChip
         counts={waitingCounts}
         waiting={thread.waiting}

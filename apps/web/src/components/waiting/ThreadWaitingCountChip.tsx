@@ -1,5 +1,4 @@
 import {
-  waitingTotal,
   type TrackedAnswerWaitingRow,
   type WaitingCounts,
   type WaitingItemSummary,
@@ -12,6 +11,7 @@ import {
   groupWaitingItems,
   waitingChipLabel,
   waitingStripSummary,
+  waitingTotalWithAnswers,
 } from "./waitingStrip.logic";
 
 // Everything listed but not counted says why.
@@ -36,7 +36,7 @@ export function ThreadWaitingCountChip({
   readonly waiting: ReadonlyArray<WaitingItemSummary> | undefined;
   readonly answers?: ReadonlyArray<TrackedAnswerWaitingRow> | undefined;
 }) {
-  const total = waitingTotal(counts);
+  const total = waitingTotalWithAnswers(counts);
   const label = waitingChipLabel(counts);
   const groups = groupWaitingItems(waiting);
   // The row carries a capped list, so a long backlog ends with how many it left out.

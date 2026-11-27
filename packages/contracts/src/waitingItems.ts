@@ -92,7 +92,7 @@ const waitingItemCounts = (items: ReadonlyArray<WaitingItemSummary>): WaitingCou
 };
 
 export const waitingTotal = (counts: WaitingCounts | undefined): number =>
-  counts === undefined ? 0 : counts.question + counts.qa + counts.task + (counts.answer ?? 0);
+  counts === undefined ? 0 : counts.question + counts.qa + counts.task;
 
 export const sameWaitingCounts = (a: WaitingCounts | undefined, b: WaitingCounts | undefined) =>
   a === b ||
@@ -171,7 +171,6 @@ export function waitingMirror(
         ? counts
         : {
             ...counts,
-            live: (counts.live ?? 0) + answers.length,
             answer,
             owed: answers.length - answer,
           },

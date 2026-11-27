@@ -35,6 +35,9 @@ export interface WaitingStripSummary {
   readonly hasQuestions: boolean;
 }
 
+export const waitingTotalWithAnswers = (counts: WaitingCounts | undefined) =>
+  waitingTotal(counts) + (counts?.answer ?? 0);
+
 /**
  * Null when nothing waits on the user and nothing is being discussed, so the strip hides. Every
  * number comes from the exact counts, never from how many rows the thread lists.
@@ -49,7 +52,7 @@ export function waitingStripSummary(
   // Counts stored before these numbers were kept lack them until the startup rebuild; the rows
   // then stand in, as they did before the numbers existed.
   const discussing = counts.discussing ?? live.filter((row) => row.state === "discussing").length;
-  const total = waitingTotal(counts);
+  const total = waitingTotalWithAnswers(counts);
   const owedAnswers = counts.owed ?? 0;
   if (total === 0 && discussing === 0 && owedAnswers === 0) return null;
   return {
@@ -61,7 +64,8 @@ export function waitingStripSummary(
     ...(owedAnswers ? { owedAnswers } : {}),
     total,
     unlisted:
-      counts.live === undefined ? 0 : Math.max(0, counts.live - live.length - listedAnswers),
+      Math.max(0, (counts.live ?? live.length) - live.length) +
+      Math.max(0, (counts.answer ?? 0) + owedAnswers - listedAnswers),
     hasQuestions: hasLiveQuestions(rows, counts),
   };
 }
@@ -108,7 +112,7 @@ export function waitingChipLabel(counts: WaitingCounts): string {
       : [],
   );
   if (counts.answer) parts.push(`${counts.answer} ${counts.answer === 1 ? "answer" : "answers"}`);
-  return `${waitingTotal(counts)} waiting on you: ${parts.join(", ")}`;
+  return `${waitingTotalWithAnswers(counts)} waiting on you: ${parts.join(", ")}`;
 }
 
 /**
