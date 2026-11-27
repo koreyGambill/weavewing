@@ -7,6 +7,8 @@ import { test } from "node:test";
 import * as CP from "node:child_process";
 
 import {
+  PACKAGE_TEST,
+  SUITES,
   failingTestFiles,
   parseTaskList,
   receiptFor,
@@ -184,4 +186,10 @@ test("only a run in a Sparkwing branch checkout writes a receipt, never a clean 
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("package tests pass their worker count, and the suites declare the cores it implies", () => {
+  assert.deepEqual(PACKAGE_TEST, ["test", "--maxWorkers=1"]);
+  assert.equal(SUITES.packages.cores, 4, "four packages at once, one worker each");
+  assert.equal(SUITES.web.cores, 6, "four workers plus Vite and Chromium's browser process");
 });

@@ -63,23 +63,33 @@ export async function eachPackage(
       await logged(ctx, co, log, ["vp", "run", "--fail-if-no-match", "--filter", name, ...script]).catch(() => failed.push(name));
     }
   };
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await Promise.all(Array.from({ length: PACKAGES_AT_ONCE }, worker));
   if (failed.length > 0) throw new Error(`${label} failed in: ${failed.sort().join(", ")}`);
 }
 
 interface Suite {
-  /** Admission cores: web and server run vitest with Chromium or four workers, packages four at a time. */
+  /** Admission cores, derived from the worker counts each suite passes, so the two cannot drift. */
   readonly cores: number;
   readonly run: (ctx: Context, co: Checkout) => Promise<void>;
 }
 
+// vp run passes tasks only its own short list of variables, so VITEST_MAX_WORKERS never reaches
+// vitest, which then starts a worker per core; the worker counts go on the command line instead.
+const WEB_WORKERS = 4;
+// Each package's vitest gets one worker and four packages run at once: 4 x 1 = 4 cores.
+const PACKAGE_WORKERS = 1;
+const PACKAGES_AT_ONCE = 4;
+/** The test command each package runs in the packages suite and in ci. */
+export const PACKAGE_TEST = ["test", `--maxWorkers=${PACKAGE_WORKERS}`];
+
 /** The full suites ci runs, each reporting every failing file or package in one pass. */
 export const SUITES = {
-  // One vitest run over the unit and browser projects.
+  // One vitest run over the unit and browser projects. Two cores beyond the workers cover Vite's
+  // dev server and Chromium's browser process, which run beside them.
   web: {
-    cores: 6,
+    cores: WEB_WORKERS + 2,
     run: async (ctx, co) => {
-      await logged(ctx, co, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test"]);
+      await logged(ctx, co, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test", `--maxWorkers=${WEB_WORKERS}`]);
     },
   },
   // One vitest run; test:cached runs a vp task per file, and vp run stops the rest after a failure.
@@ -89,7 +99,10 @@ export const SUITES = {
       await logged(ctx, co, "test-server", ["vp", "run", "--filter", "t3", "test", "--maxWorkers=4"]);
     },
   },
-  packages: { cores: 4, run: (ctx, co) => eachPackage(ctx, co, "packages", packageTestNames(co), ["test"]) },
+  packages: {
+    cores: PACKAGES_AT_ONCE * PACKAGE_WORKERS,
+    run: (ctx, co) => eachPackage(ctx, co, "packages", packageTestNames(co), PACKAGE_TEST),
+  },
 } satisfies Record<string, Suite>;
 
 export type SuiteName = keyof typeof SUITES;

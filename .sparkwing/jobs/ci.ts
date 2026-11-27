@@ -13,7 +13,7 @@ import {
   git,
   logged,
 } from "../lib/checkout.ts";
-import { eachPackage, packagesWithTask, packageTestNames, SUITES } from "../lib/suites.ts";
+import { eachPackage, PACKAGE_TEST, packagesWithTask, packageTestNames, SUITES } from "../lib/suites.ts";
 
 // Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
 // mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
@@ -132,7 +132,8 @@ definePipeline({
     const test = p
       .job("test")
       .inline()
-      .cores(4)
+      // The packages step dominates this job.
+      .cores(SUITES.packages.cores)
       .needs(changes, electron)
       .failurePolicy("collect_all")
       .skipIf(unless("test"));
@@ -143,7 +144,7 @@ definePipeline({
     test.step("packages", async (ctx) => {
       const chosen = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
       const co = checkout(ctx);
-      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co), ["test"]);
+      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co), PACKAGE_TEST);
     });
 
     p.job("test-web", (ctx) => SUITES.web.run(ctx, checkout(ctx)))
