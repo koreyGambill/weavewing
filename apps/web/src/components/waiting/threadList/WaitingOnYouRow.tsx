@@ -29,6 +29,7 @@ import {
   selectWaitingAlerts,
   waitingListNote,
   waitingRowLabel,
+  waitingShortcutAction,
   type WaitingAlert,
   type WaitingThread,
   type WaitingThreads,
@@ -53,7 +54,7 @@ const SEVERITY_BADGE: Record<NotificationSeverity, "error" | "warning" | "second
  * list of them with alerts no thread owns. It reads only what the client already streams.
  */
 export function WaitingOnYouRow() {
-  const { threads, inboxes, unread, severity, machines, visible } = useWaitingOnYou();
+  const { threads, inboxes, unread, severity, machines, visible, enabledCount } = useWaitingOnYou();
   const [open, setOpen] = useState(false);
   // Closing with nothing left keeps the list from reopening when something next waits.
   if (!visible && open) setOpen(false);
@@ -81,9 +82,11 @@ export function WaitingOnYouRow() {
     const stopOpener = registerWaitingListOpener(show);
     const stopCommands = registerCommands({
       "waiting.show": (event) => {
+        const action = waitingShortcutAction(enabledCount, visible);
+        if (action === "off") return false;
         event.preventDefault();
         event.stopPropagation();
-        if (!visible) {
+        if (action === "empty") {
           toastManager.add({ type: "info", title: "Nothing is waiting on you", timeout: 2000 });
         } else if (!show()) {
           openInboxView();
@@ -94,7 +97,7 @@ export function WaitingOnYouRow() {
       stopOpener();
       stopCommands();
     };
-  }, [show, visible]);
+  }, [show, visible, enabledCount]);
 
   if (!visible) return null;
 

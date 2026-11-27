@@ -63,5 +63,7 @@ export function useWaitingOnYou() {
       })),
     ),
     visible: row !== null,
+    /** Machines with waiting cards on; none means the feature is off everywhere. */
+    enabledCount: enabled.length,
   };
 }

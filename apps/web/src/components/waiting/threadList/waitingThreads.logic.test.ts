@@ -16,6 +16,7 @@ import {
   selectWaitingThreads,
   waitingListNote,
   waitingRowState,
+  waitingShortcutAction,
   type WaitingThreadSource,
 } from "./waitingThreads.logic";
 
@@ -210,5 +211,13 @@ describe("machineLabels", () => {
     expect(machineLabels([machine(ENV, true), machine(OTHER_ENV, true)])?.get(OTHER_ENV)).toBe(
       "Machine env-b",
     );
+  });
+});
+
+describe("waitingShortcutAction", () => {
+  it("says nothing waits only while the feature is on, and declines while it is off everywhere", () => {
+    expect(waitingShortcutAction(1, true)).toBe("open");
+    expect(waitingShortcutAction(1, false)).toBe("empty");
+    expect(waitingShortcutAction(0, false)).toBe("off");
   });
 });

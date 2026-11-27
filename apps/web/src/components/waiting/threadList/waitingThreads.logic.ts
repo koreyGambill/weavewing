@@ -177,3 +177,15 @@ export function machineLabels(
     ? new Map(connected.map((environment) => [environment.environmentId, environment.label]))
     : null;
 }
+
+/**
+ * What the waiting shortcut does: open the list, say nothing waits, or decline while waiting
+ * cards are off on every machine, so the key reaches whatever else it is bound to.
+ */
+export function waitingShortcutAction(
+  enabledEnvironments: number,
+  visible: boolean,
+): "open" | "empty" | "off" {
+  if (enabledEnvironments === 0) return "off";
+  return visible ? "open" : "empty";
+}

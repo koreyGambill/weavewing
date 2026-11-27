@@ -95,10 +95,11 @@ it("opens the Inbox instead of a list anchored to a row the thread list hides", 
   expect(screen.container.querySelector("[data-waiting-list-item]")).toBeNull();
 });
 
-it("opens the Inbox beside the thread list on desktop and in the sidebar on a phone", async () => {
+it("opens one Inbox beside the thread list on desktop and the sidebar's on a phone", async () => {
   await page.viewport(1280, 800);
   useToolSidebarStore.getState().dispatch({ type: "close" });
-  useThreadContextSidebarStore.getState().selectView("threads");
+  // The sidebar left on its own Inbox, as after opening it on a phone or from the rail.
+  useThreadContextSidebarStore.getState().selectView("inbox");
   openInbox();
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
   expect(useThreadContextSidebarStore.getState().view).toBe("threads");
