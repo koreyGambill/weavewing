@@ -566,6 +566,27 @@ it.effect("a commit already asked about leaves a new landing in the same run to 
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("a run that was asked once is not asked again about later moves", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const evidence = yield* EvidenceService.EvidenceService;
+    const { git, second } = yield* landedRepo;
+    yield* service.handle(yield* ranTurn("same-run", [{ input: "git merge feature" }]));
+    yield* evidence.record({
+      id: "first-move",
+      title: "First move",
+      target: { branch: "main", sha: second },
+      verifications: [],
+      exempt: { reason: "Nothing to check." },
+      threadId: lead,
+      projectId: project,
+    });
+    yield* nextMove(git, MERGED_AT);
+    yield* service.handle(yield* ranTurn("same-run", [{ input: "git merge next" }]));
+    assert.strictEqual((yield* deliveries).length, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("claims nothing when evidence for the commits is recorded during the Git work", () =>
   Effect.gen(function* () {
     const service = yield* Service.EvidencePromptService;
@@ -734,6 +755,10 @@ it.effect("claims nothing when the run, its commands or the thread rule a prompt
         yield* ranTurn("reset", [{ input: merge, startedAt: "2026-02-01T00:10:00Z" }]),
       ],
       ["merging main into a checkout", yield* ranTurn("refresh", [{ input: "git merge main" }])],
+      [
+        "a merge of another branch than the move's",
+        yield* ranTurn("other-source", [{ input: "git merge other-branch" }]),
+      ],
       ["push to another branch", yield* ranTurn("push", [{ input: "git push origin feature" }])],
       ["text naming a command", yield* ranTurn("echo", [{ input: "echo 'git merge feature'" }])],
       [
