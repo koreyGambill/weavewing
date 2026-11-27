@@ -125,7 +125,7 @@ export const questionPointers = (
  * can make that pointer name a later, unrelated message; messages that cite the card still count.
  */
 export const qaPointers = (
-  qa: Pick<EvidenceChangeQa, "discussedMessageId">,
+  qa: Pick<EvidenceChangeQa, "discussedMessageId" | "messageId">,
 ): ReadonlyArray<MessageId | undefined> => [qa.discussedMessageId];
 
 /**
