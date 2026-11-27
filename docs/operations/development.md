@@ -239,9 +239,9 @@ the main checkout's env files that a clean clone must not contain.
 
 `sparkwing run confirm-main` confirms `origin/main` and gates nothing. It waits as batch work for a
 suite's cores, then stops when a finished `suite --full` run already covers the head's tree (pass
-`-- --force` to run anyway). Otherwise it clones `origin/main` into a temporary directory, runs
-`suite --full` there, appends any failing files to the known-failures list, and removes the clone.
-Its daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
+`-- --force` to run anyway). Otherwise it clones `origin/main` into a new directory under its cache,
+runs `suite --full` there, appends any failing files to the known-failures list, and removes the
+clone. Its daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB
 of available memory. On a large machine a run takes about as long as its slowest step, usually

@@ -71,7 +71,7 @@ definePipeline({
   help:
     "Confirms main while the machine is otherwise idle and gates nothing. It waits as batch work for the cores " +
     "a suite needs, then reads origin/main's head; when a finished `suite --full` run already covers that tree it " +
-    "stops. Otherwise it clones origin/main into a temporary directory, installs it with `vp i` and Playwright's " +
+    "stops. Otherwise it clones origin/main into a new directory under --clones, installs it with `vp i` and Playwright's " +
     "Chromium, runs `sparkwing run suite --full` there, appends the failing files to --known-failures when it " +
     "fails, and removes the clone.",
   args: [
@@ -81,6 +81,11 @@ definePipeline({
       name: "known-failures",
       type: "string",
       description: "File that collects failing files (default ~/evidence/weavewing/main-green/known-main-failures.md)",
+    },
+    {
+      name: "clones",
+      type: "string",
+      description: "Directory for the temporary clone (default $XDG_CACHE_HOME or ~/.cache, then weavewing-confirm-main)",
     },
     { name: "evidence", type: "string", description: "Absolute directory for logs" },
   ],
@@ -99,7 +104,13 @@ definePipeline({
         const covered = force ? undefined : resultFor(undefined, remote);
         if (covered) return { head: remote, skip: `${remote.slice(0, 10)} already has full result ${covered}` };
 
-        const clone = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "confirm-main-"));
+        // Sparkwing removes a job's own temporary directory when the job ends, and the clone must
+        // outlive this job for the next one.
+        const root =
+          ctx.args.clones ||
+          NodePath.join(process.env.XDG_CACHE_HOME || NodePath.join(NodeOS.homedir(), ".cache"), "weavewing-confirm-main");
+        NodeFS.mkdirSync(root, { recursive: true });
+        const clone = NodeFS.mkdtempSync(NodePath.join(root, "clone-"));
         try {
           await ctx
             .exec([
