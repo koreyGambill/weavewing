@@ -5,7 +5,6 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { render } from "../../../../test/render";
-import { useThreadContextSidebarStore } from "../../../threadContextSidebarStore";
 import { useToolSidebarStore } from "../../../toolSidebarStore";
 import { openInbox } from "../../inbox/openInbox";
 import { SidebarProvider } from "../../ui/sidebar";
@@ -96,18 +95,14 @@ it("opens the Inbox instead of a list anchored to a row the thread list hides", 
   expect(screen.container.querySelector("[data-waiting-list-item]")).toBeNull();
 });
 
-it("opens one Inbox beside the thread list on desktop and the sidebar's on a phone", async () => {
-  await page.viewport(1280, 800);
-  useToolSidebarStore.getState().dispatch({ type: "close" });
-  // The sidebar left on its own Inbox, as after opening it on a phone or from the rail.
-  useThreadContextSidebarStore.getState().selectView("inbox");
-  openInbox();
-  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
-  expect(useThreadContextSidebarStore.getState().view).toBe("threads");
-
-  await page.viewport(390, 844);
-  useToolSidebarStore.getState().dispatch({ type: "close" });
-  openInbox();
-  expect(useToolSidebarStore.getState().open).toBe(false);
-  expect(useThreadContextSidebarStore.getState().view).toBe("inbox");
+it("opens the side panel's Inbox at every width", async () => {
+  for (const [width, height] of [
+    [1280, 800],
+    [390, 844],
+  ] as const) {
+    await page.viewport(width, height);
+    useToolSidebarStore.getState().dispatch({ type: "close" });
+    openInbox();
+    expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
+  }
 });

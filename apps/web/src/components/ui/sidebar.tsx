@@ -890,7 +890,6 @@ function SidebarMenuSubButton({
 }
 
 export {
-  isMobileViewport,
   SidebarInput,
   Sidebar,
   SidebarContent,

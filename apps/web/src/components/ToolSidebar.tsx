@@ -178,11 +178,15 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     }
   }, [routePathname, routeKey, routeIndex]);
   const sidebar = useSidebar();
-  // A shortcut that opens the side area on a phone shows it, so the thread drawer gives way.
+  // On a phone the side area is a sheet the thread drawer would cover, so the drawer gives way.
+  const closeDrawer = useStableCallback(() => {
+    if (sidebar.isMobile && sidebar.openMobile) sidebar.setOpenMobile(false);
+  });
+  // A shortcut that opens the side area on a phone shows it, so the thread drawer gives way first.
   const openFromShortcut = useStableCallback((action: SideAreaAction) => {
     const wasOpen = useToolSidebarStore.getState().open;
     const opening = !wasOpen && transitionSideArea(useToolSidebarStore.getState(), action).open;
-    if (opening && sidebar.isMobile && sidebar.openMobile) sidebar.setOpenMobile(false);
+    if (opening) closeDrawer();
     useToolSidebarStore.getState().dispatch(action);
   });
 
@@ -191,6 +195,9 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
     const stopContext = provideSideAreaContext(readContext);
+    const stopDrawer = useToolSidebarStore.subscribe((state, previous) => {
+      if (state.open && !previous.open) closeDrawer();
+    });
     const toggle = () => openFromShortcut({ type: "toggle" });
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
@@ -235,6 +242,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     );
     return () => {
       stopContext();
+      stopDrawer();
       stopObserving();
       stopCommands();
       stopEscape();
