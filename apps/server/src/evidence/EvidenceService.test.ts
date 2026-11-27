@@ -2369,3 +2369,41 @@ it.effect("a user's Discuss or answer for a change that went quiet raises its ca
     }),
   ).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("an agent's note withdraws only a card with no forced reason and no user action", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      const waived = { verdict: "waived", reason: "Docs only." } as const;
+      yield* evidence.record(
+        recordInput("marks", [
+          change("own-mark"),
+          change("forced", { review: waived }),
+          change("discussed"),
+        ]),
+      );
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("m-marks"),
+        changes: [{ landingId: "marks", changeId: "discussed" }],
+      });
+      const again = yield* evidence.record(
+        recordInput("marks", [
+          change("own-mark", { attention: "note" }),
+          change("forced", { attention: "note", review: waived }),
+          // A newly waived review does not rewrite the reasons of a card the user is discussing.
+          change("discussed", { attention: "note", review: waived }),
+        ]),
+      );
+      assert.deepStrictEqual(
+        again.changes.map((item) => [item.id, item.qa, item.raised]),
+        [
+          ["own-mark", "quiet", []],
+          ["forced", "pending", ["review_waived"]],
+          ["discussed", "pending", ["needs_you"]],
+        ],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
