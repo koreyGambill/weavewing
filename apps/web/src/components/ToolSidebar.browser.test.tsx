@@ -20,6 +20,7 @@ import { getRouter } from "~/router";
 import { useDropdownTerminalStore } from "~/dropdownTerminalStore";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { threadListRead } from "~/state/threadWorkspace";
+import { openInbox } from "./inbox/openInbox";
 import { useThreadContextSidebarStore } from "~/threadContextSidebarStore";
 import { useToolSidebarStore } from "~/toolSidebarStore";
 import { SIDE_AREA_SETTLE_MS } from "./ToolSidebar";
@@ -473,4 +474,17 @@ it("closes the thread drawer and focuses the panel when the shortcut opens it on
   await expect
     .element(panel.getByRole("button", { name: /^View: .*Choose a view$/ }))
     .toHaveFocus();
+});
+
+it("closes the thread drawer when anything opens the side panel on a phone", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("phone-inbox", 1)], 390);
+  await using _app = stack;
+  await userEvent.click(screen.getByRole("button", { name: /^Toggle main sidebar/ }));
+  const drawer = page.getByRole("navigation", { name: "Threads" });
+  await expect.element(drawer).toBeVisible();
+  // As the thread list's Waiting on you row or a notification does.
+  await act(() => openInbox());
+  await expect.element(page.getByRole("complementary", { name: "Side panel" })).toBeVisible();
+  await expect.element(drawer).not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
 });
