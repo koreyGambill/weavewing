@@ -11,6 +11,8 @@ import { userEvent } from "vite-plus/test/browser";
 import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../../test/render";
+import { useThreadTrackedAsks } from "../../state/threads";
+import { AnswersSection } from "./AnswersSection";
 import { TrackAnswerToggle } from "./TrackAnswerToggle";
 import { ThreadAnswerCard } from "./ThreadAnswerCard";
 
@@ -21,6 +23,36 @@ const commands = vi.hoisted(() => ({
 vi.mock("./trackedAnswers-web-state", () => ({
   useUpdateTrackedAsk: () => ({ canUpdate: true, submit: commands.update }),
 }));
+
+vi.mock("../../state/threads", { spy: true });
+
+it("explains why a rolled-back question cannot be revealed", async () => {
+  const at = "2026-11-01T12:00:00.000Z";
+  const threadRef = scopeThreadRef(EnvironmentId.make("environment"), ThreadId.make("thread"));
+  vi.mocked(useThreadTrackedAsks).mockReturnValue([
+    {
+      id: "A1",
+      state: "withdrawn",
+      withdrawnBecause: "rollback",
+      question: "What resets the counter?",
+      askedInMessageId: MessageId.make("removed"),
+      createdAt: at,
+      closedAt: null,
+      answers: [],
+      followUps: [],
+    },
+  ]);
+  await using screen = await render(
+    <AnswersSection threadRef={threadRef} scope="thread" actions={null} />,
+  );
+  await screen.getByRole("button", { name: /What resets the counter/ }).click();
+  await expect
+    .element(screen.getByText("The asking message was removed by a rollback."))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Show in chat" }))
+    .not.toBeInTheDocument();
+});
 
 it("reaches Track answer before Send and changes its pressed state with Space and Enter", async () => {
   function Composer() {

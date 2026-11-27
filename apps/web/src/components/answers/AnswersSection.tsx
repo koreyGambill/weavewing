@@ -282,10 +282,15 @@ function AnswerListRow({
       {expanded ? (
         <div className="space-y-2 px-2 pb-2">
           {answer ? <TrackedAnswerBody answer={answer} threadRef={target} /> : null}
+          {ask.withdrawnBecause === "rollback" ? (
+            <p className="text-muted-foreground">The asking message was removed by a rollback.</p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-end gap-1">
-            <Button size="xs" variant="ghost-muted" onClick={() => void showInChat()}>
-              Show in chat
-            </Button>
+            {ask.withdrawnBecause === "rollback" ? null : (
+              <Button size="xs" variant="ghost-muted" onClick={() => void showInChat()}>
+                Show in chat
+              </Button>
+            )}
             <TrackedAskActions
               ask={ask}
               threadRef={target}
