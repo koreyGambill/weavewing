@@ -170,9 +170,13 @@ export function isAutoSettlementCandidate(
   if (thread.pendingRuntimeRequest !== null) return false;
   // A guest is waiting on the owner; settling would hide the Request.
   if ((thread.pendingGuestMessageCount ?? 0) > 0) return false;
-  // Questions, QA changes and tasks wait on the user while the setting shows them; deferred and
-  // discussed ones do not count. A manual settle still goes through.
-  if (options.waitingCardsEnabled === true && waitingTotal(thread.waitingCounts) > 0) return false;
+  // Questions, QA changes, tasks and unread answers wait on the user while the setting shows them.
+  // Deferred and discussed items do not count. A manual settle still goes through.
+  if (
+    options.waitingCardsEnabled === true &&
+    waitingTotal(thread.waitingCounts) + (thread.waitingCounts?.answer ?? 0) > 0
+  )
+    return false;
   if (thread.activityRunStatus != null) return false;
   if (threadBackgroundWorkHoldsCompletion(thread)) return false;
   // Settling ends a watch, which would silently drop a reviewer's later comments.

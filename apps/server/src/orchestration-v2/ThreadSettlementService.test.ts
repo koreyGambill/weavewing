@@ -203,6 +203,21 @@ describe("isAutoSettlementCandidate", () => {
       expected: false,
     },
     {
+      waitingCounts: { question: 0, qa: 0, task: 0, answer: 1 },
+      waitingCardsEnabled: true,
+      expected: false,
+    },
+    {
+      waitingCounts: { question: 0, qa: 0, task: 0, answer: 1 },
+      waitingCardsEnabled: false,
+      expected: true,
+    },
+    {
+      waitingCounts: { question: 0, qa: 0, task: 0, owed: 1 },
+      waitingCardsEnabled: true,
+      expected: true,
+    },
+    {
       waitingCounts: { question: 2, qa: 1, task: 1, discussing: 0, liveQuestions: 2, live: 4 },
       waitingCardsEnabled: false,
       expected: true,

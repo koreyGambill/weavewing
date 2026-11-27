@@ -3903,6 +3903,25 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         })
         .pipe(Effect.flip);
       assert.instanceOf(heldAutoSettle, Orchestrator.OrchestratorDispatchError);
+      yield* orchestrator.dispatch({
+        type: "thread.waiting.sync",
+        commandId: CommandId.make("runtime-layer-lifecycle-unread-answer"),
+        threadId,
+        items: [],
+        answers: [{ ref: "A1", title: "Which database?", state: "answered" }],
+        answersRevision: 1,
+      });
+      const answeredProjection = yield* orchestrator.getThreadProjection(threadId);
+      const heldForAnswer = yield* orchestrator
+        .dispatch({
+          type: "thread.auto-settle",
+          commandId: CommandId.make("runtime-layer-lifecycle-auto-settle-answer-held"),
+          threadId,
+          snapshotAt: answeredProjection.thread.updatedAt,
+          holdForWaiting: true,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(heldForAnswer, Orchestrator.OrchestratorDispatchError);
       // An answer a message carries no longer holds the thread for the user, so the sweep's
       // settle below lands.
       yield* orchestrator.dispatch({

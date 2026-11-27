@@ -300,7 +300,8 @@ const pendingRequest = (thread: WorkMapThread) =>
 
 // Waiting counts already include an open question; a pending approval adds one when nothing else does.
 const userWaitCount = (thread: WorkMapThread) =>
-  waitingTotal(thread.waitingCounts) || pendingRequest(thread);
+  waitingTotal(thread.waitingCounts) + (thread.waitingCounts?.answer ?? 0) ||
+  pendingRequest(thread);
 
 // QA is about a change that already landed, so only questions and tasks hold work in flight.
 const userBlockCount = (thread: WorkMapThread) =>

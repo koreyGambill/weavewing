@@ -618,6 +618,19 @@ describe("deriveWorkMap edge cases", () => {
     ]);
   });
 
+  it("lists unread answers in waiting on you", () => {
+    const answered = implementer("answered", { status: "completed", completedMin: 1 });
+    const map = deriveWorkMap({
+      now: NOW,
+      environments: pcOnly,
+      threads: [
+        thread({ id: "release-lead", waitsOnThreads: true }),
+        { ...answered, waitingCounts: { question: 0, qa: 0, task: 0, answer: 2 } },
+      ],
+    });
+    expect(map.waitingOnYou.map((entry) => [entry.title, entry.count])).toEqual([["answered", 2]]);
+  });
+
   it("credits no hold to a cached question on an unreachable reviewer of a blocked change", () => {
     const map = deriveWorkMap({
       now: NOW,

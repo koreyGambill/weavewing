@@ -17379,7 +17379,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           thread.settledOverride !== null ||
           DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt) ||
           // Waiting items keep updatedAt, so the sweep's snapshot cannot see a reopen.
-          (command.holdForWaiting === true && waitingTotal(thread.waitingCounts) > 0)
+          (command.holdForWaiting === true &&
+            waitingTotal(thread.waitingCounts) + (thread.waitingCounts?.answer ?? 0) > 0)
         ) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
