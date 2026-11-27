@@ -13,6 +13,8 @@ import {
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -41,6 +43,12 @@ import { liveThreadShell } from "./McpToolAccess.testkit.ts";
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(
+    Layer.merge(
+      Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+    ),
+  ),
   Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );

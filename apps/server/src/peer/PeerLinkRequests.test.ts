@@ -1,4 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -181,6 +183,12 @@ const makeLaptopWith = (
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
+      Layer.provide(
+        Layer.merge(
+          Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+          Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+        ),
+      ),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
       Layer.provide(
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-peer-link-requests-" }).pipe(

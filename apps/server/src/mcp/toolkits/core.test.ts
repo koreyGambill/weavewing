@@ -1,4 +1,6 @@
 import * as ContextRecords from "../../threadInsights/ContextRecords.ts";
+import * as DevelopmentEnvironmentLifecycle from "../../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as MonitoringDialogue from "../../monitoring/MonitoringDialogue.ts";
 import * as NotificationService from "../../notifications/NotificationService.ts";
 import * as EvidenceService from "../../evidence/EvidenceService.ts";
@@ -80,6 +82,12 @@ const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
 
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(
+    Layer.merge(
+      Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+    ),
+  ),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 

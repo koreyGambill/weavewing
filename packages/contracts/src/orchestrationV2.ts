@@ -3961,6 +3961,8 @@ export const OrchestrationV2Command = Schema.Union([
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+    /** Only the server sets this, with an `existing_worktree` strategy in that checkout. */
+    developmentEnvironment: Schema.optional(OrchestrationV2DevelopmentEnvironmentCheckout),
     // The child starts from this conversation point as a fork; omitted starts it fresh.
     contextSource: Schema.optional(
       Schema.Struct({

@@ -47,6 +47,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -134,7 +135,10 @@ const layerTestProviderInstanceRegistry = Layer.succeed(
 );
 
 const layerTest = Layer.mergeAll(
-  RuntimeLayer.layer,
+  // These children never bind an Xwing environment, so nothing releases holds.
+  RuntimeLayer.layer.pipe(
+    Layer.provide(Layer.mock(DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds)({})),
+  ),
   RuntimeLayer.layerEventSink,
   ProjectionStore.layer,
   ThreadCommandExecutor.layer,

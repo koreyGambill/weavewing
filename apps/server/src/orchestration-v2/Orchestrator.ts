@@ -89,6 +89,7 @@ import {
   sameWaitingItems,
   waitingMirror,
   waitingTotal,
+  XwingEnvironmentId,
 } from "@t3tools/contracts";
 import { claudeMcpServerRule } from "@t3tools/shared/mcpApp";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -11265,7 +11266,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
-        ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
+        // An Xwing checkout already exists, so the child starts bound to it, as a launch does.
+        ...(command.developmentEnvironment !== undefined
+          ? {
+              branch: command.workspaceStrategy?.branch ?? null,
+              worktreePath: command.developmentEnvironment.checkoutPath,
+              developmentEnvironment: { ...command.developmentEnvironment, selectedAt: now },
+            }
+          : command.workspaceStrategy === undefined
+            ? {}
+            : { branch: null, worktreePath: null }),
         ...(command.delegateRole === undefined ? {} : { delegateRole: command.delegateRole }),
       };
       const task: OrchestrationV2Subagent = {
@@ -16726,7 +16736,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               },
             ]),
       ];
-      yield* writeSystemEvents(completionEvents, [], { updateDelegatedCompletionOnly: true });
+      const childEnvironment = childControls.thread.developmentEnvironment;
+      yield* writeSystemEvents(
+        completionEvents,
+        childEnvironment == null
+          ? []
+          : [
+              {
+                id: `effect:development-environment.release-holds:${task.id}`,
+                commandId: CommandId.make(
+                  `command:development-environment.release-holds:${task.id}`,
+                ),
+                threadId: childThreadId,
+                request: {
+                  type: "development-environment.release-holds",
+                  xwingEnvironmentId: XwingEnvironmentId.make(childEnvironment.xwingEnvironmentId),
+                },
+              },
+            ],
+        { updateDelegatedCompletionOnly: true },
+      );
       yield* releaseFinishedDelegateSessions(childThreadId, childRun.id);
 
       if (completionPlan.offer && completionPlan.parentRun !== undefined) {

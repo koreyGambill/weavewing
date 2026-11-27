@@ -32,6 +32,7 @@ import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationServic
 import * as MessageSummaryService from "./MessageSummaryService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
 
 const isProviderTurnControlError = Schema.is(ProviderTurnControlService.ProviderTurnControlError);
@@ -104,6 +105,7 @@ export const layerExecutor: Layer.Layer<
   | ThreadManagementService.ThreadManagementService
   | ProjectionStore.ProjectionStoreV2
   | ServerSettings.ServerSettingsService
+  | DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds
 > = Layer.effect(
   OrchestrationEffectExecutorV2,
   Effect.gen(function* () {
@@ -120,6 +122,7 @@ export const layerExecutor: Layer.Layer<
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const settings = yield* ServerSettings.ServerSettingsService;
+    const holds = yield* DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds;
     const startRun = (
       effect: EffectOutbox.OrchestrationEffectV2,
       runId: RunId,
@@ -713,6 +716,22 @@ export const layerExecutor: Layer.Layer<
                 threadId: effect.threadId,
                 commandId: effect.commandId,
                 reason: effect.request.reason,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
+          case "development-environment.release-holds":
+            return holds
+              .releaseThread({
+                xwingEnvironmentId: effect.request.xwingEnvironmentId,
+                threadId: effect.threadId,
               })
               .pipe(
                 Effect.mapError(

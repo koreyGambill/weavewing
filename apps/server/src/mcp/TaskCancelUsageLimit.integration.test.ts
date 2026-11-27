@@ -1,4 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -176,6 +178,12 @@ it.effect.each([
       const layerTest = Layer.merge(
         OrchestratorMcpService.layer.pipe(
           Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(
+            Layer.merge(
+              Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+              Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+            ),
+          ),
           Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
           Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
         ),

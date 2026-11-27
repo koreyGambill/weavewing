@@ -25,6 +25,7 @@ import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.t
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -178,6 +179,7 @@ const layerRuntime = (dbPath: string) => {
       }),
     ),
     Layer.provide(layerPlatform),
+    Layer.provide(Layer.mock(DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds)({})),
     Layer.provide(
       Layer.succeed(ServerEnvironmentIdentity, {
         getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:upgrade")),
