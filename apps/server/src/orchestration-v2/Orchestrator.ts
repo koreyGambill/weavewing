@@ -13676,10 +13676,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         sideChatRefresh: _incomingSnapshot,
         sideChatRefreshBefore: _incomingCutoff,
         sideChatRefreshAfterArchive: _incomingArchive,
+        trackedAsk,
+        discussAnswers,
         ...editedContext
       } = context;
+      const preservedAsk = context.clearTrackedAsk
+        ? undefined
+        : (trackedAsk ?? queuedMessage.context?.trackedAsk);
+      const preservedDiscussion = discussAnswers ?? queuedMessage.context?.discussAnswers;
       context = {
         ...editedContext,
+        ...(preservedAsk === undefined ? {} : { trackedAsk: preservedAsk }),
+        ...(preservedDiscussion === undefined ? {} : { discussAnswers: preservedDiscussion }),
         ...(sideChatRefresh === undefined ? {} : { sideChatRefresh }),
         ...(sideChatRefreshBefore === undefined ? {} : { sideChatRefreshBefore }),
         ...(sideChatRefreshAfterArchive === undefined ? {} : { sideChatRefreshAfterArchive }),

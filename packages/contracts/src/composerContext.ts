@@ -356,6 +356,7 @@ export const OrchestrationMessageContext = Schema.Struct({
   sideChatRefreshBefore: Schema.optional(IsoDateTime),
   sideChatRefreshAfterArchive: Schema.optional(ThreadId),
   trackedAsk: Schema.optional(TrackedAskContext),
+  clearTrackedAsk: Schema.optionalKey(Schema.Literal(true)),
   discussAnswers: Schema.optional(Schema.Array(TrackedAskId).check(Schema.isMaxLength(20))),
   records: Schema.Array(Schema.Unknown)
     .check(

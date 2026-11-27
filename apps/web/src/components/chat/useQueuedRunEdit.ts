@@ -195,7 +195,15 @@ async function submitQueuedRunEdit(input: {
         edit: {
           messageId: editing.messageId,
           attachments: uploads,
-          context: withTrackedAnswerDraft(context, editText, answerDraft) ?? context,
+          context: {
+            ...(withTrackedAnswerDraft(context, editText, answerDraft) ?? context),
+            ...(editing.context?.trackedAsk && !answerDraft?.track
+              ? { clearTrackedAsk: true as const }
+              : {}),
+            ...(editing.context?.discussAnswers?.length && !answerDraft?.discuss.length
+              ? { discussAnswers: [] }
+              : {}),
+          },
         },
       },
     });

@@ -428,7 +428,14 @@ it.effect("keeps a queued edit's ref and allocates a new ref after tracking is t
     expect(kept).toMatchObject([
       { id: "A1", question: "When does the counter reset?", state: "queued" },
     ]);
-    const untracked = { ...edited, context: { version: 1 as const, records: [] } };
+    const legacyEdit = { ...edited, context: { version: 1 as const, records: [] } };
+    expect(yield* service.recordTrackedMessages(threadId, [legacyEdit], false, true)).toMatchObject(
+      [{ id: "A1", state: "queued" }],
+    );
+    const untracked = {
+      ...legacyEdit,
+      context: { ...legacyEdit.context, clearTrackedAsk: true as const },
+    };
     yield* service.recordTrackedMessages(threadId, [untracked], false, true);
     expect((yield* service.get({ threadId })).asks).toEqual([]);
     const trackedAgain = yield* service.recordTrackedMessages(threadId, [edited], false, true);

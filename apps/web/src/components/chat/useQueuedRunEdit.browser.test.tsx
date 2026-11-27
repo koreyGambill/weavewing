@@ -395,6 +395,39 @@ describe("useQueuedRunEdit", () => {
     );
   });
 
+  it("explicitly clears the tracked mark and discussion removed in a queued edit", async () => {
+    const { hook } = setup();
+    mocks.editQueuedRun.mockResolvedValue({ _tag: "Success" });
+    const messageId = MessageId.make("message-1");
+    const text = "Can you check this?";
+    const context = {
+      version: 1 as const,
+      records: [],
+      trackedAsk: { question: text },
+      discussAnswers: ["A1"],
+    };
+    await using _screen = await render(
+      view(THREAD_A, "queued", hook, [{ id: messageId, text, context }]),
+    );
+    await act(() => requireHook(hook).beginEdit({ runId: RUN, messageId, text, attachments: [] }));
+    const target = requireHook(hook).draftTarget;
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.trackedAnswer).toMatchObject({
+      track: true,
+      discuss: [{ id: "A1" }],
+    });
+    await act(() => useComposerDraftStore.getState().setTrackedAnswer(target, undefined));
+    await requireHook(hook).saveEdit(savedContent(text), () => {});
+    expect(mocks.editQueuedRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          edit: expect.objectContaining({
+            context: { version: 1, records: [], clearTrackedAsk: true, discussAnswers: [] },
+          }),
+        }),
+      }),
+    );
+  });
+
   it("adds terminal context to the queued message being edited", async () => {
     const { hook } = setup();
     await using _screen = await render(view(THREAD_A, "queued", hook));

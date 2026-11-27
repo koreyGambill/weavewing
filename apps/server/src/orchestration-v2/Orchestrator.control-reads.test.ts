@@ -3190,6 +3190,16 @@ it.effect("queued-message commands read a long thread's history without walking 
         messageId: MessageId.make(`message:long-history-reads:${name}`),
         // A compacting target lets promote skip it without a live provider session.
         text: name === "active" ? "/compact" : `Request ${name}`,
+        ...(name === "queued"
+          ? {
+              context: {
+                version: 1 as const,
+                records: [],
+                trackedAsk: { question: "What resets the counter?" },
+                discussAnswers: ["A2"],
+              },
+            }
+          : {}),
         attachments: [],
         dispatchMode: { type: "defer_start" },
         createdBy: "user",
@@ -3382,15 +3392,26 @@ it.effect("queued-message commands read a long thread's history without walking 
     const walks = yield* historyWalks("message.dispatch");
     const queuedRun = (yield* projections.getThreadProjection(threadId)).runs.at(-1)!;
     assert.equal(queuedRun.status, "queued");
-    yield* observed(
+    const edited = yield* observed(
       orchestrator.dispatch({
         type: "queued-run.edit",
         commandId: CommandId.make("edit:long-history-reads"),
         threadId,
         runId: queuedRun.id,
         text: "Request queued, edited",
+        context: { version: 1, records: [] },
       }),
     );
+    const editedMessage = edited.storedEvents.find(
+      ({ event }) => event.type === "message.updated",
+    )?.event;
+    assert.equal(editedMessage?.type, "message.updated");
+    if (editedMessage?.type === "message.updated") {
+      assert.deepEqual(editedMessage.payload.context?.trackedAsk, {
+        question: "What resets the counter?",
+      });
+      assert.deepEqual(editedMessage.payload.context?.discussAnswers, ["A2"]);
+    }
     walks.push(...(yield* historyWalks("queued-run.edit")));
     yield* observed(
       orchestrator.dispatch({

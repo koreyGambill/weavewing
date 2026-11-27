@@ -941,7 +941,7 @@ const make = Effect.gen(function* () {
       }
       const previous = next.asks?.find((ask) => ask.askedInMessageId === message.id);
       if (tracking === undefined) {
-        if (editing && previous?.state === "queued") {
+        if (editing && message.context?.clearTrackedAsk && previous?.state === "queued") {
           next.asks = next.asks?.filter((ask) => ask.id !== previous.id) ?? [];
           changed = true;
         }
