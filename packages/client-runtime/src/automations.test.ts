@@ -1,7 +1,7 @@
 import type { ScheduledTask } from "@t3tools/contracts";
 import { expect, it } from "vite-plus/test";
 
-import { automationAppliesTo } from "./automations.ts";
+import { automationAppliesTo, runOutcomeLabel } from "./automations.ts";
 
 const thread = {
   threadId: "thread:child",
@@ -40,4 +40,12 @@ it.each([
   expect(automationAppliesTo(task as Pick<ScheduledTask, "threadId" | "schedule">, thread)).toBe(
     expected,
   );
+});
+
+it.each([
+  [{ status: "skipped", skipCount: 3 }, "Skipped ×3"],
+  [{ status: "budget_stopped" }, "Stopped at its budget"],
+  [{ status: "new_outcome" }, "new outcome"],
+])("labels recorded automation outcomes (%j)", (run, label) => {
+  expect(runOutcomeLabel(run)).toBe(label);
 });

@@ -69,6 +69,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { resolveNewTaskBranchLabel } from "../threads/new-task-context-presentation";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { ScheduledTaskHistorySheet } from "./components/ScheduledTaskHistorySheet";
 import { ScheduledTaskPromptField } from "./components/ScheduledTaskPromptField";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -1524,9 +1525,15 @@ function EnvironmentTasks({
   readonly onEdit: (task: ScheduledTask) => void;
 }) {
   const environmentId = environment.environmentId;
+  const hasRunHistory =
+    environment.serverConfig?.environment.capabilities.automationRunHistory === true;
+  const [historyTaskId, setHistoryTaskId] = useState<ScheduledTask["id"] | null>(null);
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
+  const historyTask = hasRunHistory
+    ? tasks.data?.tasks.find((task) => task.id === historyTaskId)
+    : undefined;
   const visibleTasks = tasks.data?.tasks.filter(
     (task) => projectIds === null || projectIds.includes(task.projectId),
   );
@@ -1627,6 +1634,7 @@ function EnvironmentTasks({
             <Menu
               actions={[
                 { id: "edit", title: "Edit" },
+                ...(hasRunHistory ? [{ id: "history", title: "Run history" }] : []),
                 ...(task.threadId !== null && scheduledTaskThreadMode(task) !== "new_thread"
                   ? [{ id: "thread", title: "Open thread" }]
                   : []),
@@ -1648,6 +1656,8 @@ function EnvironmentTasks({
                 const action = nativeEvent.event;
                 if (action === "edit") {
                   onEdit(task);
+                } else if (action === "history" && hasRunHistory) {
+                  setHistoryTaskId(task.id);
                 } else if (action === "thread" && task.threadId !== null) {
                   selectDetail({
                     name: "Thread",
@@ -1686,6 +1696,22 @@ function EnvironmentTasks({
           </View>
         ))
       )}
+      {historyTask ? (
+        <ScheduledTaskHistorySheet
+          key={historyTask.id}
+          environmentId={environmentId}
+          task={historyTask}
+          onClose={(threadId) => {
+            setHistoryTaskId(null);
+            if (threadId !== null) {
+              selectDetail({
+                name: "Thread",
+                params: { environmentId: String(environmentId), threadId: String(threadId) },
+              });
+            }
+          }}
+        />
+      ) : null}
     </SettingsSection>
   );
 }
