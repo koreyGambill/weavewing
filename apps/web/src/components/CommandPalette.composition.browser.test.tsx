@@ -64,6 +64,8 @@ vi.mock("../composerHandleContext", async (original) => {
 });
 vi.mock("../hooks/useTheme", () => ({
   useRenderedAppearance: () => "light",
+  getRenderedAppearance: () => "light",
+  subscribeRenderedAppearance: () => () => {},
   useTheme: () => ({ theme: "t3-chat", resolvedTheme: "light", appearanceMode: "light" }),
 }));
 vi.mock("../hooks/useCustomThemes", () => ({ useCustomThemes: () => [] }));
