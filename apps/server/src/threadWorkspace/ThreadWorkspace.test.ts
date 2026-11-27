@@ -1723,6 +1723,41 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("keeps the user's Done and dismissal note from an agent without the user's message", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const agent = { by: "agent", userMessageId: null } as const;
+    const user = { by: "user" } as const;
+    let workspace = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
+      },
+      agent,
+    );
+    const write = (
+      changes: Parameters<typeof h.service.update>[0]["changes"],
+      actor: Parameters<typeof h.service.update>[1],
+    ) => h.service.update({ threadId, expectedRevision: workspace.revision, changes }, actor);
+    workspace = yield* write([{ id: "rotate", state: "done" }], user);
+    expect(
+      (yield* write([{ id: "rotate", state: "dropped", note: "Agent cancelled it" }], agent).pipe(
+        Effect.flip,
+      )).message,
+    ).toContain("The user recorded this task's outcome");
+    workspace = yield* write([{ id: "rotate", state: "dropped", note: "My reason" }], user);
+    expect(
+      (yield* write([{ id: "rotate", state: "open" }], agent).pipe(Effect.flip)).message,
+    ).toContain("The user recorded this task's outcome");
+    expect((yield* h.service.get({ threadId })).items[0]).toMatchObject({
+      state: "dropped",
+      settledBy: "user",
+      note: "My reason",
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("shows a task discussed until the user changes it again", () =>
   Effect.gen(function* () {
     const h = yield* harness();
