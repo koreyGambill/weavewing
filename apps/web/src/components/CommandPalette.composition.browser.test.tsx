@@ -14,6 +14,8 @@ import { dispatchCommandPalette } from "../commandPaletteStore";
 import { CommandPalette } from "./CommandPalette";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { waitingThreadsAtom } from "./waiting/threadList/waitingOnYou";
+import { NO_WAITING_THREADS } from "./waiting/threadList/waitingThreads.logic";
 
 const scopes = vi.hoisted(() => ({
   denied: undefined as string | undefined,
@@ -50,7 +52,11 @@ const githubAvailable = {
 vi.mock("@effect/atom-react", async (original) => ({
   ...(await original<typeof import("@effect/atom-react")>()),
   useAtomValue: (atom: unknown) =>
-    atom === primaryServerKeybindingsAtom ? DEFAULT_RESOLVED_KEYBINDINGS : [],
+    atom === primaryServerKeybindingsAtom
+      ? DEFAULT_RESOLVED_KEYBINDINGS
+      : atom === waitingThreadsAtom
+        ? NO_WAITING_THREADS
+        : [],
 }));
 vi.mock("../composerHandleContext", async (original) => {
   const actual = await original<typeof import("../composerHandleContext")>();

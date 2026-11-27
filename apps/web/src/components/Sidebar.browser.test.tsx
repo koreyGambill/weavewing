@@ -416,6 +416,7 @@ describe("sidebar computer filter", () => {
           environmentId: laptop,
           label: "WSL",
           displayUrl: null,
+          connection: { phase: "connected" },
           entry: {
             target: new BearerConnectionTarget({
               environmentId: laptop,
@@ -428,6 +429,7 @@ describe("sidebar computer filter", () => {
           environmentId: desk,
           label: "Remote WSL",
           displayUrl: null,
+          connection: { phase: "connected" },
           entry: {
             target: new BearerConnectionTarget({
               environmentId: desk,
