@@ -5,6 +5,7 @@ import { MessageSquareReplyIcon } from "lucide-react";
 
 import { waitingCardsEnvironmentIdsAtom } from "../../state/threadQuestions";
 import { revealAnswerInChat } from "../questions/questionReveal";
+import { markdownPlainText } from "../chat/timelineMinimapItems";
 import { Button } from "../ui/button";
 import { TrackedAskActions } from "./TrackedAskActions";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -30,9 +31,8 @@ export function TrackedAskMarker({
   }[ask.state];
   const hasAnswer = ask.state === "answered" || ask.state === "closed";
   const latest = ask.answers.at(-1);
-  const hint = latest
-    ? `${ask.question} · ${new Date(latest.answeredAt).toLocaleString()}`
-    : ask.question;
+  const question = markdownPlainText(ask.question) || "Tracked question";
+  const hint = latest ? `${question} · ${new Date(latest.answeredAt).toLocaleString()}` : question;
   const showAnswer = () => {
     if (latest) revealAnswerInChat(scopedThreadKey(threadRef), ask.id, latest.n);
   };

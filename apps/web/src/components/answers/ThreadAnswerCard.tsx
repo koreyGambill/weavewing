@@ -4,6 +4,7 @@ import { cn } from "../../lib/utils";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import ChatMarkdown from "../ChatMarkdown";
 import { findRevealRef } from "../chat/markdownFindContext";
+import { markdownPlainText } from "../chat/timelineMinimapItems";
 import { useTallEnoughToFold } from "../chat/useTallEnoughToFold";
 import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
@@ -17,6 +18,10 @@ import { useUpdateTrackedAsk } from "./trackedAnswers-web-state";
 
 function answerCardElementId(id: string) {
   return `thread-answer-${id}`;
+}
+
+export function trackedAnswerPreview(text: string): string {
+  return markdownPlainText(text.split(/\r?\n/, 1)[0] ?? "");
 }
 
 const ARTIFACT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -122,7 +127,8 @@ export function ThreadAnswerCard({
   const closed = latest && ask.state === "closed";
   const collapsible = !waiting && !discussing;
   const id = latest ? answerCardElementId(ask.id) : `${answerCardElementId(ask.id)}-${answer.n}`;
-  const label = `${ask.id}: ${ask.question}`;
+  const question = markdownPlainText(ask.question) || "Tracked question";
+  const label = `${ask.id}: ${question}`;
   const [status, variant]: [string, CardBadgeVariant] = !latest
     ? ["Replaced", "outline"]
     : closed
@@ -162,10 +168,10 @@ export function ThreadAnswerCard({
         id={id}
         label={label}
         refLabel={ask.id}
-        title={ask.question}
+        title={question}
         outcome={
           latest
-            ? (answer.text.split("\n")[0] ?? null)
+            ? trackedAnswerPreview(answer.text) || null
             : `Answer ${answer.n} of ${ask.answers.length}`
         }
         expandRef={focus("line")}
@@ -182,7 +188,7 @@ export function ThreadAnswerCard({
       id={id}
       label={label}
       waiting={waiting}
-      heading={<ThreadCardHeading refLabel={ask.id} title={ask.question} editable={waiting} />}
+      heading={<ThreadCardHeading refLabel={ask.id} title={question} editable={waiting} />}
       controls={badge}
       onCollapse={collapsible ? () => setExpanded(false) : undefined}
     >

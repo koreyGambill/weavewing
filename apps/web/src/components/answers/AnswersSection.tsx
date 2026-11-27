@@ -16,6 +16,7 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { DeferEnvironmentQueries, formatEnvironmentQueryError } from "../../state/query";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../../threadRoutes";
 import { focusThreadDraft, showThreadConversation } from "../../lib/sideChatPane";
+import { markdownPlainText } from "../chat/timelineMinimapItems";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CardStatusBadge } from "../questions/QuestionStatusBadge";
 import { revealAnswerInChat, revealTrackedMessageInChat } from "../questions/questionReveal";
@@ -24,7 +25,7 @@ import { observeIntersection } from "../../lib/observeIntersection";
 import { useThreadTrackedAsks } from "../../state/threads";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { TrackedAnswerBody } from "./ThreadAnswerCard";
+import { TrackedAnswerBody, trackedAnswerPreview } from "./ThreadAnswerCard";
 import { TrackedAskActions } from "./TrackedAskActions";
 import { toggleAnswerDiscussion, useTrackedAnswerDraft } from "./trackedAnswerDraft";
 import { useUpdateTrackedAsk } from "./trackedAnswers-web-state";
@@ -272,7 +273,9 @@ function AnswerListRow({
       >
         <strong className="shrink-0">{ask.id}</strong>
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{ask.question}</span>
+          <span className="block truncate">
+            {markdownPlainText(ask.question) || "Tracked question"}
+          </span>
           {entry.threadTitle ? (
             <span className="block truncate text-muted-foreground">
               {entry.threadTitle}
@@ -281,7 +284,7 @@ function AnswerListRow({
           ) : null}
           {!expanded && answer ? (
             <span className="block truncate text-muted-foreground">
-              {answer.text.split("\n")[0]}
+              {trackedAnswerPreview(answer.text)}
             </span>
           ) : null}
         </span>

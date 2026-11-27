@@ -26,7 +26,7 @@ const archive: TrackedAnswersPage["entries"][number] = {
     askedInMessageId: MessageId.make("message"),
     createdAt: at,
     closedAt: null,
-    answers: [{ n: 1, text: "The reconnect handler.", answeredAt: at, runId: null }],
+    answers: [{ n: 1, text: "The **reconnect** handler.", answeredAt: at, runId: null }],
     followUps: [],
   },
 };
@@ -37,8 +37,12 @@ it("keeps an archived answer readable without sending the user to an unavailable
   await using screen = await render(
     <AnswersSection threadRef={threadRef} scope="all" actions={null} />,
   );
-  await screen.getByRole("button", { name: /What resets the counter/ }).click();
-  await expect.element(screen.getByText("The reconnect handler.", { exact: true })).toBeVisible();
+  const row = screen.getByRole("button", { name: /What resets the counter/ });
+  await expect.element(row).toBeVisible();
+  expect(row.element().textContent).toContain("The reconnect handler.");
+  expect(row.element().textContent).not.toContain("**reconnect**");
+  await row.click();
+  await expect.element(screen.getByText("reconnect", { exact: true })).toBeVisible();
   await expect.element(screen.getByText(/Restore this archived thread/)).toBeVisible();
   await expect
     .element(screen.getByRole("button", { name: "Show in chat" }))

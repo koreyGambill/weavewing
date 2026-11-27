@@ -88,7 +88,14 @@ it("returns focus to the collapsed answer after Got it and to Got it after Reope
     askedInMessageId: MessageId.make("message"),
     createdAt: at,
     closedAt: null,
-    answers: [{ n: 1, text: "The reconnect handler.", answeredAt: at, runId: null }],
+    answers: [
+      {
+        n: 1,
+        text: "The **reconnect** handler.\n\nA second paragraph.",
+        answeredAt: at,
+        runId: null,
+      },
+    ],
     followUps: [],
   };
   commands.update.mockReset();
@@ -112,9 +119,11 @@ it("returns focus to the collapsed answer after Got it and to Got it after Reope
   await using screen = await render(<Card />);
   const gotIt = screen.getByRole("button", { name: "Got it" });
   await gotIt.click();
-  await expect
-    .element(screen.getByRole("button", { name: /What resets the counter/ }))
-    .toHaveFocus();
+  const closedLine = screen.getByRole("button", { name: /What resets the counter/ });
+  await expect.element(closedLine).toHaveFocus();
+  expect(closedLine.element().textContent).toContain("The reconnect handler.");
+  expect(closedLine.element().textContent).not.toContain("**reconnect**");
+  expect(closedLine.element().textContent).not.toContain("A second paragraph.");
   await screen.getByRole("button", { name: "Reopen" }).click();
   await expect.element(gotIt).toHaveFocus();
   expect(commands.update.mock.calls.map(([input]) => input.action)).toEqual(["close", "reopen"]);
