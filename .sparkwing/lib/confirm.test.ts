@@ -40,6 +40,10 @@ test("a failed child adds a finding about main only when every suite reached a r
     FS.writeFileSync(Path.join(logs, "test-web.log"), " FAIL  src/a.test.ts > case\n");
     assert.equal(reportFailure(file, "origin/main", "run-2", logs), false, "a child stopped mid-run");
     assert.equal(FS.existsSync(file), false);
+    const crashed = { web: "failed", server: "not-run", packages: "passed" };
+    FS.writeFileSync(Path.join(logs, "results.json"), JSON.stringify({ ...ids, results: crashed }));
+    assert.equal(reportFailure(file, "origin/main", "run-2b", logs), false, "a suite that crashed before testing");
+    assert.equal(FS.existsSync(file), false);
     const results = { web: "failed", server: "passed", packages: "passed" };
     FS.writeFileSync(Path.join(logs, "results.json"), JSON.stringify({ ...ids, results }));
     assert.equal(reportFailure(file, "origin/main", "run-3", logs), true);
