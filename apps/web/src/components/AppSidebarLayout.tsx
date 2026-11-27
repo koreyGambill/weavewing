@@ -18,6 +18,7 @@ import {
   undoLatestThreadAction,
 } from "../hooks/showThreadUndoNotice";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
+import { useSettingsDocked } from "./settings/settingsDock";
 import {
   isRichTextBoldShortcut,
   resolveShortcutCommand,
@@ -444,6 +445,18 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
   );
 }
 
+/**
+ * Docked Settings takes the window's right edge, so the shell narrows beside it. Layout
+ * containment makes the shell's fixed controls place against the shell, not the window, and
+ * the native window controls now sit over Settings, so the shell reserves no inset for them.
+ */
+const SETTINGS_DOCKED_SHELL_STYLE = {
+  width: "calc(100% - var(--settings-dock-width))",
+  contain: "layout",
+  "--workspace-tools-controls-right": "0.75rem",
+  "--workspace-native-controls-inset": "0px",
+} as CSSProperties;
+
 export function AppSidebarLayout({
   children,
   showSidebar = true,
@@ -452,6 +465,7 @@ export function AppSidebarLayout({
   showSidebar?: boolean;
 }) {
   const sidebarArea = workspaceAreaProps("sidebar", 0, "Threads");
+  const settingsDocked = useSettingsDocked();
   const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
     observedKey: null,
     pendingKey: null,
@@ -492,6 +506,7 @@ export function AppSidebarLayout({
     "--workspace-titlebar-content-left":
       "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-count) * var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap) + var(--workspace-titlebar-visible-wordmark-width, 0px))",
     ...windowControlsInsetStyle,
+    ...(settingsDocked ? SETTINGS_DOCKED_SHELL_STYLE : {}),
   } as CSSProperties;
 
   return (

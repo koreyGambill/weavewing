@@ -49,14 +49,16 @@ function useOpenThreadFamily(threadRef: ScopedThreadRef | null, missing: boolean
  * Unkeyed so navigating between server threads reuses one ChatView. Rendered by the `_chat`
  * layout, since an element only survives a route swap when the same parent renders it. Draft
  * promotion runs in the draft store; this only follows the redirect it leaves behind.
- * `background` keeps the thread mounted, inert and in place under Settings or Usage.
+ * `background` keeps the thread mounted under Settings or Usage; `inert` also blocks input.
  */
 export function ThreadRouteView({
   target,
   background = false,
+  inert = background,
 }: {
   target: ThreadRouteTarget;
   background?: boolean;
+  inert?: boolean;
 }) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
@@ -227,7 +229,7 @@ export function ThreadRouteView({
   return (
     <SidebarInset
       className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
-      inert={background}
+      inert={inert}
     >
       <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>
       {background ? null : redirect}

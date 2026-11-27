@@ -1,11 +1,17 @@
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { RotateCcwIcon } from "lucide-react";
+import { PanelRightIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 
 import { AppRouteModal, AppRouteModalClose } from "../components/AppRouteModal";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
+import {
+  useSettingsDockAvailable,
+  useSettingsDockPreference,
+  useSettingsDocked,
+} from "../components/settings/settingsDock";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
 import {
@@ -37,8 +43,33 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      <span className="max-sm:sr-only">Restore device defaults</span>
+      <span className="@max-2xl:sr-only">Restore device defaults</span>
     </Button>
+  );
+}
+
+function SettingsDockToggle() {
+  const [docked, setDocked] = useSettingsDockPreference();
+  const available = useSettingsDockAvailable();
+  if (!available) return null;
+  const label = docked ? "Show Settings over the app" : "Dock Settings beside the chat";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-sm"
+            variant="ghost-toggle"
+            aria-label={label}
+            aria-pressed={docked}
+            onClick={() => setDocked(!docked)}
+          />
+        }
+      >
+        <PanelRightIcon />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -115,13 +146,14 @@ function SettingsContentLayout() {
       ? environment?.environmentId
       : JSON.stringify(search);
   const [restoreSignal, setRestoreSignal] = useState(0);
+  const docked = useSettingsDocked();
 
   return (
-    <AppRouteModal label="Settings">
+    <AppRouteModal label="Settings" docked={docked}>
       <div className="relative flex min-h-0 flex-1">
         <SettingsSidebarNav pathname={location.pathname} />
         <div {...contentArea} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-3 border-b ps-5 pe-2">
+          <header className="@container flex h-12 shrink-0 items-center gap-3 border-b ps-5 pe-2">
             <SettingsBreadcrumb pathname={location.pathname} />
             <div className="ms-auto flex shrink-0 items-center gap-1">
               {location.pathname === "/settings/general" ? (
@@ -129,6 +161,7 @@ function SettingsContentLayout() {
                   onRestored={() => setRestoreSignal((value) => value + 1)}
                 />
               ) : null}
+              <SettingsDockToggle />
               <AppRouteModalClose />
             </div>
           </header>

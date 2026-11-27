@@ -44,4 +44,27 @@ describe("AppRouteModal", () => {
 
     await expect.element(settings).toHaveAttribute("data-open");
   });
+
+  it("leaves the page beside it usable when docked", async () => {
+    const onPageClick = vi.fn();
+    await using _screen = await render(
+      <>
+        <button type="button" onClick={onPageClick}>
+          Copy instructions
+        </button>
+        <AppRouteModal label="Settings" docked>
+          <CommitOnBlurField onCommit={() => undefined} />
+        </AppRouteModal>
+      </>,
+      { router: "/settings/general" },
+    );
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect.element(settings).toHaveFocus();
+
+    await page.getByRole("button", { name: "Copy instructions" }).click();
+    await userEvent.keyboard("{Escape}");
+
+    expect(onPageClick).toHaveBeenCalledOnce();
+    await expect.element(settings).toHaveAttribute("data-open");
+  });
 });
