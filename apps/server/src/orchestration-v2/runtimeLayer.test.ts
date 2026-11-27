@@ -364,7 +364,7 @@ const layerTest = Layer.mergeAll(
   ThreadCommandExecutor.layer,
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provide(McpProviderSessions.layer),
+  Layer.provideMerge(McpProviderSessions.layer),
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
@@ -1898,6 +1898,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       const eventSink = yield* EventSink.EventSinkV2;
       const outbox = yield* EffectOutbox.EffectOutboxV2;
       const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       const threadId = ThreadId.make("runtime-delivery-intent");
       yield* orchestrator.dispatch({
         type: "thread.create",
@@ -1980,12 +1982,30 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
           },
         ],
       });
+      const steerTurn = vi.fn<ProviderAdapter.ProviderAdapterV2SessionRuntime["steerTurn"]>(
+        () => Effect.void,
+      );
       const sessionSpy = vi.spyOn(sessions, "get").mockReturnValue(
         Effect.succeedSome({
+          instanceId: modelSelection.instanceId,
+          driver,
+          providerSessionId: providerSession.id,
           providerSession,
-        } as ProviderAdapter.ProviderAdapterV2SessionRuntime),
+          events: Stream.empty,
+          steerTurn,
+        } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime),
       );
       yield* Effect.addFinalizer(() => Effect.sync(() => sessionSpy.mockRestore()));
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId,
+        providerSessionId: providerSession.id,
+        providerInstanceId: modelSelection.instanceId,
+        endpoint: "http://localhost/mcp",
+        authorizationHeader: "synthetic",
+        browserToolsAvailable: false,
+        capabilities: new Set(["questions"]),
+      });
 
       const steerCommandId = CommandId.make("runtime-delivery-intent-auto");
       const steerMessageId = MessageId.make("runtime-delivery-intent-auto");
@@ -1998,6 +2018,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         threadId,
         messageId: steerMessageId,
         text: "Include this in the active work.",
+        context: {
+          version: 1,
+          records: [],
+          trackedAsk: { question: "What resets the counter?" },
+        },
         attachments: [],
         dispatchMode: { type: "start_immediately" },
         deliveryIntent: "auto",
@@ -2023,6 +2048,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
           },
         ],
       );
+      yield* worker.drain();
+      assert.include(steerTurn.mock.calls[0]?.[0].message.text, "Tracked as A1");
 
       yield* eventSink.write({
         commandId: CommandId.make("runtime-delivery-intent-completed"),

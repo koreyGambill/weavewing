@@ -192,6 +192,7 @@ function startWithMissingWorktree(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(McpProviderSessions.McpProviderSessions)({ read: () => Effect.undefined }),
+        Layer.mock(ThreadWorkspace)({}),
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
         }),
@@ -1395,15 +1396,14 @@ function makeLocalCommandHarness(input: {
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
         }),
-        input.waitingWork === undefined
-          ? Layer.empty
-          : Layer.mock(ThreadWorkspace)({
-              waitingWork: () =>
-                Effect.succeed({
-                  questions: input.waitingWork?.questions ?? [],
-                  tasks: input.waitingWork?.tasks ?? [],
-                }),
+        Layer.mock(ThreadWorkspace)({
+          waitingWork: () =>
+            Effect.succeed({
+              questions: input.waitingWork?.questions ?? [],
+              tasks: input.waitingWork?.tasks ?? [],
+              asks: [],
             }),
+        }),
         input.qa === undefined
           ? Layer.empty
           : Layer.mock(EvidenceService.EvidenceService)({

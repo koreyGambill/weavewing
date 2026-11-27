@@ -133,7 +133,7 @@ const layerTools = Layer.mergeAll(
 ).pipe(
   Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
   Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
-  Layer.provide(layerLaunches),
+  Layer.provide(Layer.merge(layerLaunches, ThreadWorkspace.layerTest)),
   Layer.provide(NodeCrypto.layer),
   Layer.provide(
     Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),

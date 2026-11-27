@@ -1463,6 +1463,7 @@ function xwingIntake(options: { readonly checkoutUnavailable?: boolean } = {}) {
     layer: Layer.mergeAll(
       harness.layer,
       layerEnvironments,
+      Layer.mock(ThreadWorkspace)({}),
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-xwing-intake-" }).pipe(
         Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       ),

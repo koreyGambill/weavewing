@@ -122,6 +122,8 @@ export const layer: Layer.Layer<
   | EventSink.EventSinkV2
   | ProjectionStore.ProjectionStoreV2
   | ProviderSessionManager.ProviderSessionManagerV2
+  | ThreadWorkspace
+  | McpProviderSessions.McpProviderSessions
 > = Layer.effect(
   ProviderTurnControlServiceV2,
   Effect.gen(function* () {
@@ -129,8 +131,8 @@ export const layer: Layer.Layer<
     const eventSink = yield* EventSink.EventSinkV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
-    const workspaces = yield* Effect.serviceOption(ThreadWorkspace);
-    const mcpSessions = yield* Effect.serviceOption(McpProviderSessions.McpProviderSessions);
+    const workspaces = yield* ThreadWorkspace;
+    const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
 
     const load = Effect.fn("ProviderTurnControlService.load")(function* (input: {
       readonly threadId: ThreadId;
@@ -463,9 +465,8 @@ export const layer: Layer.Layer<
             }),
           ).find(({ message: inputMessage }) => inputMessage.id === message.id)?.index;
           const tracked =
-            Option.isSome(workspaces) &&
-            (message.context?.trackedAsk || message.context?.discussAnswers?.length)
-              ? yield* workspaces.value.recordTrackedMessages(input.threadId, [message], true).pipe(
+            message.context?.trackedAsk || message.context?.discussAnswers?.length
+              ? yield* workspaces.recordTrackedMessages(input.threadId, [message], true).pipe(
                   Effect.mapError(
                     (cause) =>
                       new ProviderTurnControlError({
@@ -477,10 +478,7 @@ export const layer: Layer.Layer<
                   ),
                 )
               : [];
-          const session =
-            tracked.length > 0 && Option.isSome(mcpSessions)
-              ? yield* mcpSessions.value.read(input.threadId)
-              : undefined;
+          const session = tracked.length > 0 ? yield* mcpSessions.read(input.threadId) : undefined;
           const text = projectComposerContextForProvider({
             text: message.text,
             records: message.context?.records ?? [],

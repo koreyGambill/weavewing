@@ -31,6 +31,8 @@ import * as EventSink from "./EventSink.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 
 const threadId = ThreadId.make("thread:control-reads");
@@ -444,6 +446,8 @@ it.effect.each(storageCases)(
               Layer.mergeAll(
                 layerSessions,
                 layerEvents,
+                McpProviderSessions.layer,
+                Layer.mock(ThreadWorkspace)({}),
                 Layer.succeed(ServerEnvironmentIdentity, {
                   getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
                 }),

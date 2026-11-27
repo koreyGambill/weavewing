@@ -9,7 +9,6 @@ import type {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -152,9 +151,8 @@ const recordTrackedMessages = Effect.fn("ThreadMessageIntake.recordTrackedMessag
     )
   )
     return;
-  const workspace = yield* Effect.serviceOption(ThreadWorkspace);
-  if (Option.isSome(workspace))
-    yield* workspace.value.recordTrackedMessages(threadId, messages, false, editing);
+  const workspace = yield* ThreadWorkspace;
+  yield* workspace.recordTrackedMessages(threadId, messages, false, editing);
 });
 
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
@@ -417,19 +415,22 @@ const launchInEnvironment = Effect.fnUntraced(function* (
 // The caller's ThreadMessageIntake.launchThread span already covers this.
 const launchResolved = Effect.fnUntraced(function* (input: ThreadLaunch.ThreadLaunchInput) {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
+  const context = input.initialMessage?.context;
   const record = (result: ThreadLaunch.ThreadLaunchResult) =>
-    recordTrackedMessages(result.projection.thread.id, result.projection.messages).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ThreadLaunch.ThreadLaunchError({
-            operation: "dispatch-message",
-            commandId: input.commandId,
-            projectId: input.projectId,
-            threadId: result.projection.thread.id,
-            cause,
-          }),
-      ),
-    );
+    context?.trackedAsk || context?.discussAnswers?.length
+      ? recordTrackedMessages(result.projection.thread.id, result.projection.messages).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ThreadLaunch.ThreadLaunchError({
+                operation: "dispatch-message",
+                commandId: input.commandId,
+                projectId: input.projectId,
+                threadId: result.projection.thread.id,
+                cause,
+              }),
+          ),
+        )
+      : Effect.void;
   yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage?.attachments ?? []);
   if (!input.initialMessage?.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
     return yield* launches.launch(input).pipe(Effect.tap(record));

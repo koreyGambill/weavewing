@@ -203,6 +203,7 @@ export const layer: Layer.Layer<
   | RunExecutionService.RunExecutionServiceV2
   | RuntimePolicy.RuntimePolicyV2
   | TurnItemPositionStore.TurnItemPositionStoreV2
+  | ThreadWorkspace
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
@@ -225,7 +226,7 @@ export const layer: Layer.Layer<
       DevelopmentEnvironmentDiscovery.DevelopmentEnvironmentDiscovery,
     );
     const managedFolders = yield* Effect.serviceOption(ManagedProjectFolders.ManagedProjectFolders);
-    const workspaces = yield* Effect.serviceOption(ThreadWorkspace);
+    const workspaces = yield* ThreadWorkspace;
     const evidence = yield* Effect.serviceOption(EvidenceService.EvidenceService);
     // The lines are advice, so a failed read leaves them out rather than failing the turn.
     const readWaitingContext = Effect.fn("ProviderTurnStartService.readWaitingContext")(
@@ -237,8 +238,8 @@ export const layer: Layer.Layer<
         currentMessageIds: ReadonlySet<MessageId>,
       ) {
         const work =
-          (available.questions || (userTurn && available.lists)) && Option.isSome(workspaces)
-            ? yield* workspaces.value.waitingWork(threadId)
+          available.questions || (userTurn && available.lists)
+            ? yield* workspaces.waitingWork(threadId)
             : { questions: [], tasks: [], asks: [] };
         const qa =
           available.lists && Option.isSome(evidence)
@@ -1005,15 +1006,13 @@ export const layer: Layer.Layer<
         questions: capabilities?.has("questions") === true,
         lists: capabilities?.has("orchestration") === true,
       };
-      const tracked =
-        Option.isSome(workspaces) &&
-        inputMessages.some(
-          (input) => input.context?.trackedAsk || input.context?.discussAnswers?.length,
-        )
-          ? yield* workspaces.value
-              .recordTrackedMessages(projection.thread.id, inputMessages, true)
-              .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })))
-          : [];
+      const tracked = inputMessages.some(
+        (input) => input.context?.trackedAsk || input.context?.discussAnswers?.length,
+      )
+        ? yield* workspaces
+            .recordTrackedMessages(projection.thread.id, inputMessages, true)
+            .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })))
+        : [];
       const projectInput = (input: typeof message) => {
         const text = projectComposerContextForProvider({
           text: input.text,

@@ -192,16 +192,6 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   ),
 );
 
-const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      layerEventSink,
-      ProjectionStore.layer,
-      layerProviderSessionManagerProvided,
-      ServerEnvironment.layerIdentity,
-    ),
-  ),
-);
 const layerRuntimeRequestServiceProvided = RuntimeRequestService.layer.pipe(
   Layer.provide(Layer.merge(ProjectionStore.layer, layerProviderSessionManagerProvided)),
 );
@@ -336,6 +326,17 @@ const layerThreadWorkspaceProvided = ThreadWorkspace.layer.pipe(
       layerOrchestratorProvided,
       layerThreadManagementProvided,
       TicketTracker.layer.pipe(Layer.provide(ProcessRunner.layer)),
+    ),
+  ),
+);
+const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerEventSink,
+      ProjectionStore.layer,
+      layerProviderSessionManagerProvided,
+      ServerEnvironment.layerIdentity,
+      layerThreadWorkspaceProvided,
     ),
   ),
 );

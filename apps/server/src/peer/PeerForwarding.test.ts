@@ -273,7 +273,7 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       Layer.provide(NodeCrypto.layer),
       Layer.provide(boxThreads(seen, linkSession)),
       Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
-      Layer.provide(boxLaunches(seen)),
+      Layer.provide(Layer.merge(boxLaunches(seen), ThreadWorkspace.layerTest)),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
@@ -356,6 +356,7 @@ const makeLaptop = Effect.fn(function* (
     Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
     Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
     Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
+    Layer.provide(ThreadWorkspace.layerTest),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({

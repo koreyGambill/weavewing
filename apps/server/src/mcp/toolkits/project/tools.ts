@@ -27,6 +27,7 @@ import * as ServerConfig from "../../../config.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
+import { ThreadWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as DevelopmentEnvironmentLifecycle from "../../../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../../../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as Digest from "effect/crypto/Digest";
@@ -172,6 +173,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   dependencies: [
     ...shared.dependencies,
     ThreadLaunchService.ThreadLaunchService,
+    ThreadWorkspace,
     DevelopmentEnvironments.DevelopmentEnvironments,
     DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle,
     ManagedProjectFolders.ManagedProjectFolders,

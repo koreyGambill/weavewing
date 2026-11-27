@@ -30,6 +30,8 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const providerInstanceId = ProviderInstanceId.make("codex");
@@ -319,6 +321,8 @@ it.effect(
           Layer.mergeAll(
             layerProjection,
             layerSessionManager,
+            McpProviderSessions.layer,
+            Layer.mock(ThreadWorkspace)({}),
             Layer.mock(EventSink.EventSinkV2)({}),
             Layer.succeed(ServerEnvironmentIdentity, {
               getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),

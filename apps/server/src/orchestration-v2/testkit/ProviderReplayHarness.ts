@@ -57,6 +57,7 @@ import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
+import { ThreadWorkspace } from "../../threadWorkspace/ThreadWorkspace.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
@@ -441,6 +442,10 @@ export function layerWithRegistry<Error>(
       ),
     ),
   );
+  const layerWorkspace = Layer.mock(ThreadWorkspace)({
+    waitingWork: () => Effect.succeed({ questions: [], tasks: [], asks: [] }),
+    recordTrackedMessages: () => Effect.succeed([]),
+  });
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -457,6 +462,7 @@ export function layerWithRegistry<Error>(
         layerRuntime,
         layerServerConfig,
         layerServerSettings,
+        layerWorkspace,
         // The same store the session manager fills, so turn start sees each session's capabilities.
         McpProviderSessions.layer,
       ),
@@ -469,6 +475,8 @@ export function layerWithRegistry<Error>(
         layerStores,
         layerProviderSessionManagerProvided,
         layerEnvironmentIdentity,
+        layerWorkspace,
+        McpProviderSessions.layer,
       ),
     ),
   );
