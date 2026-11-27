@@ -152,8 +152,8 @@ export function comparisonBase(root: string, ref?: string): string {
 }
 
 /** NUL-separated paths from git, so no name is quoted or split by a newline. */
-function gitPaths(root: string, ...args: string[]): string[] {
-  return NodeChildProcess.execFileSync("git", ["-C", root, ...args, "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+function gitPaths(root: string, command: string, ...args: string[]): string[] {
+  return NodeChildProcess.execFileSync("git", ["-C", root, command, "-z", ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
     .split("\0")
     .filter(Boolean);
 }

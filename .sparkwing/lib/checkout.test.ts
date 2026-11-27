@@ -5,7 +5,7 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { test } from "node:test";
 
-import { checkChangedInputs, comparisonBase, definitionDigest, isCommittedCheckout } from "./checkout.ts";
+import { changedFiles, checkChangedInputs, comparisonBase, definitionDigest, isCommittedCheckout } from "./checkout.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   CP.execFileSync(
@@ -51,6 +51,22 @@ function withFixture(run: (clone: (name: string) => string) => void) {
     FS.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test("changed files include committed pipeline paths and preserve newlines in paths", () =>
+  withFixture((clone) => {
+    const root = clone("changed-files");
+    const base = git(root, "rev-parse", "HEAD");
+    const pipeline = ".sparkwing/gate.ts";
+    const tracked = ".sparkwing/with\nnewline.ts";
+    const untracked = "untracked\nfile.ts";
+    FS.mkdirSync(Path.join(root, ".sparkwing"));
+    FS.writeFileSync(Path.join(root, pipeline), "export const gate = 1;\n");
+    FS.writeFileSync(Path.join(root, tracked), "export const fixture = 1;\n");
+    git(root, "add", "--", pipeline, tracked);
+    git(root, "commit", "-m", "add pipeline files");
+    FS.writeFileSync(Path.join(root, untracked), "export const untracked = 1;\n");
+    assert.deepEqual(changedFiles(root, base), [pipeline, tracked, untracked]);
+  }));
 
 test("two checkouts of one tree, installed at different times, share the gate inputs", () => {
   const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "checkout-inputs-"));
