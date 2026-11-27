@@ -12,6 +12,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
 import { type RightPanelSurface } from "./rightPanelStore";
+import { persistViewSurface, restoreViewSurface } from "./views/viewTiles.logic";
 
 export type ClosedView =
   | {
@@ -60,6 +61,8 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
   const surface = view.surface;
   if (!surface || typeof surface.id !== "string") return false;
   switch (surface.kind) {
+    case "view":
+      return restoreViewSurface(surface) !== null;
     case "files":
       if (surface.root !== undefined && typeof surface.root !== "string") return false;
       return surface.id === surface.kind || surface.id.startsWith(`${surface.kind}:`);
@@ -144,7 +147,28 @@ export const useClosedViewStore = create<ClosedViewStoreState>()(
             : [],
         };
       },
-      partialize: ({ entries }) => ({ entries: entries.filter(isPersistentView) }),
+      merge: (persisted, current) => {
+        const entries = (persisted as Partial<Pick<ClosedViewStoreState, "entries">> | null)
+          ?.entries;
+        if (!Array.isArray(entries)) return current;
+        return {
+          ...current,
+          entries: entries.flatMap((entry) => {
+            if (entry?.kind !== "panel-tab" || entry.surface?.kind !== "view") return [entry];
+            const surface = restoreViewSurface(entry.surface);
+            return surface ? [{ ...entry, surface }] : [];
+          }),
+        };
+      },
+      partialize: ({ entries }) => ({
+        entries: entries
+          .filter(isPersistentView)
+          .map((entry) =>
+            entry.kind === "panel-tab" && entry.surface.kind === "view"
+              ? { ...entry, surface: persistViewSurface(entry.surface) }
+              : entry,
+          ),
+      }),
     },
   ),
 );

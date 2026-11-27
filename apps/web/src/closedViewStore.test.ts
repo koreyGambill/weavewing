@@ -5,9 +5,11 @@ import {
   type PreviewSessionSnapshot,
   ThreadId,
 } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { type ClosedViewEntry, useClosedViewStore } from "./closedViewStore";
+import { reopenClosedView } from "./reopenClosedView";
+import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-2" as EnvironmentId, ThreadId.make("thread-A"));
@@ -29,6 +31,38 @@ const snapshot: PreviewSessionSnapshot = {
 };
 
 describe("closedViewStore", () => {
+  it("rehydrates a legacy view tab and writes its older ID back to history", async () => {
+    const { storage, name, version } = useClosedViewStore.persist.getOptions();
+    const saved = {
+      id: "closed-checklist",
+      kind: "panel-tab",
+      threadRef: refA,
+      surface: { id: "view:todos", kind: "view", viewId: "todos" },
+    } as const;
+    const invalid = {
+      ...saved,
+      id: "removed",
+      surface: { id: "view:future", kind: "view", viewId: "future" },
+    } as const;
+    await storage!.setItem(name!, {
+      state: { entries: [saved, invalid] as unknown as ClosedViewEntry[] },
+      version: version ?? 0,
+    });
+    await useClosedViewStore.persist.rehydrate();
+    const restored = useClosedViewStore.getState().entries;
+    expect(restored).toEqual([{ ...saved, surface: { ...saved.surface, viewId: "checklist" } }]);
+    useRightPanelStore.setState({ byThreadKey: {} });
+    await expect(
+      reopenClosedView(restored[0]!, { openPreview: vi.fn(), workspaceAvailable: true }),
+    ).resolves.toBe(true);
+    const panels = useRightPanelStore.getState();
+    expect(selectThreadRightPanelState(panels.byThreadKey, refA).surfaces).toEqual([
+      { ...saved.surface, viewId: "checklist" },
+    ]);
+    useClosedViewStore.getState().remember(diff(refA));
+    expect((await storage!.getItem(name!))?.state.entries).toContainEqual(saved);
+  });
+
   it("retains distinct area instances when migrating closed history", async () => {
     const store = useClosedViewStore.getState();
     const first = store.remember({

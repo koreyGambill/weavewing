@@ -33,8 +33,13 @@ import { resolveStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
-import { storedViewId, type ViewId } from "./components/ToolSidebar.logic";
-import { normalizeStoredViewTabId, restoreViewSurface, viewSurface } from "./views/viewTiles.logic";
+import type { ViewId } from "./components/ToolSidebar.logic";
+import {
+  normalizeStoredViewTabId,
+  persistViewSurface,
+  restoreViewSurface,
+  viewSurface,
+} from "./views/viewTiles.logic";
 
 const RIGHT_PANEL_KINDS = [
   "diff",
@@ -1647,7 +1652,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                         .filter((surface) => surface.kind !== "related-thread")
                         .map((surface) =>
                           surface.kind === "view"
-                            ? { ...surface, viewId: storedViewId(surface.viewId) }
+                            ? persistViewSurface(surface)
                             : withoutReveal(surface),
                         ),
                     },

@@ -68,6 +68,11 @@ export function restoreViewSurface(value: unknown): ViewSurface | null {
     : { id: tabId, kind: "view", viewId };
 }
 
+/** The stored form uses IDs a build before the view merge can reopen. */
+export function persistViewSurface(surface: ViewSurface) {
+  return { ...surface, viewId: storedViewId(surface.viewId) };
+}
+
 export function isViewArea(area: string): area is `view:${string}` {
   return area.startsWith("view:");
 }
