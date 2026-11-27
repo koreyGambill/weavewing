@@ -2,7 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { type Context, definePipeline, workDir } from "@sparkwing/sdk";
+import { ConcurrencyGroup, type Context, definePipeline, workDir } from "@sparkwing/sdk";
 
 import { type Checkout, checkoutArgs, checkoutAt, evidencePath, git } from "../lib/checkout.ts";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../lib/suites.ts";
 
 const FULL_SUITE_CORES = Math.max(...Object.values(SUITES).map((suite) => suite.cores));
+const machineSuite = new ConcurrencyGroup("machine-suite", { capacity: 1, scope: "box" });
 
 async function suiteCheckout(ctx: Context): Promise<Checkout> {
   const root = suiteRoot(ctx.args, workDir());
@@ -97,6 +98,7 @@ definePipeline({
       return { commit, tree, results };
     })
       .inline()
-      .cores(full ? FULL_SUITE_CORES : (suite?.cores ?? 0.25));
+      .cores(full ? FULL_SUITE_CORES : (suite?.cores ?? 0.25))
+      .concurrency(machineSuite);
   },
 });
