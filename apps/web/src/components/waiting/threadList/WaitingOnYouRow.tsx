@@ -9,6 +9,7 @@ import { useMediaQuery } from "../../../hooks/useMediaQuery";
 import { useNowMinute } from "../../../hooks/useNowMinute";
 import { useStableCallback } from "../../../hooks/useStableCallback";
 import { shortcutLabelForCommand } from "../../../keybindings";
+import { cn } from "../../../lib/utils";
 import { registerCommands } from "../../../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../../../state/server";
 import { useThreadContextSidebarStore } from "../../../threadContextSidebarStore";
@@ -36,7 +37,13 @@ import {
 
 const ITEM = "[data-waiting-list-item]";
 
-const UNREAD_BADGE: Record<NotificationSeverity, "error" | "warning" | "secondary"> = {
+const UNREAD_TEXT: Record<NotificationSeverity, string> = {
+  critical: "text-destructive-foreground",
+  warning: "text-warning-foreground",
+  info: "text-muted-foreground",
+};
+
+const SEVERITY_BADGE: Record<NotificationSeverity, "error" | "warning" | "secondary"> = {
   critical: "error",
   warning: "warning",
   info: "secondary",
@@ -101,17 +108,24 @@ export function WaitingOnYouRow() {
     >
       <UserRoundIcon />
       <span className="min-w-0 flex-1 truncate">Waiting on you</span>
-      {unread > 0 ? (
-        <Badge variant={UNREAD_BADGE[severity ?? "info"]} size="sm">
-          <BellIcon aria-hidden />
-          {unread}
-        </Badge>
-      ) : null}
-      {waitingCount > 0 ? (
-        <Badge variant="info" size="sm">
-          {waitingCount}
-        </Badge>
-      ) : null}
+      <span className="flex shrink-0 items-center gap-1">
+        {unread > 0 ? (
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-0.5 text-xs tabular-nums",
+              UNREAD_TEXT[severity ?? "info"],
+            )}
+          >
+            <BellIcon aria-hidden className="size-3" />
+            {unread}
+          </span>
+        ) : null}
+        {waitingCount > 0 ? (
+          <Badge variant="info" size="sm">
+            {waitingCount}
+          </Badge>
+        ) : null}
+      </span>
     </SidebarMenuButton>
   );
   const list = (
@@ -121,6 +135,7 @@ export function WaitingOnYouRow() {
       unread={unread}
       onDone={close}
       returnFocus={() => triggerRef.current?.focus({ preventScroll: true })}
+      titled={!wide}
     />
   );
 
@@ -189,12 +204,15 @@ function WaitingList({
   unread,
   onDone,
   returnFocus,
+  titled,
 }: {
   threads: WaitingThreads;
   inboxes: ReturnType<typeof useWaitingOnYou>["inboxes"];
   unread: number;
   onDone: () => void;
   returnFocus: () => void;
+  /** The sheet already says "Waiting on you" in its title. */
+  titled: boolean;
 }) {
   const navigate = useNavigate();
   const sidebar = useSidebar();
@@ -233,7 +251,11 @@ function WaitingList({
     <div className="flex flex-col gap-2 py-1 text-sm" onKeyDown={moveFocus}>
       {threads.waiting.length > 0 ? (
         <Section
-          title={`Waiting on you · ${threads.waiting.length} ${threads.waiting.length === 1 ? "thread" : "threads"}`}
+          title={
+            titled
+              ? `Threads · ${threads.waiting.length}`
+              : `Waiting on you · ${threads.waiting.length} ${threads.waiting.length === 1 ? "thread" : "threads"}`
+          }
         >
           {threads.waiting.map((thread) => (
             <ThreadEntry key={thread.key} thread={thread} onOpen={openThread} />
@@ -259,7 +281,7 @@ function WaitingList({
               >
                 <span className="min-w-0 flex-1 break-words">{alert.notification.title}</span>
                 {alert.notification.severity === "info" ? null : (
-                  <Badge variant={UNREAD_BADGE[alert.notification.severity]} size="sm">
+                  <Badge variant={SEVERITY_BADGE[alert.notification.severity]} size="sm">
                     {alert.notification.severity}
                   </Badge>
                 )}

@@ -91,6 +91,7 @@ describe("selectWaitingThreads", () => {
     );
     expect(result.waiting).toEqual([]);
     expect(ids(result.onAgent)).toEqual(["older"]);
+    expect(result.onAgent[0]!.discussing).toBe(1);
   });
 
   it("leaves out archived threads and environments with waiting cards off", () => {
