@@ -1,3 +1,4 @@
+import { adapterWithoutCapabilityReport } from "./ProviderRegistry.testkit.ts";
 import { HttpClient } from "effect/http";
 import { assert, describe, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
@@ -261,7 +262,7 @@ it.effect("a remote policy refresh preserves a newer health result on the regist
             makeManualOnlyProviderMaintenanceCapabilities({ provider: driver, packageName: null }),
           ),
       },
-      orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+      orchestrationAdapter: adapterWithoutCapabilityReport,
       textGeneration: {} as ProviderInstance["textGeneration"],
     };
     const refresh = Deferred.succeed(started, undefined).pipe(

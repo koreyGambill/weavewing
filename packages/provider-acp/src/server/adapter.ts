@@ -7561,6 +7561,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           flavor.modelOptionArrivesLate === true,
           flavor.forkFromTurn?.supported(started.initializeResult) === true,
         );
+        const mcpCapabilities = started.initializeResult.agentCapabilities?.mcpCapabilities;
+        const trackedAnswersAvailable =
+          mcpCapabilities?.acp === true ||
+          (flavor.mcpOverHttp === true && mcpCapabilities?.http === true);
         const canLoadSession = started.initializeResult.agentCapabilities?.loadSession === true;
         const canResumeSession =
           started.initializeResult.agentCapabilities?.sessionCapabilities?.resume != null;
@@ -7906,6 +7910,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           cwd: input.runtimePolicy.cwd ?? process.cwd(),
           model: input.modelSelection.model,
           capabilities,
+          trackedAnswersAvailable,
           createdAt,
           updatedAt: createdAt,
           lastError: null,

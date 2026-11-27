@@ -116,6 +116,7 @@ import {
   resolveLatestForkableAssistantItem,
   getUserQueuedThreadRuns,
   threadSteersDuringCompaction,
+  threadAnswerToolSession,
   threadSupportsProviderHandoff,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import { compactionBlocksSteering } from "@t3tools/client-runtime/state/composer-dispatch";
@@ -4197,6 +4198,8 @@ export default function ChatView(props: ChatViewProps) {
                               onPageScrollRelease={onComposerPageScrollReleaseStable}
                               onCompactContext={onComposerCompactContextStable}
                               waitingCardsEnabled={settings.waitingCardsEnabled}
+                              trackAnswerSession={threadAnswerToolSession(serverProjection)}
+                              trackAnswerDelegated={isSubagentThread}
                               onSend={onComposerSendStable}
                               onResume={onComposerResumeStable}
                               onInterrupt={onInterruptStable}

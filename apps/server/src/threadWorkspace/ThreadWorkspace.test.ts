@@ -396,6 +396,10 @@ it.effect(
       );
       const child = ThreadId.make("child");
       delegatedChildren.add(child);
+      expect(
+        (yield* Effect.flip(service.trackMessage({ threadId: child, messageId: message.id })))
+          .message,
+      ).toBe("This agent can't give tracked answers.");
       const attempted = yield* Effect.flip(
         service.answerAsk({
           id: "A1",

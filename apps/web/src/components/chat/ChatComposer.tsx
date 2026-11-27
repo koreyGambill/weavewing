@@ -240,6 +240,7 @@ import {
 } from "./ExpandedImagePreview";
 import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { TrackAnswerToggle } from "../answers/TrackAnswerToggle";
+import { canTrackAnswer } from "../answers/trackedAnswers-availability.logic";
 import {
   toggleAnswerDiscussion,
   toggleTrackAnswer,
@@ -364,6 +365,7 @@ export interface ChatComposerHandle {
     selectedModelSelection: ModelSelection;
     multipleModelSelections: ReadonlyArray<ModelSelection> | null;
     providerAvailable: boolean;
+    trackAnswerAvailable?: boolean;
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
@@ -394,6 +396,8 @@ export interface ChatComposerProps {
   >;
 
   waitingCardsEnabled?: boolean;
+  trackAnswerSession?: Parameters<typeof canTrackAnswer>[1];
+  trackAnswerDelegated?: boolean;
   activeThreadId: ThreadId | null;
   activeThread: Thread | undefined;
   activeThreadRuns: ReadonlyArray<OrchestrationV2Run>;
@@ -613,7 +617,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   const answerDraft = useTrackedAnswerDraft(composerDraftTarget);
-  const showTrackAnswer = props.waitingCardsEnabled === true;
   const onToggleTrackAnswer = () => toggleTrackAnswer(composerDraftTarget);
   const {
     heldRequestIds,
@@ -985,6 +988,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (multipleModelSelections === null ? providerSendBlockReason : null)));
   const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  const trackAnswerAvailable =
+    props.waitingCardsEnabled === true &&
+    (multipleModelSelections === null
+      ? canTrackAnswer(
+          selectedProviderEntry?.snapshot,
+          props.trackAnswerSession,
+          props.trackAnswerDelegated === true,
+        )
+      : multipleModelSelections.every((selection) =>
+          canTrackAnswer(
+            providerStatuses.find((provider) => provider.instanceId === selection.instanceId),
+            props.trackAnswerSession,
+            props.trackAnswerDelegated === true,
+          ),
+        ));
+  const showTrackAnswer =
+    props.waitingCardsEnabled === true && (trackAnswerAvailable || answerDraft.track);
   const selectedProviderSkills = selectedProviderStatus
     ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SKILLS;
@@ -3289,6 +3309,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
       },
       getSendContext: () => ({
+        trackAnswerAvailable,
         answeringPendingUserInput: activePendingProgress !== null,
         shownPendingApprovalIds: pendingApprovals
           .map((approval) => approval.requestId)
@@ -3335,6 +3356,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       activeThread,
+      trackAnswerAvailable,
       addComposerAttachments,
       addComposerFoldersStable,
       foldPastedText,
@@ -3718,7 +3740,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
               {composerAttachmentFileList}
 
-              {showTrackAnswer && answerDraft.discuss.length > 0 ? (
+              {props.waitingCardsEnabled && answerDraft.discuss.length > 0 ? (
                 <div className="flex min-w-0 flex-wrap gap-1 px-2">
                   {answerDraft.discuss.map((ask) => (
                     <Button
@@ -3984,6 +4006,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         pressed={answerDraft.track}
                         compact={isComposerFooterCompact}
                         disabled={!canOperateThread}
+                        unavailable={!trackAnswerAvailable}
                         shortcut={shortcutLabelForCommand(keybindings, "composer.trackAnswer", {
                           context: { composerFocus: true },
                         })}

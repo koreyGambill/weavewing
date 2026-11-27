@@ -1049,8 +1049,23 @@ const make = Effect.gen(function* () {
       if (current.asks?.some((ask) => ask.askedInMessageId === input.messageId))
         return yield* invalidAsk("That message already has a tracked answer.");
       const records = yield* orchestrator
-        .getThreadRecords(input.threadId, ["messages"], { messageIds: [input.messageId] })
+        .getThreadRecords(input.threadId, ["messages", "providerSessions"], {
+          messageIds: [input.messageId],
+        })
         .pipe(Effect.mapError(storage));
+      const { thread } = records;
+      const session = records.providerSessions.findLast(
+        (entry) =>
+          entry.providerInstanceId === thread.providerInstanceId &&
+          entry.status !== "stopped" &&
+          entry.status !== "error",
+      );
+      if (
+        thread.lineage.relationshipToParent === "subagent" ||
+        thread.delegatedFrom != null ||
+        session?.trackedAnswersAvailable === false
+      )
+        return yield* invalidAsk("This agent can't give tracked answers.");
       const message = records.messages.find((candidate) => candidate.id === input.messageId);
       if (message === undefined)
         return yield* new ThreadWorkspaceError({

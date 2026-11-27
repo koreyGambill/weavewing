@@ -6,12 +6,14 @@ export function TrackAnswerToggle({
   pressed,
   compact,
   disabled,
+  unavailable,
   shortcut,
   onToggle,
 }: {
   readonly pressed: boolean;
   readonly compact: boolean;
   readonly disabled?: boolean;
+  readonly unavailable?: boolean;
   readonly shortcut?: string | null;
   readonly onToggle: () => void;
 }) {
@@ -21,7 +23,11 @@ export function TrackAnswerToggle({
       aria-label="Track answer"
       aria-pressed={pressed}
       disabled={disabled ?? false}
-      help={`Track the answer${shortcut ? ` (${shortcut})` : ""}. You get a card when the agent answers, and it stays in this thread's Checklist.`}
+      help={
+        unavailable
+          ? "This agent can't give tracked answers. Turn tracking off or choose another agent."
+          : `Track the answer${shortcut ? ` (${shortcut})` : ""}. You get a card when the agent answers, and it stays in this thread's Checklist.`
+      }
       onClick={onToggle}
     >
       <MessageSquareReplyIcon aria-hidden="true" />

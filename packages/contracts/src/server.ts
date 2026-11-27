@@ -234,6 +234,7 @@ export const ServerProvider = Schema.Struct({
   supportedRuntimeModes: Schema.optional(ForwardCompatibleArray(RuntimeMode)),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
+  supportsTrackedAnswers: Schema.optionalKey(Schema.Boolean),
   setup: Schema.optional(
     Schema.Struct({
       canAuthenticate: Schema.Boolean,

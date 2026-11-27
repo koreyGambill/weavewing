@@ -582,7 +582,11 @@ export const layerWithOptions = (
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const lineage = yield* projectionStore.getThread(threadId).pipe(
-                  Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
+                  Effect.map(
+                    (thread) =>
+                      thread.lineage.relationshipToParent === "subagent" ||
+                      thread.delegatedFrom != null,
+                  ),
                   Effect.option,
                 );
                 const subagent = Option.getOrElse(lineage, () => false);
@@ -758,6 +762,7 @@ export const layerWithOptions = (
         const now = yield* DateTime.now;
         const events = yield* Effect.forEach(input.threadIds, (threadId) =>
           Effect.gen(function* () {
+            const mcp = yield* mcpSessions.read(threadId);
             return {
               id: yield* idAllocator.allocate.event({
                 threadId,
@@ -768,7 +773,13 @@ export const layerWithOptions = (
               driver: input.runtime.driver,
               providerInstanceId: input.runtime.instanceId,
               occurredAt: now,
-              payload: input.payload,
+              payload: {
+                ...input.payload,
+                trackedAnswersAvailable:
+                  (input.payload.trackedAnswersAvailable ??
+                    input.payload.capabilities.tools.supportsMcpTools) &&
+                  mcp?.capabilities?.has("questions") === true,
+              },
             } satisfies OrchestrationV2DomainEvent;
           }),
         );

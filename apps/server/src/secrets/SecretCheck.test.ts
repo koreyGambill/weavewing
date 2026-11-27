@@ -1,3 +1,4 @@
+import { adapterWithoutCapabilityReport } from "../provider/ProviderRegistry.testkit.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -136,7 +137,7 @@ const setup = Effect.fn("SecretCheckTest.setup")(function* (
             streamChanges: Stream.empty,
             applyUsageLimits: () => Effect.void,
           },
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         } satisfies ProviderInstance;
       }),

@@ -390,13 +390,23 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 };
 
 // Rebuilt instances have new PubSubs; capture their fresh closures instead of a closed source.
-const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
-  instanceId: instance.instanceId,
-  driverKind: instance.driverKind,
-  getSnapshot: instance.snapshot.getSnapshot,
-  refresh: instance.snapshot.refresh,
-  streamChanges: instance.snapshot.streamChanges,
-});
+const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => {
+  const withTracking = (snapshot: ServerProvider) =>
+    instance.orchestrationAdapter.getCapabilities().pipe(
+      Effect.map((capabilities) => ({
+        ...snapshot,
+        supportsTrackedAnswers: capabilities.tools.supportsMcpTools,
+      })),
+      Effect.orElseSucceed(() => snapshot),
+    );
+  return {
+    instanceId: instance.instanceId,
+    driverKind: instance.driverKind,
+    getSnapshot: instance.snapshot.getSnapshot.pipe(Effect.flatMap(withTracking)),
+    refresh: instance.snapshot.refresh.pipe(Effect.flatMap(withTracking)),
+    streamChanges: instance.snapshot.streamChanges.pipe(Stream.mapEffect(withTracking)),
+  };
+};
 
 export const layer = Layer.effect(
   ProviderRegistry,

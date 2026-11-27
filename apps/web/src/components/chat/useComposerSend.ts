@@ -432,6 +432,22 @@ export function useComposerSend(input: ComposerSendInput) {
       }
       return;
     }
+    if (
+      (!answeringQuestion || startsSideChat) &&
+      !queuedRunEdit.isEditing &&
+      (answerDraft?.track || answerDraft?.discuss.length) &&
+      sendCtx?.trackAnswerAvailable !== true
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "This agent can't give tracked answers",
+          description:
+            "Choose an agent that can answer, or turn off tracking and remove any follow-up chips.",
+        }),
+      );
+      return;
+    }
 
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;

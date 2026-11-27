@@ -200,6 +200,11 @@ function resolveThreadProviderSession(projection: Projection): ProviderSession |
   );
 }
 
+export function threadAnswerToolSession(projection: Projection | null | undefined) {
+  const session = projection == null ? null : resolveThreadProviderSession(projection);
+  return session?.status === "stopped" || session?.status === "error" ? null : session;
+}
+
 export function threadSteersDuringCompaction(projection: Projection | null | undefined): boolean {
   if (projection == null) return false;
   return (

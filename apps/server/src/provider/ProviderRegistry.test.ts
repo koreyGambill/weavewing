@@ -1,3 +1,4 @@
+import { adapterWithoutCapabilityReport } from "./ProviderRegistry.testkit.ts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import { vi } from "vite-plus/test";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -208,7 +209,7 @@ const makeWorkspaceRescanHarness = Effect.gen(function* () {
           yield* Queue.offer(scans, { cwd, result });
           return yield* Deferred.await(result);
         }),
-      orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+      orchestrationAdapter: adapterWithoutCapabilityReport,
       textGeneration: {} as ProviderInstance["textGeneration"],
     };
     return { instance, rescans, reports };
@@ -526,7 +527,7 @@ const buildRegistryOverSnapshot = Effect.fn("buildRegistryOverSnapshot")(functio
       streamChanges: Stream.empty,
       applyUsageLimits: () => Effect.void,
     },
-    orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+    orchestrationAdapter: adapterWithoutCapabilityReport,
     textGeneration: {} as ProviderInstance["textGeneration"],
   } satisfies ProviderInstance;
   const layerInstanceRegistry = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
@@ -1644,7 +1645,7 @@ it.layer(
                 streamChanges: Stream.empty,
                 applyUsageLimits: () => Effect.void,
               },
-              orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+              orchestrationAdapter: adapterWithoutCapabilityReport,
               textGeneration: {} as ProviderInstance["textGeneration"],
             } satisfies ProviderInstance;
             const layerInstanceRegistry = Layer.succeed(
@@ -1786,7 +1787,7 @@ it.layer(
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            orchestrationAdapter: adapterWithoutCapabilityReport,
             textGeneration: {} as ProviderInstance["textGeneration"],
           } satisfies ProviderInstance;
           const layerInstanceRegistry = Layer.succeed(
@@ -1892,7 +1893,7 @@ it.layer(
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            orchestrationAdapter: adapterWithoutCapabilityReport,
             textGeneration: {} as ProviderInstance["textGeneration"],
           } satisfies ProviderInstance;
           const layerInstanceRegistry = Layer.succeed(
@@ -2204,7 +2205,7 @@ it.layer(
                     : Effect.void,
                 ),
               ),
-              orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+              orchestrationAdapter: adapterWithoutCapabilityReport,
               textGeneration: {} as ProviderInstance["textGeneration"],
             } satisfies ProviderInstance;
             const takeMaintenanceReads = Ref.getAndSet(maintenanceReads, []);
@@ -2390,7 +2391,7 @@ it.layer(
                 Effect.andThen(Deferred.await(releaseScan)),
                 Effect.as(provider),
               ),
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            orchestrationAdapter: adapterWithoutCapabilityReport,
             textGeneration: {} as ProviderInstance["textGeneration"],
           };
           const layerInstanceRegistry = Layer.succeed(
@@ -2627,7 +2628,7 @@ it.layer(
                 skills: [{ name: "finalize", path: `${directory}/finalize`, enabled: true }],
               }),
             ),
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         };
         const layerInstanceRegistry = Layer.succeed(
@@ -2724,7 +2725,7 @@ it.layer(
             applyUsageLimits: () => Effect.void,
           },
           snapshotForCwd: () => Ref.get(scanResult),
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         };
         const layerInstanceRegistry = Layer.succeed(
@@ -2852,7 +2853,7 @@ it.layer(
             applyUsageLimits: () => Effect.void,
           },
           snapshotForCwd: () => Ref.get(scanResult),
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         };
         const layerInstanceRegistry = Layer.succeed(
@@ -2961,7 +2962,7 @@ it.layer(
               streamChanges: Stream.empty,
               applyUsageLimits: () => Effect.void,
             },
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            orchestrationAdapter: adapterWithoutCapabilityReport,
             textGeneration: {} as ProviderInstance["textGeneration"],
           },
         ] satisfies ReadonlyArray<ProviderInstance>;
@@ -3061,7 +3062,7 @@ it.layer(
                 streamChanges: Stream.empty,
                 applyUsageLimits: () => Effect.void,
               },
-              orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+              orchestrationAdapter: adapterWithoutCapabilityReport,
               textGeneration: {} as ProviderInstance["textGeneration"],
             }) satisfies ProviderInstance;
           const retiredInstance = makeInstance(
@@ -3204,7 +3205,7 @@ it.layer(
             streamChanges: Stream.fromPubSub(changes),
             applyUsageLimits: () => Effect.void,
           },
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         } satisfies ProviderInstance;
         const instanceRegistryLayer = Layer.succeed(
@@ -3328,7 +3329,7 @@ it.layer(
             streamChanges: Stream.fromPubSub(changes),
             applyUsageLimits: () => Effect.void,
           },
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         } satisfies ProviderInstance;
         const layerInstanceRegistry = Layer.succeed(
@@ -3429,7 +3430,7 @@ it.layer(
             streamChanges: Stream.fromPubSub(changes),
             applyUsageLimits: () => Effect.void,
           },
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         } satisfies ProviderInstance;
         const layerInstanceRegistry = Layer.succeed(
@@ -3618,7 +3619,7 @@ it.layer(
               streamChanges: Stream.fromPubSub(changes),
               applyUsageLimits: () => Effect.void,
             },
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            orchestrationAdapter: adapterWithoutCapabilityReport,
             textGeneration: {} as ProviderInstance["textGeneration"],
           } satisfies ProviderInstance;
           const layerInstanceRegistry = Layer.succeed(
@@ -3722,7 +3723,7 @@ it.layer(
             streamChanges: Stream.empty,
             applyUsageLimits: () => Effect.void,
           },
-          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          orchestrationAdapter: adapterWithoutCapabilityReport,
           textGeneration: {} as ProviderInstance["textGeneration"],
         } satisfies ProviderInstance;
         const layerInstanceRegistry = Layer.succeed(

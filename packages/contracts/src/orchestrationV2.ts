@@ -1222,6 +1222,7 @@ export const OrchestrationV2ProviderSession = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   model: Schema.NullOr(TrimmedNonEmptyString),
   capabilities: OrchestrationV2ProviderCapabilities,
+  trackedAnswersAvailable: Schema.optionalKey(Schema.Boolean),
   extensionStatuses: Schema.optional(
     Schema.Array(
       Schema.Struct({

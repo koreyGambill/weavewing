@@ -200,6 +200,8 @@ import {
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
 import { toggleTrackAnswer, useTrackedAnswerDraft } from "./answers/trackedAnswerDraft";
+import { useCanTrackAnswerTarget } from "./answers/trackedAnswers-availability";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { useQueuedRunEditTarget } from "./chat/useQueuedRunEdit";
 import { openTrackedAnswersSection } from "./answers/AnswersSection";
 import { openInbox, openInboxView } from "./inbox/openInbox";
@@ -595,6 +597,20 @@ function OpenCommandPaletteDialog(props: {
   const trackDraftEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const tracking = useTrackedAnswerDraft(trackDraftTarget);
+  const draftProviderInstanceId = useComposerDraftStore((store) =>
+    trackDraftTarget === null
+      ? null
+      : (store.getComposerDraft(trackDraftTarget)?.activeProvider ?? store.stickyActiveProvider),
+  );
+  const canAnswer = useCanTrackAnswerTarget(
+    trackThreadRef,
+    trackDraftEnvironmentId === null
+      ? undefined
+      : {
+          environmentId: trackDraftEnvironmentId,
+          instanceId: draftProviderInstanceId ?? activeThread?.modelSelection.instanceId ?? null,
+        },
+  );
   const canToggleTracking = useEnvironmentScope(
     trackDraftEnvironmentId,
     AuthOrchestrationOperateScope,
@@ -1918,7 +1934,8 @@ function OpenCommandPaletteDialog(props: {
   if (
     trackDraftTarget !== null &&
     trackDraftEnvironmentId !== null &&
-    waitingCardsEnvironmentIds.includes(trackDraftEnvironmentId)
+    waitingCardsEnvironmentIds.includes(trackDraftEnvironmentId) &&
+    (canAnswer || tracking.track)
   ) {
     actionItems.push({
       kind: "action",

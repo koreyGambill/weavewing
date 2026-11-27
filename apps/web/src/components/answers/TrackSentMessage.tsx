@@ -11,6 +11,7 @@ import type { ChatMessage } from "../../types";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useTrackedAsks } from "./trackedAnswers-web-state";
+import { useCanTrackAnswerTarget } from "./trackedAnswers-availability";
 
 const trackMessage = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "answer:track",
@@ -25,9 +26,11 @@ export function TrackSentMessage({
   readonly message: ChatMessage;
 }) {
   const environments = useAtomValue(waitingCardsEnvironmentIdsAtom);
+  const providerCanAnswer = useCanTrackAnswerTarget(threadRef);
   const eligible =
     threadRef !== null &&
     environments.includes(threadRef.environmentId) &&
+    providerCanAnswer &&
     message.role === "user" &&
     message.createdBy === "user" &&
     (message.origin?.kind ?? "user") === "user" &&
