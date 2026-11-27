@@ -1934,6 +1934,7 @@ function ThreadDetailBody(
                         isDraft={Boolean(props.draftMode)}
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}
+                        contextThreadRef={props.selectedThreadDetailRef}
                         editorRef={composerEditorRef}
                         placeholder={
                           props.activePendingApproval

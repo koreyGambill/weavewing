@@ -1,4 +1,7 @@
-import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import {
+  contextBreakdown,
+  type ContextWindowSnapshot,
+} from "@t3tools/client-runtime/state/context-window";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { formatUsd } from "@t3tools/shared/usageFormat";
 
@@ -9,7 +12,6 @@ import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popov
 import { ComposerControl } from "./ComposerControl";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { ComposerContextSources } from "./ComposerContextSources";
-import { contextBreakdown } from "./contextBreakdown.logic";
 import type { ThreadApiCost } from "./threadCost.logic";
 import { ThreadCostDetails } from "./ThreadDetailsUsage";
 

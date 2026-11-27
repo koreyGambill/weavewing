@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { contextBreakdown } from "./contextBreakdown.logic";
+import { contextBreakdown } from "./contextWindow.ts";
 
 const usage = (fields: {
   readonly usedTokens: number;

@@ -22,6 +22,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type ScopedThreadRef,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
 } from "@t3tools/contracts";
@@ -73,6 +74,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
+import { ComposerContextMeter } from "./ComposerContextMeter";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
@@ -259,6 +261,7 @@ export interface ThreadComposerProps {
   readonly environmentLabel: string | null;
   readonly selectedThread: EnvironmentThreadShell;
   readonly reportedModelSelection?: ModelSelection | null;
+  readonly contextThreadRef: ScopedThreadRef | null;
   readonly hasCompactableConversation: boolean;
   /** Set while the next send compacts the thread first. */
   readonly compactBeforeSend?: {
@@ -1190,6 +1193,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 >
                   {compactControl}
                   {modelControl}
+                  {props.contextThreadRef ? (
+                    <ComposerContextMeter
+                      key={scopedThreadKey(
+                        props.contextThreadRef.environmentId,
+                        props.contextThreadRef.threadId,
+                      )}
+                      threadRef={props.contextThreadRef}
+                    />
+                  ) : null}
                 </Animated.View>
                 <ComposerDictationStartAction
                   size={usesLargeControls ? "large" : "regular"}
