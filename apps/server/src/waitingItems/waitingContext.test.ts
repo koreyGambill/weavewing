@@ -116,4 +116,27 @@ describe("waitingContextInput", () => {
       problems: [{ ref: "QA2", title: "Change QA2", note: "still overlaps" }],
     });
   });
+
+  it("leaves out each kind the session has no tools for", () => {
+    const input = waitingContextInput({
+      questions: [question("Q1")],
+      tasks: [task("T1")],
+      qa: [qa("QA1"), qa("QA2", { state: "problem", note: "x" })],
+      userTurn: true,
+      sinceMs: null,
+      available: { questions: false, lists: true },
+    });
+    expect(input.waiting.map((item) => item.ref)).toEqual(["QA1", "T1"]);
+    expect(input.problems.map((problem) => problem.ref)).toEqual(["QA2"]);
+    const noLists = waitingContextInput({
+      questions: [question("Q1")],
+      tasks: [task("T1")],
+      qa: [qa("QA2", { state: "problem", note: "x" })],
+      userTurn: true,
+      sinceMs: null,
+      available: { questions: true, lists: false },
+    });
+    expect(noLists.waiting.map((item) => item.ref)).toEqual(["Q1"]);
+    expect(noLists.problems).toEqual([]);
+  });
 });

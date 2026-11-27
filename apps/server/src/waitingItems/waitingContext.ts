@@ -46,9 +46,16 @@ const QA_CHANGE: Partial<Record<QaForTurn["state"], WaitingContextChange["change
   pending: "reopened",
 };
 
+/** Which kinds the session has tools for: questions, and the lists and evidence of tasks and QA. */
+export interface WaitingKindsAvailable {
+  readonly questions: boolean;
+  readonly lists: boolean;
+}
+
 /**
  * What an agent's turn is told about the items waiting on the user, read from the stores so no
- * display cap can shorten it. A turn without the user's own message gets only the QA problems.
+ * display cap can shorten it. A turn without the user's own message gets only the QA problems,
+ * and a kind the session has no tools for is left out.
  */
 export function waitingContextInput(input: {
   readonly questions: ReadonlyArray<ThreadQuestion>;
@@ -57,21 +64,27 @@ export function waitingContextInput(input: {
   readonly userTurn: boolean;
   /** The user's previous message; earlier changes went with it. Null takes every change. */
   readonly sinceMs: number | null;
+  /** Unset, every kind is available. */
+  readonly available?: WaitingKindsAvailable;
 }): {
   readonly waiting: ReadonlyArray<WaitingContextItem>;
   readonly changes: ReadonlyArray<WaitingContextChange>;
   readonly problems: ReadonlyArray<WaitingContextProblem>;
 } {
-  const problems = input.qa.flatMap((change) =>
+  const available = input.available ?? { questions: true, lists: true };
+  const questions = available.questions ? input.questions : [];
+  const tasks = available.lists ? input.tasks : [];
+  const qa = available.lists ? input.qa : [];
+  const problems = qa.flatMap((change) =>
     change.state === "problem" ? [{ ref: change.ref, title: change.title, note: change.note }] : [],
   );
   if (!input.userTurn) return { waiting: [], changes: [], problems };
-  const userTasks = input.tasks.flatMap((task) =>
+  const userTasks = tasks.flatMap((task) =>
     task.owner === "you" && task.ref !== undefined ? [{ ...task, ref: task.ref }] : [],
   );
   const waiting: ReadonlyArray<WaitingContextItem> = [
-    ...input.questions.flatMap(questionWaiting),
-    ...input.qa.flatMap((change): ReadonlyArray<WaitingContextItem> =>
+    ...questions.flatMap(questionWaiting),
+    ...qa.flatMap((change): ReadonlyArray<WaitingContextItem> =>
       change.state === "pending"
         ? [
             {
@@ -104,7 +117,7 @@ export function waitingContextInput(input: {
   ): ReadonlyArray<WaitingContextChange> =>
     change === undefined ? [] : [{ kind, ref, title, change }];
   const changes = [
-    ...input.questions.flatMap((question) =>
+    ...questions.flatMap((question) =>
       after(question.userChangedAt, input.sinceMs)
         ? changed(
             "question",
@@ -114,7 +127,7 @@ export function waitingContextInput(input: {
           )
         : [],
     ),
-    ...input.qa.flatMap((change) =>
+    ...qa.flatMap((change) =>
       change.by === "user" && after(change.updatedAt, input.sinceMs)
         ? changed("qa", change.ref, change.title, QA_CHANGE[change.state])
         : [],
