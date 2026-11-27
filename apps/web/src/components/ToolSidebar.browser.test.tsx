@@ -1,5 +1,10 @@
 import { createMemoryHistory } from "@tanstack/react-router";
-import { WS_METHODS, type ThreadId } from "@t3tools/contracts";
+import {
+  ThreadId,
+  WS_METHODS,
+  type ThreadWorkspace,
+  type WaitingItemSummary,
+} from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -15,6 +20,7 @@ import { getRouter } from "~/router";
 import { useDropdownTerminalStore } from "~/dropdownTerminalStore";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { threadListRead } from "~/state/threadWorkspace";
+import { useThreadContextSidebarStore } from "~/threadContextSidebarStore";
 import { useToolSidebarStore } from "~/toolSidebarStore";
 import { SIDE_AREA_SETTLE_MS } from "./ToolSidebar";
 import {
@@ -26,6 +32,13 @@ import {
   type FakeThread,
 } from "../../test/fakeEnvironment";
 import { act, fakeTimers, render } from "../../test/render";
+import { isMacPlatform } from "@t3tools/shared/keybindings";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { readSelectedThreadRef } from "~/threadContextSidebar";
+import { ThreadReviewsButton } from "./reviews/ThreadReviewsButton";
+import { WaitingItemsList } from "./waiting/WaitingItemsList";
+import { groupWaitingItems } from "./waiting/waitingStrip.logic";
 
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
   const [actual, { fakeDriver }, Layer] = await Promise.all([
@@ -54,7 +67,9 @@ async function mountApp(threads: ReadonlyArray<FakeThread>, width: number) {
     locked: null,
     maximized: false,
     threadView: "details",
+    arrival: null,
   });
+  useRightPanelStore.setState({ byThreadKey: {} });
   stack.use(installFakeEnvironment(threads));
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
@@ -71,11 +86,41 @@ async function mountApp(threads: ReadonlyArray<FakeThread>, width: number) {
   return { stack, screen, router };
 }
 
+// The thread views shortcut, mod+alt+i, with the modifier the app reads on this platform.
+const THREAD_VIEWS_SHORTCUT = isMacPlatform(navigator.platform)
+  ? "{Meta>}{Alt>}i{/Alt}{/Meta}"
+  : "{Control>}{Alt>}i{/Alt}{/Control}";
+
 function widthOf(selector: string) {
   const element = document.querySelector(selector);
   expect(element).not.toBeNull();
   return element!.getBoundingClientRect().width;
 }
+
+// First in the file: the title menu reads thread shells, and the fake shell stream keeps serving the
+// first mounted fixture's shells to later tests in the same file.
+it("shows the menu's thread in Checklist, locked, while a side chat of it is focused", async () => {
+  const [main, side] = [threadWithHistory("menu-main", 1), threadWithHistory("menu-side", 1)];
+  const { stack, screen } = await mountApp([main, side], 1280);
+  await using _app = stack;
+  const mainRef = scopeThreadRef(ENVIRONMENT_ID, main.id);
+  await act(() => useRightPanelStore.getState().openSideChat(mainRef, side.id));
+  expect(readSelectedThreadRef(mainRef)).toEqual(scopeThreadRef(ENVIRONMENT_ID, side.id));
+  // From the keyboard: a pointer click on the same spot as an earlier test's reads as a double-click.
+  screen
+    .getByRole("button", { name: `Thread actions for ${main.title}` })
+    .element()
+    .focus();
+  await userEvent.keyboard("{Enter}");
+  await userEvent.click(page.getByRole("menuitem", { name: "Todos" }));
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel.getByText(main.title, { exact: true })).toBeVisible();
+  expect(useToolSidebarStore.getState()).toMatchObject({
+    open: true,
+    view: "todos",
+    locked: mainRef,
+  });
+});
 
 it("covers the chat without changing the chat's or the thread list's width", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("cover", 2)], 1280);
@@ -118,10 +163,10 @@ it("gives the thread list the whole left sidebar and opens thread views on the r
     sidebar!.getBoundingClientRect().width - 2,
   );
   await act(() => useToolSidebarStore.setState({ view: "status", threadView: "links" }));
-  await userEvent.keyboard("{Control>}{Alt>}i{/Alt}{/Control}");
+  await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
   await expect.element(screen.getByRole("complementary", { name: "Side panel" })).toBeVisible();
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "links" });
-  await userEvent.keyboard("{Control>}{Alt>}i{/Alt}{/Control}");
+  await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
   await expect
     .element(screen.getByRole("complementary", { name: "Side panel" }))
     .not.toBeInTheDocument();
@@ -319,4 +364,92 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   expect(interrupted).toEqual([]);
   expect(maxThreadsInFlight).toBe(1);
   expect(useToolSidebarStore.getState().open).toBe(true);
+});
+
+it("keeps a view opened for another thread open when the navigation to it arrives", async () => {
+  const [here, there] = [threadWithHistory("review-here", 1), threadWithHistory("review-there", 1)];
+  const { stack, router } = await mountApp([here, there], 1280);
+  await using _app = stack;
+  const thereRef = scopeThreadRef(ENVIRONMENT_ID, there.id);
+  // What a review reminder does from another thread: open the view, then navigate there.
+  await act(async () => {
+    useThreadContextSidebarStore
+      .getState()
+      .show("artifacts", { thread: thereRef, artifactId: "review", arriving: true });
+    await router.navigate({ to: `/${ENVIRONMENT_ID}/${there.id}` });
+  });
+  await expect.element(page.getByRole("complementary", { name: "Side panel" })).toBeVisible();
+  expect(useToolSidebarStore.getState()).toMatchObject({
+    open: true,
+    view: "artifacts",
+    arrival: null,
+  });
+  await act(() => router.navigate({ to: `/${ENVIRONMENT_ID}/${here.id}` }));
+  await expect
+    .element(page.getByRole("complementary", { name: "Side panel" }))
+    .not.toBeInTheDocument();
+});
+
+const waitingThread = scopeThreadRef(ENVIRONMENT_ID, ThreadId.make("waiting-host"));
+const waitingTask: ReadonlyArray<WaitingItemSummary> = [
+  { kind: "task", ref: "T1", key: "task-1", title: "Rotate the webhook secret", state: "open" },
+];
+const emptyWorkspace: ThreadWorkspace = {
+  threadId: waitingThread.threadId,
+  revision: 1,
+  items: [],
+  artifacts: [],
+  questions: [],
+  summaryNotes: "",
+  childPreamble: "",
+  updatedAt: null,
+};
+
+it.each([
+  ["a waiting task", { name: "T1: Rotate the webhook secret" }, "todos"],
+  ["the composer's Artifacts button", { name: "Artifacts", exact: true }, "artifacts"],
+] as const)(
+  "keeps an unpinned panel open when %s outside it opens a view",
+  async (_caller, button, view) => {
+    const { stack, screen } = await mountApp([threadWithHistory("outside-open", 1)], 1280);
+    await using _app = stack;
+    // A second root outside the panel, as the waiting strip and the composer are.
+    await using outside = await render(
+      <div style={{ position: "fixed", left: 280, top: 120, width: 600, zIndex: 50 }}>
+        <WaitingItemsList
+          threadRef={waitingThread}
+          groups={groupWaitingItems(waitingTask)}
+          workspace={emptyWorkspace}
+          unlisted={0}
+          hasQuestions={false}
+        />
+        <ThreadReviewsButton threadRef={waitingThread} />
+      </div>,
+    );
+    await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "links" }));
+    const panel = screen.getByRole("complementary", { name: "Side panel" });
+    await expect.element(panel).toBeVisible();
+    await userEvent.click(outside.getByRole("button", button));
+    await expect.element(panel.getByRole("region", { name: viewTitle(view) })).toBeVisible();
+    expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view });
+  },
+);
+
+function viewTitle(view: "todos" | "artifacts") {
+  return view === "todos" ? "Todos" : "Artifacts";
+}
+
+it("closes the thread drawer and focuses the panel when the shortcut opens it on a phone", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("phone-drawer", 1)], 390);
+  await using _app = stack;
+  await userEvent.click(screen.getByRole("button", { name: /^Toggle main sidebar/ }));
+  const drawer = page.getByRole("navigation", { name: "Threads" });
+  await expect.element(drawer).toBeVisible();
+  await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
+  const panel = page.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel).toBeVisible();
+  await expect.element(drawer).not.toBeInTheDocument();
+  await expect
+    .element(panel.getByRole("button", { name: /^View: .*Choose a view$/ }))
+    .toHaveFocus();
 });
