@@ -219,8 +219,8 @@ describe("deriveWorkMap on yesterday's worst moment, from today's inputs", () =>
         lane(worst, "release-lead").items.map((entry) => [entry.title, entry.stage]),
       ),
     ).toEqual({
-      "finished-a": "ready_to_land",
-      "finished-b": "ready_to_land",
+      "finished-a": "in_review",
+      "finished-b": "in_review",
       building: "implementing",
       fixing: "fixing",
       reviewing: "in_review",
@@ -232,16 +232,17 @@ describe("deriveWorkMap on yesterday's worst moment, from today's inputs", () =>
     expect(item(worst, "finished-a").stageSource).toBe("inferred");
   });
 
-  it("shows two finished changes waiting to land as stalled, because no one declared them ready", () => {
+  it("leaves two reviewed changes with their lead, stalled, because no one declared them ready", () => {
     expect(item(worst, "finished-a")).toMatchObject({
+      stage: "in_review",
       state: "stalled",
-      waitsOn: "landing",
+      waitsOn: null,
       blocked: false,
-      reason: "waited 4.7 h to land",
+      reason: "reviewed 4.7 h ago",
     });
     expect(item(worst, "finished-b")).toMatchObject({
       state: "stalled",
-      reason: "waited 3.8 h to land",
+      reason: "reviewed 3.8 h ago",
     });
   });
 
@@ -301,8 +302,8 @@ describe("deriveWorkMap on yesterday's worst moment, from today's inputs", () =>
       briefed: 1,
       implementing: 6,
       fixing: 1,
-      in_review: 1,
-      ready_to_land: 2,
+      in_review: 3,
+      ready_to_land: 0,
     });
   });
 });
@@ -313,8 +314,8 @@ describe("deriveWorkMap on yesterday's worst moment, with the inputs later steps
     threads: worstThreads,
     environments,
     declared: new Map([
-      ["env-pc:release-lead:project-1:finished-a", { readyAt: ago(282) }],
-      ["env-pc:release-lead:project-1:finished-b", { readyAt: ago(228) }],
+      ["env-pc:release-lead:project-1:finished-a", { stage: "ready_to_land", readyAt: ago(282) }],
+      ["env-pc:release-lead:project-1:finished-b", { stage: "ready_to_land", readyAt: ago(228) }],
     ]),
     taskOutputAt: new Map([["env-pc:silent-suite:silent-suite-suite", ago(74)]]),
   });
@@ -395,10 +396,11 @@ describe("deriveWorkMap on a healthy day", () => {
     );
   });
 
-  it("holds a reviewed change that finished recently as waiting to land, not blocked", () => {
+  it("keeps a recently reviewed change in review, waiting on its lead rather than a reviewer", () => {
     expect(item(map, "recent")).toMatchObject({
-      stage: "ready_to_land",
+      stage: "in_review",
       state: "waiting",
+      waitsOn: null,
       blocked: false,
     });
   });
@@ -552,7 +554,7 @@ describe("deriveWorkMap edge cases", () => {
         }),
       ],
     });
-    expect(item(map, "change").stage).toBe("ready_to_land");
+    expect(item(map, "change").stage).toBe("in_review");
     expect(item(map, "batch")).toMatchObject({ stage: "landed", reason: "landed 2 changes" });
   });
 
@@ -598,6 +600,64 @@ describe("deriveWorkMap edge cases", () => {
         .items.map((entry) => entry.title)
         .sort(),
     ).toEqual(["cli-fix", "stray-review", "web-fix"]);
+  });
+
+  it("credits only the thread whose question blocks a change, not one with QA on it", () => {
+    const map = deriveWorkMap({
+      now: NOW,
+      environments: pcOnly,
+      threads: [
+        thread({ id: "release-lead", waitsOnThreads: true }),
+        implementer("change", { status: "waiting", questions: 1, updatedMin: 10 }),
+        reviewer("review", "change", { status: "completed", completedMin: 30, qa: 1 }),
+      ],
+    });
+    expect(map.waitingOnYou.map((entry) => [entry.title, entry.holds])).toEqual([
+      ["change", 1],
+      ["review", 0],
+    ]);
+  });
+
+  it("does not call a top-level thread's unawaited command silent", () => {
+    const map = deriveWorkMap({
+      now: NOW,
+      environments: pcOnly,
+      threads: [thread({ id: "lone", branch: "lone", status: "waiting", commandTask: true })],
+      taskOutputAt: new Map([["env-pc:lone:lone-suite", ago(60)]]),
+    });
+    expect(item(map, "lone").state).not.toBe("blocked");
+  });
+
+  it("does not count a child on an unreachable environment as working", () => {
+    const map = deriveWorkMap({
+      now: NOW,
+      environments,
+      threads: [
+        thread({ id: "release-lead", status: "completed", updatedMin: 60 }),
+        thread({
+          id: "mac-research",
+          env: MAC,
+          parent: "release-lead",
+          parentEnv: PC,
+          role: "research",
+          status: "running",
+        }),
+      ],
+    });
+    expect(lane(map, "release-lead").state).toBe("idle");
+  });
+
+  it("keeps a thread sharing a worktree path but naming another branch apart", () => {
+    const map = deriveWorkMap({
+      now: NOW,
+      environments: pcOnly,
+      threads: [
+        thread({ id: "release-lead", waitsOnThreads: true }),
+        { ...implementer("first", { status: "running" }), worktreePath: "/w/one" },
+        { ...implementer("second", { status: "running" }), worktreePath: "/w/one" },
+      ],
+    });
+    expect(lane(map, "release-lead").items).toHaveLength(2);
   });
 
   it("treats an environment the caller did not list as unknown", () => {
