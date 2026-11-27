@@ -1,4 +1,4 @@
-import type { EvidenceChangeQa, EvidenceLanding } from "@t3tools/contracts";
+import type { EvidenceChangeQa, EvidenceLanding, EvidenceQaRaiseReason } from "@t3tools/contracts";
 
 export type QaChange = EvidenceLanding["changes"][number];
 
@@ -67,17 +67,32 @@ export const qaRef = (change: QaChange) =>
 /** The composer record key of a change, `<landingId>/<changeId>`. */
 export const qaKey = (landingId: string, changeId: string) => `${landingId}/${changeId}`;
 
+const forcingReason: Partial<Record<EvidenceQaRaiseReason, string>> = {
+  check_skipped: "a check was skipped",
+  check_failed: "a check failed",
+  review_waived: "the review was waived",
+  review_changes_requested: "the reviewer requested changes",
+};
+
 /** Selects the lead of an expanded QA card for both clients. */
-export function qaCardLead(change: Pick<QaChange, "qaCheck">) {
+export function qaCardLead(change: Pick<QaChange, "qaCheck" | "qa">) {
   const check = change.qaCheck;
-  return check === undefined
-    ? ({ kind: "fallback", text: "No QA check was recorded" } as const)
-    : ({
-        kind: "check",
-        rows: [
-          { label: "Where", text: check.where },
-          { label: "Do", text: check.do },
-          { label: "Expect", text: check.expect },
-        ],
-      } as const);
+  if (check === undefined) {
+    const explanation = change.qa.raised?.map((reason) => forcingReason[reason]).find(Boolean);
+    return {
+      kind: "fallback",
+      text:
+        explanation === undefined
+          ? "No QA check was recorded"
+          : `No QA check was recorded. Raised because ${explanation}.`,
+    } as const;
+  }
+  return {
+    kind: "check",
+    rows: [
+      { label: "Where", text: check.where },
+      { label: "Do", text: check.do },
+      { label: "Expect", text: check.expect },
+    ],
+  } as const;
 }

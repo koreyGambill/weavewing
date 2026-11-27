@@ -82,10 +82,10 @@ describe("qaNoted", () => {
   });
 });
 
-it("leads with the check or an explicit fallback", () => {
-  expect(qaCardLead({})).toEqual({ kind: "fallback", text: "No QA check was recorded" });
+it("leads with the recorded check even when a forcing reason exists", () => {
   expect(
     qaCardLead({
+      qa: qa({ raised: ["check_skipped"] }),
       qaCheck: { where: "Settings", do: "Widen the window", expect: "Two columns" },
     }),
   ).toEqual({
@@ -95,5 +95,28 @@ it("leads with the check or an explicit fallback", () => {
       { label: "Do", text: "Widen the window" },
       { label: "Expect", text: "Two columns" },
     ],
+  });
+});
+
+it.each([
+  ["check_skipped", "a check was skipped"],
+  ["check_failed", "a check failed"],
+  ["review_waived", "the review was waived"],
+  ["review_changes_requested", "the reviewer requested changes"],
+] as const)("explains a fallback raised by %s", (reason, explanation) => {
+  expect(qaCardLead({ qa: qa({ raised: [reason] }) })).toEqual({
+    kind: "fallback",
+    text: `No QA check was recorded. Raised because ${explanation}.`,
+  });
+});
+
+it.each([
+  { raised: undefined },
+  { raised: ["legacy", "gaps"] },
+  { raised: ["needs_you"] },
+] as const)("keeps the bare fallback for $raised", ({ raised }) => {
+  expect(qaCardLead({ qa: qa(raised === undefined ? {} : { raised }) })).toEqual({
+    kind: "fallback",
+    text: "No QA check was recorded",
   });
 });

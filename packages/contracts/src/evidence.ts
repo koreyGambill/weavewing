@@ -107,9 +107,12 @@ export const EvidenceChange = Schema.Struct({
   ),
   qaCheck: Schema.optional(
     Schema.Struct({
-      where: Text(120).annotate({
-        description: "Name the screen, capture or starting state the user should open.",
-      }),
+      where: Text(120).pipe(
+        Schema.annotateEncoded({
+          description:
+            'Name the starting screen or state, or give the capture route, e.g. "Open Evidence and look at the capture named calendar.png".',
+        }),
+      ),
       do: Text(120).annotate({
         description: "Describe the one action or inspection to perform.",
       }),

@@ -116,6 +116,22 @@ it("settles with Looks good, starts no turn, and keeps focus on the line it coll
   await expect.element(screen.getByRole("button", { name: "Looks good: QA1" })).toHaveFocus();
 });
 
+it("shows why a card was forced while Evidence is closed", async () => {
+  await using screen = await render(
+    <ThreadQaCard
+      threadRef={threadRef}
+      landing={landing}
+      change={{ ...change, qa: { ...change.qa, raised: ["check_skipped"] } }}
+    />,
+  );
+  await expect
+    .element(screen.getByText("No QA check was recorded. Raised because a check was skipped."))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Evidence" }))
+    .toHaveAttribute("aria-expanded", "false");
+});
+
 it("leads with the check and opens the proof from the keyboard", async () => {
   const check = { where: "Upload panel", do: "Retry the upload", expect: "Toast reads 2 of 3" };
   await using screen = await render(
