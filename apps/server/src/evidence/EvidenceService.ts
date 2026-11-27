@@ -138,13 +138,6 @@ export class EvidenceService extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, EvidenceError>;
     /**
-     * The user-authored message of the thread's current turn, or null: the only message an agent
-     * may record the user's outcome of a waiting item from, a QA change's or a user task's.
-     */
-    readonly turnUserMessage: (
-      threadId: ThreadId,
-    ) => Effect.Effect<MessageId | null, EvidenceError>;
-    /**
      * The thread's QA changes an agent's turn names: each one still waiting on someone, and each
      * one the user changed after `since` (every one the user changed when null).
      */
@@ -1124,14 +1117,6 @@ const make = Effect.gen(function* () {
     });
   }, Effect.mapError(passStorage));
 
-  const turnUserMessage = Effect.fn("EvidenceService.turnUserMessage")(function* (
-    threadId: ThreadId,
-  ) {
-    return yield* currentUserMessage(threadId).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-    );
-  }, Effect.mapError(storage));
-
   const qaForTurn = Effect.fn("EvidenceService.qaForTurn")(function* (
     threadId: ThreadId,
     since: string | null,
@@ -1502,7 +1487,6 @@ const make = Effect.gen(function* () {
     bulkSetQa,
     waitingQa,
     qaForTurn,
-    turnUserMessage,
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),
     landingTarget,

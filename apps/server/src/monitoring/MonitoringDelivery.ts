@@ -104,7 +104,7 @@ export const layer = Layer.effect(
                 },
               ],
             },
-            { by: "agent", userMessageId: null },
+            { by: "agent", threadId: undefined },
           );
         }).pipe(
           Effect.retry({ times: 1, while: (cause) => cause.code === "conflict" }),

@@ -1,4 +1,5 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import type { AtomRegistry } from "effect/reactivity";
 import * as Effect from "effect/Effect";
 import {
   createEnvironmentRpcCommand,
@@ -24,14 +25,26 @@ export const sidebarWorkspaceGet = createEnvironmentRpcQueryAtomFamily(connectio
   staleTimeMs: 0,
   idleTtlMs: 0,
 });
+/**
+ * Refetches what shows a thread's list outside the chat after a write: the hidden sidebar's
+ * attention dot and the open Checklist view.
+ */
+export function refreshTodos(
+  registry: AtomRegistry.AtomRegistry,
+  target: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly threadId: ThreadId };
+  },
+) {
+  const { environmentId } = target;
+  const { threadId } = target.input;
+  registry.refresh(sidebarWorkspaceGet({ environmentId, input: { threadId } }));
+  registry.refresh(threadListRead({ environmentId, input: { threadId, all: true } }));
+}
 export const threadListUpdate = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "list:update",
   tag: WS_METHODS.threadListUpdate,
-  // The hidden sidebar's attention dot counts open items from the workspace query.
-  onSuccess: ({ environmentId, input }, registry) =>
-    Effect.sync(() =>
-      registry.refresh(sidebarWorkspaceGet({ environmentId, input: { threadId: input.threadId } })),
-    ),
+  onSuccess: (target, registry) => Effect.sync(() => refreshTodos(registry, target)),
 });
 export const threadArtifactList = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "artifact:list",
