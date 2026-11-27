@@ -134,8 +134,9 @@ export function ThreadTaskCard({
     setExpanded(false);
     if (!(await setState("open"))) focusNext.current = null;
   };
+  // The task can change before the write returns, so a button mounted while busy waits until enabled.
   const focusOnMount = (target: "line" | "card") => (node: HTMLButtonElement | null) => {
-    if (node === null || focusNext.current !== target) return;
+    if (node === null || node.disabled || focusNext.current !== target) return;
     focusNext.current = null;
     node.focus();
   };

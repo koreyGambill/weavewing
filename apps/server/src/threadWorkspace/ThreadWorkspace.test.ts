@@ -1677,7 +1677,12 @@ it.effect(
       expect(
         yield* h.service
           .rewrite(
-            { threadId, expectedRevision: created.revision, items: [{ id: "rotate" }] },
+            {
+              threadId,
+              expectedRevision: created.revision,
+              // Keeps T1 whole and leaves T2 out.
+              items: [{ id: "rotate", text: "Rotate the staging webhook secret", owner: "you" }],
+            },
             agent,
           )
           .pipe(

@@ -26,13 +26,11 @@ export function taskCardStatus(
 }
 
 /**
- * What a closed task's one line shows after its title: the recorded note when there is one, else
- * how it closed. Null while the task is open and keeps its full card.
+ * What a closed task's one line shows after its title: the recorded note, or empty because the
+ * status badge already says how it closed. Null while the task is open and keeps its full card.
  */
-export function taskCardOutcome(task: Pick<ListItem, "state" | "settledBy" | "note">) {
+export function taskCardOutcome(task: Pick<ListItem, "state" | "note">) {
   if (task.state !== "done" && task.state !== "dropped") return null;
   const note = task.note?.trim() ?? "";
-  if (note !== "") return `“${note}”`;
-  if (task.state === "done") return "Done";
-  return task.settledBy === "agent" ? "Cancelled by the agent" : "Cancelled";
+  return note === "" ? "" : `“${note}”`;
 }

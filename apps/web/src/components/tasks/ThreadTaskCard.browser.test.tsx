@@ -101,7 +101,7 @@ it("marks a task done in one click, keeps focus on its line, and reopens it", as
       changes: [{ id: "task-rotate", state: "done" }],
     },
   ]);
-  const line = screen.getByRole("button", { name: /T2.*Rotate the staging webhook secret.*Done/ });
+  const line = screen.getByRole("button", { name: /T2.*Rotate the staging webhook secret/ });
   await expect.element(line).toHaveFocus();
   await expect.element(screen.getByText("Done by you")).toBeVisible();
 
