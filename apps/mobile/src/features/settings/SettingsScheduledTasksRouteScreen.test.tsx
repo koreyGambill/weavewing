@@ -18,6 +18,7 @@ const { Children, mocks } = vi.hoisted(() => ({
     upsert: vi.fn(),
     alert: vi.fn(),
     tasks: [] as ScheduledTask[],
+    capabilities: {} as { automations?: boolean; automationRunHistory?: boolean },
     thread: null as {
       id: ThreadId;
       title: string;
@@ -36,6 +37,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ isFocused: () => false }),
+  useFocusEffect: () => {},
   usePreventRemove: () => {},
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
@@ -62,6 +64,8 @@ vi.mock("../../components/ui/Menu", () => ({
     )),
 }));
 vi.mock("../../components/ui/ScreenScrollView", () => ({ ScreenScrollView: Children }));
+vi.mock("../../components/ui/Sheet", () => ({ Sheet: Children }));
+vi.mock("../../components/ui/FitSheet", () => ({ FitSheet: Children }));
 vi.mock("./components/SettingsScreen", () => ({ SettingsScreen: Children }));
 vi.mock("./components/SettingsSection", () => ({ SettingsSection: Children }));
 vi.mock("./components/SettingsEnvironmentFilterHeader", () => ({
@@ -135,7 +139,13 @@ vi.mock("../../state/entities", () => ({
 }));
 vi.mock("./settings-environment-filter", () => ({
   useSettingsEnvironmentFilter: () => ({
-    selectedTargets: [{ environmentId: "environment", label: "Environment" }],
+    selectedTargets: [
+      {
+        environmentId: "environment",
+        label: "Environment",
+        serverConfig: { environment: { capabilities: mocks.capabilities, platform: {} } },
+      },
+    ],
     availableTargets: [
       { environmentId: "environment", label: "Environment" },
       { environmentId: "target", label: "Target" },
@@ -155,12 +165,16 @@ vi.mock("../../state/session", () => ({
 }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: {
-    scheduledTasksLive: () => ({}),
+    scheduledTasksLive: () => "tasks",
+    scheduledTaskRuns: () => "runs",
     upsertScheduledTask: { permissionAtom: () => Atom.make(true) },
   },
 }));
 vi.mock("../../state/query", () => ({
-  useEnvironmentQuery: () => ({ data: { tasks: mocks.tasks, threads: [] } }),
+  useEnvironmentQuery: (kind: string) => ({
+    data: kind === "runs" ? { runs: [], hasMore: false } : { tasks: mocks.tasks, threads: [] },
+    refresh: () => {},
+  }),
 }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => mocks.upsert }));
 
@@ -171,7 +185,10 @@ import {
   scheduledTaskEditorSessionAtom,
   startScheduledTaskEditor,
 } from "./scheduled-task-editor-state";
-import { SettingsScheduledTaskEditRouteScreen } from "./SettingsScheduledTasksRouteScreen";
+import {
+  SettingsScheduledTaskEditRouteScreen,
+  SettingsScheduledTasksRouteScreen,
+} from "./SettingsScheduledTasksRouteScreen";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -181,6 +198,7 @@ beforeEach(() => {
   root = createRoot(container);
   mocks.alert.mockReset();
   mocks.thread = null;
+  mocks.capabilities = {};
   mocks.upsert.mockReset();
   mocks.upsert.mockResolvedValue({ _tag: "Success" });
   const task: ScheduledTask = {
@@ -278,6 +296,19 @@ it("sends a destination reset when switching back to the stored project", async 
       detachFromThread: true,
     }),
   });
+});
+
+it("opens per-task history on servers that cannot list all automation runs", () => {
+  mocks.capabilities = { automations: true };
+  act(() =>
+    root.render(
+      <RegistryContext.Provider value={appAtomRegistry}>
+        <SettingsScheduledTasksRouteScreen />
+      </RegistryContext.Provider>,
+    ),
+  );
+  act(() => button("Select Run history").click());
+  expect(container.textContent).toContain("No runs yet.");
 });
 
 describe("scheduled task batched edits", () => {
