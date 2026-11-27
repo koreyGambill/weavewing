@@ -15,6 +15,7 @@ import {
   evidenceThreadsWaitingCount,
   landingQaSummary,
   landingQaThreadId,
+  landingNoteRemainder,
   landingTargetLine,
 } from "./evidence.logic";
 
@@ -87,6 +88,27 @@ it("counts a landing's QA in web's words and order, leaving out empty states", (
     "2 open · 1 dismissed · 1 nothing to check · 4 changes",
   );
   expect(landingQaSummary(summary("b", { confirmed: 1 }))).toBe("1 confirmed · 1 change");
+  expect(landingQaSummary(summary("c", { quiet: 3, noted: 2 }, 3))).toBe(
+    "1 nothing to check · 2 noted · 3 changes",
+  );
+  expect(landingQaSummary(summary("d", { quiet: 1, noted: 1 }))).toBe("1 noted · 1 change");
+  const exempt = {
+    ...summary("e", {}, 0),
+    exempt: { reason: "Documentation only" },
+  };
+  expect(landingQaSummary(exempt)).toBe("Exempt: Documentation only");
+});
+
+it("counts captures and gaps omitted from a note preview", () => {
+  const preview = { gapCount: 3, gapPreviews: ["One gap"] };
+  expect(landingNoteRemainder(preview)).toEqual(["2 more gaps"]);
+  expect(landingNoteRemainder({ ...preview, captureCount: 1 })).toEqual([
+    "2 more gaps",
+    "1 capture",
+  ]);
+  expect(landingNoteRemainder({ gapCount: 0, gapPreviews: [], captureCount: 2 })).toEqual([
+    "2 captures",
+  ]);
 });
 
 it("names where a landing went and the thread that shows its QA", () => {

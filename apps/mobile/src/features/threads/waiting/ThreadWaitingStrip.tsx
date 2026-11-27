@@ -1,3 +1,10 @@
+import {
+  qaCardStatus,
+  qaCardTitle,
+  qaPresence,
+  qaRef,
+  type QaChange,
+} from "@t3tools/client-runtime/qa-card";
 import type {
   EvidenceLanding,
   EvidenceThreadResult,
@@ -17,17 +24,7 @@ import { cn } from "../../../lib/cn";
 import { useThreadShell } from "../../../state/entities";
 import { evidenceThread } from "../../../state/evidence";
 import { useEnvironmentQuery, type EnvironmentQueryView } from "../../../state/query";
-import {
-  QA_STATUS_LABEL,
-  findQaChange,
-  qaCardStatus,
-  qaCardTitle,
-  qaHistory,
-  qaHistoryCapped,
-  qaRef,
-  qaShowsCard,
-  type QaChange,
-} from "./qaCard.logic";
+import { QA_STATUS_LABEL, findQaChange, qaHistory, qaHistoryCapped } from "./mobileQaCard.logic";
 import { useQaKeysInComposer } from "./qaDiscuss";
 import { WaitingQaCard } from "./WaitingQaCard";
 import {
@@ -411,7 +408,8 @@ function WaitingQaSlot(props: {
         }
       />
     );
-  if (!qaShowsCard(found.change.qa)) return <SlotNote text="Nothing to check for this change." />;
+  if (qaPresence(found.change.qa) !== "card")
+    return <SlotNote text="Nothing to check for this change." />;
   return props.renderCard(found.landing, found.change, props.rowKey);
 }
 

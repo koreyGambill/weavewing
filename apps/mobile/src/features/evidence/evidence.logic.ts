@@ -56,14 +56,34 @@ const TALLY_LABELS: ReadonlyArray<{ readonly state: EvidenceQaState; readonly la
 
 /** A landing's QA in words, such as "2 open · 1 confirmed · 3 changes". */
 export function landingQaSummary(
-  landing: Pick<EvidenceLandingSummary, "qa" | "changeCount">,
+  landing: Pick<EvidenceLandingSummary, "qa" | "changeCount" | "exempt">,
 ): string {
+  const noted = landing.qa.noted ?? 0;
   return [
-    ...TALLY_LABELS.flatMap(({ state, label }) =>
-      landing.qa[state] > 0 ? [`${landing.qa[state]} ${label}`] : [],
-    ),
-    `${landing.changeCount} ${landing.changeCount === 1 ? "change" : "changes"}`,
+    ...TALLY_LABELS.flatMap(({ state, label }) => {
+      const count = state === "quiet" ? landing.qa.quiet - noted : landing.qa[state];
+      return count > 0 ? [`${count} ${label}`] : [];
+    }),
+    ...(noted > 0 ? [`${noted} noted`] : []),
+    landing.exempt
+      ? `Exempt: ${landing.exempt.reason}`
+      : `${landing.changeCount} ${landing.changeCount === 1 ? "change" : "changes"}`,
   ].join(" · ");
+}
+
+/** Counts what the note preview does not show inline. Older servers omit the capture count. */
+export function landingNoteRemainder(
+  note: Pick<
+    NonNullable<EvidenceLandingSummary["notes"]>[number],
+    "gapCount" | "gapPreviews" | "captureCount"
+  >,
+): ReadonlyArray<string> {
+  const gaps = note.gapCount - note.gapPreviews.length;
+  const captures = note.captureCount ?? 0;
+  return [
+    ...(gaps > 0 ? [`${gaps} more ${gaps === 1 ? "gap" : "gaps"}`] : []),
+    ...(captures > 0 ? [`${captures} ${captures === 1 ? "capture" : "captures"}`] : []),
+  ];
 }
 
 /** "main · 0123456": where a landing went. */
@@ -75,12 +95,10 @@ export const landingQaThreadId = (landing: Pick<EvidenceLanding, "threadId" | "q
   landing.qaThreadId ?? landing.threadId;
 
 /**
- * Which list a group reads: the server's Needs QA filter, or every landing, unfiltered, as web's
- * "All landings" shows them. A landing that needs QA shows in both; filtering the second by the
- * QA tally would hide one whose only pending change the user is discussing, which Needs QA leaves
- * out while the tally still counts it as pending.
+ * The server's Needs QA, All landings, and Notes filters. All landings also includes changes that
+ * are still pending but being discussed.
  */
-export type EvidenceGroup = "needs-qa" | "all";
+export type EvidenceGroup = "needs-qa" | "all" | "notes";
 
 /** One environment's first pages: null until they load. */
 export interface EvidenceFirstPages {

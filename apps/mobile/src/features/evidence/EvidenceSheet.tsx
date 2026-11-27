@@ -27,8 +27,7 @@ import {
 
 /**
  * Landed work across every connected environment's threads, newest first: what needs QA, then
- * every landing, web's two Evidence filters one above the other. Only the newest landing that
- * needs QA opens by itself, so the sheet reads one landing's changes until the user opens more.
+ * all landings or notes. Only the newest landing that needs QA opens by itself.
  * Mounted only while open.
  */
 export function EvidenceSheet(props: {
@@ -40,6 +39,8 @@ export function EvidenceSheet(props: {
 }) {
   const insets = useSafeAreaInsets();
   const [expandedChange, setExpandedChange] = useState<string | null>(null);
+  const [showNotes, setShowNotes] = useState(false);
+  const landingGroup = showNotes ? "notes" : "all";
   // Navigation waits for the dismissal, so the thread never opens under a closing sheet.
   const [leavingTo, setLeavingTo] = useState<InboxThreadTarget | null>(null);
   const [dismissal] = useState(createInboxDismissal);
@@ -101,8 +102,16 @@ export function EvidenceSheet(props: {
             )}
             {state.allEmpty ? null : (
               <>
-                <GroupHeading title="All landings" detail={null} />
-                <EvidenceGroupLists group="all" {...groupProps} />
+                <View className="flex-row items-center justify-between gap-2">
+                  <GroupHeading title={showNotes ? "Notes" : "All landings"} detail={null} />
+                  <Button
+                    label={showNotes ? "Show all landings" : "Show notes"}
+                    size="compact"
+                    tone="text"
+                    onPress={() => setShowNotes(!showNotes)}
+                  />
+                </View>
+                <EvidenceGroupLists key={landingGroup} group={landingGroup} {...groupProps} />
               </>
             )}
           </>
@@ -134,11 +143,23 @@ interface GroupListProps {
   readonly onOpenThread: (thread: InboxThreadTarget) => void;
 }
 
+const GROUP_INPUTS: Record<EvidenceGroup, EvidenceListInput> = {
+  "needs-qa": NEEDS_QA_INPUT,
+  all: ALL_LANDINGS_INPUT,
+  notes: { notes: true },
+};
+
+const GROUP_EMPTY: Record<EvidenceGroup, string> = {
+  "needs-qa": "Nothing waiting for your QA.",
+  all: "No landings yet.",
+  notes: "No notes yet.",
+};
+
 /** One group's landings per environment, under the environment's name when there are several. */
 function EvidenceGroupLists(props: GroupListProps & { readonly group: EvidenceGroup }) {
   const { environments, group, openEnvironmentId, expandedChange, onToggleChange, onOpenThread } =
     props;
-  // A landing that needs QA lists in both groups, so each group opens its own copy of a card.
+  // A landing can appear in multiple groups, so each group opens its own copy of a card.
   const prefix = `${group}|`;
   const rest = {
     expandedChange: expandedChange?.startsWith(prefix) ? expandedChange.slice(prefix.length) : null,
@@ -155,7 +176,7 @@ function EvidenceGroupLists(props: GroupListProps & { readonly group: EvidenceGr
         <LandingPage
           {...rest}
           environmentId={environment.environmentId}
-          input={group === "needs-qa" ? NEEDS_QA_INPUT : ALL_LANDINGS_INPUT}
+          input={GROUP_INPUTS[group]}
           group={group}
           first
           labelled={heading !== null}
@@ -198,9 +219,12 @@ function LandingPage(
   const next = page.data.next;
   return (
     <>
-      {props.first && props.labelled && shown.length === 0 && next === null ? (
+      {props.first &&
+      (props.labelled || props.group === "notes") &&
+      shown.length === 0 &&
+      next === null ? (
         <Text className="px-1 font-sans text-sm text-foreground-secondary">
-          {props.group === "needs-qa" ? "Nothing waiting for your QA." : "No landings yet."}
+          {GROUP_EMPTY[props.group]}
         </Text>
       ) : null}
       {shown.map((landing, index) => (
@@ -223,7 +247,11 @@ function LandingPage(
         />
       ) : (
         <View className="items-start px-1">
-          <Button label="Load older landings" tone="text" onPress={() => setMore(true)} />
+          <Button
+            label={props.group === "notes" ? "Load older notes" : "Load older landings"}
+            tone="text"
+            onPress={() => setMore(true)}
+          />
         </View>
       )}
     </>
