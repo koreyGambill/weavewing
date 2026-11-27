@@ -29,7 +29,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { QuestionNoteBox } from "./QuestionNoteBox";
 import { QuestionOptions } from "./QuestionOptions";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
-import { HelpButton, ThreadCard, ThreadCardClosedLine, ThreadCardHeading } from "./ThreadCardShell";
+import {
+  HelpButton,
+  NextReferenceButton,
+  ThreadCard,
+  ThreadCardClosedLine,
+  ThreadCardHeading,
+} from "./ThreadCardShell";
 import {
   closedQuestionOutcome,
   closedQuestionShownAnswer,
@@ -218,6 +224,13 @@ export function ThreadQuestionCard({
     </HelpButton>
   ) : null;
   const reveal = onReveal ?? ((id: string) => revealQuestionInChat(scopedThreadKey(threadRef), id));
+  const nextReference = (
+    <NextReferenceButton
+      item={{ kind: "question", questionId: question.id }}
+      refLabel={question.id}
+      pointers={[question.sentInMessageId, question.discussedInMessageId]}
+    />
+  );
   const questionLink = (id: string, label: string, help: string) => (
     <HelpButton help={help} onClick={() => reveal(id)}>
       {label}
@@ -251,6 +264,7 @@ export function ThreadQuestionCard({
       >
         {replacesLink}
         {statusControl}
+        {nextReference}
         {actions}
         {reopenButton}
       </ThreadCardClosedLine>
@@ -273,6 +287,7 @@ export function ThreadQuestionCard({
           {actions}
           {replacesLink}
           {statusControl}
+          {nextReference}
           {question.options.some((option) => option.description) ? (
             <Tooltip>
               <TooltipTrigger

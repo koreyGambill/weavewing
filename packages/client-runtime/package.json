@@ -435,6 +435,10 @@
       "types": "./src/state/threadQuestionComposer.ts",
       "default": "./src/state/threadQuestionComposer.ts"
     },
+    "./state/waiting-item-references": {
+      "types": "./src/state/waitingItemReferences.ts",
+      "default": "./src/state/waitingItemReferences.ts"
+    },
     "./state/thread-questions": {
       "types": "./src/state/threadQuestions.ts",
       "default": "./src/state/threadQuestions.ts"

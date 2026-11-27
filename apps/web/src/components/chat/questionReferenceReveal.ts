@@ -7,7 +7,8 @@ import { toastManager } from "../ui/toast";
 import { questionReferenceElementId } from "./questionReferences";
 
 export interface QuestionReferenceTarget {
-  readonly questionId: string;
+  /** Set when the message holds the question's answer or comment block to scroll to. */
+  readonly questionId?: string | undefined;
   readonly messageId: string;
 }
 type RevealListener = (target: QuestionReferenceTarget) => boolean;
@@ -32,6 +33,23 @@ function mark(key: string | null) {
 function subscribeMark(listener: () => void) {
   markListeners.add(listener);
   return () => markListeners.delete(listener);
+}
+
+// A message that only cites an item, or that an item names, is marked as a whole.
+const messageMarkId = (messageId: string) => `message-reference-${messageId}`;
+
+/** True while a reveal marks this user message as a whole in the thread `threadRef`. */
+export function useMessageReferenceMark(
+  threadRef: ScopedThreadRef | null,
+  messageId: string,
+): boolean {
+  const key =
+    threadRef === null ? null : markKey(scopedThreadKey(threadRef), messageMarkId(messageId));
+  return useSyncExternalStore(
+    subscribeMark,
+    () => key !== null && marked === key,
+    () => false,
+  );
 }
 
 /** True while `revealQuestionReference` marks this block in the thread `threadRef`. */
@@ -60,6 +78,7 @@ export function scrollQuestionReferenceIntoRow(
   target: QuestionReferenceTarget,
   topOffset: number,
 ) {
+  if (target.questionId === undefined) return;
   const scroller = list?.getScrollableNode();
   const block = scroller?.querySelector(
     `[id="${CSS.escape(questionReferenceElementId(target.messageId, target.questionId))}"]`,
@@ -87,10 +106,30 @@ export function revealQuestionReference(
   questionId: string,
   messageId: string,
 ) {
+  revealItemReference(threadRef, { label: questionId, messageId, questionId });
+}
+
+/**
+ * Scrolls the thread's timeline to a user message about an item and marks it briefly: the
+ * question's answer or comment block when `questionId` is set, otherwise the whole message.
+ * `label` names the item, such as T2, when the message is not in the loaded part of the chat.
+ */
+export function revealItemReference(
+  threadRef: ScopedThreadRef,
+  input: { readonly label: string; readonly messageId: string; readonly questionId?: string },
+) {
+  const { label, messageId, questionId } = input;
   const threadKey = scopedThreadKey(threadRef);
   const target = { questionId, messageId };
   clearTimeout(markTimer);
-  mark(markKey(threadKey, questionReferenceElementId(messageId, questionId)));
+  mark(
+    markKey(
+      threadKey,
+      questionId === undefined
+        ? messageMarkId(messageId)
+        : questionReferenceElementId(messageId, questionId),
+    ),
+  );
   markTimer = setTimeout(() => mark(null), MARK_DURATION_MS);
   const current = listeners.get(threadKey);
   if (current === undefined || current.size === 0) {
@@ -103,7 +142,7 @@ export function revealQuestionReference(
   if (!revealed)
     toastManager.add({
       type: "info",
-      title: `That reply to ${questionId} is not in the loaded part of the chat`,
+      title: `That message about ${label} is not in the loaded part of the chat`,
       description: "Scroll up to load earlier messages, then try again.",
     });
 }

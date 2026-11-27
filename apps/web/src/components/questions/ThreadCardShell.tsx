@@ -1,6 +1,16 @@
-import type { ReactNode, Ref } from "react";
+import {
+  itemReferences,
+  nextReferencePosition,
+  referencedItemKey,
+  type ReferencedItem,
+} from "@t3tools/client-runtime/state/waiting-item-references";
+import type { MessageId } from "@t3tools/contracts";
+import { CornerDownRightIcon } from "lucide-react";
+import { use, useState, type ReactNode, type Ref } from "react";
 
 import { cn } from "~/lib/utils";
+import { revealItemReference } from "../chat/questionReferenceReveal";
+import { TimelineRowCtx, type TimelineRowSharedState } from "../chat/timelineRowContext";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -246,5 +256,67 @@ export function CardReasonForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Scrolls the chat to the user's next message about this item, oldest first, wrapping after the
+ * last; the message is marked briefly. Focus stays here, so pressing again goes on to the next.
+ * Absent outside the timeline and when no loaded message speaks about the item.
+ */
+export function NextReferenceButton({
+  item,
+  refLabel,
+  pointers,
+}: {
+  readonly item: ReferencedItem;
+  /** The item's ref, such as Q2, QA1 or T3. */
+  readonly refLabel: string;
+  /** Messages the item itself names, such as the one an agent recorded its outcome from. */
+  readonly pointers?: ReadonlyArray<MessageId | undefined>;
+}) {
+  // Null outside the timeline, which has no messages at hand.
+  const ctx: TimelineRowSharedState | null = use(TimelineRowCtx);
+  const key = referencedItemKey(item);
+  const [shown, setShown] = useState<{ readonly key: string; readonly position: number } | null>(
+    null,
+  );
+  const threadRef = ctx?.threadRef ?? null;
+  const references =
+    ctx?.waitingReferences === undefined
+      ? []
+      : itemReferences({ ...ctx.waitingReferences, item, pointers: pointers ?? [] });
+  if (threadRef === null || references.length === 0) return null;
+  const count = references.length;
+  const last = shown?.key === key && shown.position < count ? shown.position : null;
+  const next = nextReferencePosition(last, count);
+  const show = () => {
+    const reference = references[next];
+    if (reference === undefined) return;
+    revealItemReference(threadRef, {
+      label: refLabel,
+      messageId: reference.messageId,
+      ...(reference.target === "block" && item.kind === "question"
+        ? { questionId: item.questionId }
+        : {}),
+    });
+    setShown({ key, position: next });
+  };
+  return (
+    <>
+      <HelpButton
+        help={`Show your message ${next + 1} of ${count} about ${refLabel} in the chat. Press again for the next one.`}
+        aria-label={`Next reference, ${next + 1} of ${count}`}
+        onClick={show}
+      >
+        <CornerDownRightIcon aria-hidden />
+        <span className="tabular-nums">
+          {next + 1}/{count}
+        </span>
+      </HelpButton>
+      <span className="sr-only" aria-live="polite">
+        {last === null ? "" : `Showing your message ${last + 1} of ${count} about ${refLabel}`}
+      </span>
+    </>
   );
 }

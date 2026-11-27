@@ -19,6 +19,7 @@ import {
   type TurnItemId,
 } from "@t3tools/contracts";
 import type { AsyncResult, Atom } from "effect/reactivity";
+import type { ItemReference } from "@t3tools/client-runtime/state/waiting-item-references";
 import type { CommandOutputView } from "@t3tools/client-runtime/state/command-output";
 import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
 import { useEffect, useRef, createContext, type MouseEvent, type ReactNode } from "react";
@@ -117,6 +118,15 @@ export interface TimelineRowSharedState {
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   workGroupViewState: WorkGroupViewState;
+  /** Which loaded user messages speak about each waiting item, for a card's Next reference. */
+  waitingReferences?: WaitingReferences | undefined;
+}
+
+/** The user messages the timeline holds, indexed by the waiting items they speak about. */
+export interface WaitingReferences {
+  readonly index: ReadonlyMap<string, ReadonlyArray<ItemReference>>;
+  /** Each loaded user message's place in the timeline. */
+  readonly messageOrder: ReadonlyMap<string, number>;
 }
 
 export interface TimelineRowActivityState {

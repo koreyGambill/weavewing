@@ -9,6 +9,7 @@ import { threadTaskElementId } from "../questions/questionReveal";
 import {
   CardReasonForm,
   HelpButton,
+  NextReferenceButton,
   ThreadCard,
   ThreadCardClosedLine,
   ThreadCardHeading,
@@ -131,6 +132,14 @@ export function ThreadTaskCard({
     </HelpButton>
   );
 
+  const nextReference = (
+    <NextReferenceButton
+      item={{ kind: "task", taskId: task.id }}
+      refLabel={task.ref}
+      pointers={[task.settledFromMessageId, task.discussedInMessageId]}
+    />
+  );
+
   if (!waiting && !expanded) {
     return (
       <ThreadCardClosedLine
@@ -145,6 +154,7 @@ export function ThreadTaskCard({
         stackOnNarrow
       >
         <TaskStatusBadge status={status} note={note} />
+        {nextReference}
         {reopenButton}
       </ThreadCardClosedLine>
     );
@@ -163,7 +173,12 @@ export function ThreadTaskCard({
       waiting={waiting}
       heading={<ThreadCardHeading refLabel={task.ref} title={task.text} editable={waiting} />}
       onCollapse={waiting ? undefined : () => setExpanded(false)}
-      controls={<TaskStatusBadge status={status} note={note} />}
+      controls={
+        <>
+          <TaskStatusBadge status={status} note={note} />
+          {nextReference}
+        </>
+      }
     >
       {task.details.trim() || linkLabels.length > 0 || (!waiting && note) ? (
         <div className="space-y-0.5">

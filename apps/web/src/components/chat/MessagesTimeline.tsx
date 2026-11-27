@@ -98,6 +98,7 @@ import {
   resolveTimelineMinimapHitStripWidth,
   TIMELINE_MINIMAP_TARGET_OFFSET,
   timelineTurnFoldRunIdsByEntryId,
+  timelineWaitingReferences,
   liveAnswerPreview,
   type MessagesTimelineRow,
   type TimelineLatestRun,
@@ -1335,6 +1336,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
     onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
     workGroupViewState,
+    waitingReferences: timelineWaitingReferences(rows),
   };
   const compactionAwaitingRow =
     isCompacting &&

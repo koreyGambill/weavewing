@@ -1,4 +1,6 @@
 import * as DateTime from "effect/DateTime";
+import { waitingItemReferenceIndex } from "@t3tools/client-runtime/state/waiting-item-references";
+import type { WaitingReferences } from "./timelineRowContext";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import {
@@ -3086,4 +3088,27 @@ export function sameRowsInput(
     return false;
   }
   return Object.keys(left).length === Object.keys(right).length;
+}
+
+// One index per rows array, so every card in the timeline reads the same one.
+const waitingReferencesByRows = new WeakMap<
+  ReadonlyArray<MessagesTimelineRow>,
+  WaitingReferences
+>();
+
+/** The loaded user messages indexed by the waiting items they speak about, built once per rows. */
+export function timelineWaitingReferences(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): WaitingReferences {
+  const cached = waitingReferencesByRows.get(rows);
+  if (cached !== undefined) return cached;
+  const messages = rows.flatMap((row) =>
+    row.kind === "message" && row.message.role === "user" ? [row.message] : [],
+  );
+  const value: WaitingReferences = {
+    index: waitingItemReferenceIndex(messages),
+    messageOrder: new Map(messages.map((message, index) => [message.id, index])),
+  };
+  waitingReferencesByRows.set(rows, value);
+  return value;
 }

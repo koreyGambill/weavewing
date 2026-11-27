@@ -19,6 +19,7 @@ import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionSta
 import {
   CardReasonForm,
   HelpButton,
+  NextReferenceButton,
   ThreadCard,
   ThreadCardClosedLine,
   ThreadCardHeading,
@@ -192,6 +193,13 @@ export function ThreadQaCard({
       Reopen
     </HelpButton>
   );
+  const nextReference = (
+    <NextReferenceButton
+      item={{ kind: "qa", landingId: landing.id, changeId: change.id }}
+      refLabel={ref}
+      pointers={[qa.messageId, qa.discussedMessageId]}
+    />
+  );
   const note = qa.note.trim();
   const userDismissed = qa.state === "waived" && qa.by !== "agent";
 
@@ -209,6 +217,7 @@ export function ThreadQaCard({
         stackOnNarrow
       >
         <QaStatusBadge status={status} note={note} />
+        {nextReference}
         {reopenButton}
       </ThreadCardClosedLine>
     );
@@ -238,7 +247,12 @@ export function ThreadQaCard({
       waiting={waiting}
       heading={<ThreadCardHeading refLabel={ref} title={title} editable={waiting} />}
       onCollapse={waiting ? undefined : () => setExpanded(false)}
-      controls={<QaStatusBadge status={status} note={note} />}
+      controls={
+        <>
+          <QaStatusBadge status={status} note={note} />
+          {nextReference}
+        </>
+      }
     >
       <p className="px-1.5 text-xs break-words text-muted-foreground">{landedLine}</p>
       <div className="space-y-0.5">

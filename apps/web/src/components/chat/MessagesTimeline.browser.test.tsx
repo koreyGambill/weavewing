@@ -104,6 +104,24 @@ vi.mock(import("~/assets/assetUrls"), async (original) => {
   };
 });
 
+// The task card itself needs a thread workspace; Next reference needs only the timeline around it.
+vi.mock(import("../tasks/ThreadTasksTimelineRow"), async () => {
+  const { NextReferenceButton } = await import("../questions/ThreadCardShell");
+  return {
+    ThreadTasksTimelineRow: ({ taskRefs }: { readonly taskRefs: ReadonlyArray<string> }) => (
+      <div>
+        {taskRefs.map((ref) => (
+          <NextReferenceButton
+            key={ref}
+            item={{ kind: "task", taskId: `task-${ref}` }}
+            refLabel={ref}
+          />
+        ))}
+      </div>
+    ),
+  };
+});
+
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const CREATED_AT = "2026-03-17T19:12:28.000Z";
 
@@ -1971,6 +1989,93 @@ describe("MessagesTimeline sent references", () => {
       await session.send("Emulation.setEmulatedMedia", { features: [] });
     }
   });
+});
+
+describe("MessagesTimeline Next reference", () => {
+  it.each([0, 12])(
+    "walks a card's later messages from the keyboard from row %i, marking each and wrapping",
+    async (cardIndex) => {
+      setup();
+      const threadKey = `environment-local:thread-next-${Math.random().toString(36).slice(2)}`;
+      const reference = {
+        version: 1 as const,
+        kind: "waiting-item" as const,
+        contextId: ComposerContextId.make("waiting-item_task-T1"),
+        label: "T1 · discuss · Rotate the webhook secret",
+        itemKind: "task" as const,
+        key: "task-T1",
+        ref: "T1",
+        title: "Rotate the webhook secret",
+      };
+      const about = (id: string, text: string) =>
+        message(
+          `${formatComposerContextReference(reference)} ${text}`,
+          { context: { version: 1, records: [reference] } },
+          id,
+        );
+      const filler = Array.from({ length: 40 }, (_, index) =>
+        message(`Filler message ${index}\n\n${"More text. ".repeat(40)}`, {}, `filler-${index}`),
+      );
+      const card = {
+        id: "entry-tasks",
+        kind: "thread-tasks",
+        createdAt: CREATED_AT,
+        runId: null,
+        taskRefs: ["T1"],
+      } as Entry;
+      const props = { ...baseProps(), routeThreadKey: threadKey };
+      const session = cdp();
+      await session.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+      });
+      try {
+        await using screen = await renderElement(
+          <MessagesTimeline
+            {...props}
+            timelineEntries={[
+              ...filler.slice(0, cardIndex),
+              card,
+              ...filler.slice(cardIndex, cardIndex + 15),
+              about("first", "Can this wait until Monday?"),
+              ...filler.slice(cardIndex + 15, 30),
+              about("second", "Rotated it."),
+              ...filler.slice(30),
+            ]}
+          />,
+        );
+        const viewport = props.listRef.current!.getScrollableNode()!;
+        const bubble = (id: string) =>
+          document
+            .querySelector(`[data-message-id="${id}"]`)
+            ?.querySelector<HTMLElement>("[data-user-message-bubble]") ?? null;
+        const shownAndMarked = (id: string) => {
+          const element = bubble(id);
+          expect(element?.hasAttribute("data-reference-marked")).toBe(true);
+          const rect = element!.getBoundingClientRect();
+          const view = viewport.getBoundingClientRect();
+          expect(rect.bottom).toBeGreaterThan(view.top);
+          expect(rect.top).toBeLessThan(view.bottom);
+        };
+        props.listRef.current!.scrollToIndex({ index: cardIndex, animated: false });
+        const control = screen.getByRole("button", { name: "Next reference, 1 of 2" });
+        await expect.element(control).toBeVisible();
+        (control.element() as HTMLElement).focus();
+
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => shownAndMarked("first"));
+        const moved = screen.getByRole("button", { name: "Next reference, 2 of 2" });
+        await expect.element(moved).toHaveFocus();
+
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => shownAndMarked("second"));
+        await expect
+          .element(screen.getByRole("button", { name: "Next reference, 1 of 2" }))
+          .toHaveFocus();
+      } finally {
+        await session.send("Emulation.setEmulatedMedia", { features: [] });
+      }
+    },
+  );
 });
 
 describe("MessagesTimeline attachments", () => {

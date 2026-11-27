@@ -97,6 +97,7 @@ import { useTallEnoughToFold } from "./useTallEnoughToFold";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
 import { UserMessageContextReferenceChip } from "./UserMessageContextChips";
+import { useMessageReferenceMark } from "./questionReferenceReveal";
 import { sentContextBlocks } from "@t3tools/shared/sentContext";
 import {
   SentContextBlocks,
@@ -402,6 +403,7 @@ function UserTimelineRow({
   const coarsePointer = useMediaQuery({ pointer: "coarse" });
   const userMessage = resolveUserMessagePresentation(row.message);
   const bookmarks = useMessageBookmarks(ctx.threadRef ?? null, row.message.id);
+  const referenceMarked = useMessageReferenceMark(ctx.threadRef, row.message.id);
   const sender = userMessage.sender;
   const resources = selectMessageImageResources(row.message.attachments);
   const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources);
@@ -890,8 +892,11 @@ function UserTimelineRow({
             !cardBody && !folded && !mediaOnly && !fileCardsOnly && !audioOnly && "p-3",
             folded && "border border-primary/20 bg-primary/5",
             folded && expanded && "w-full",
+            // A card's Next reference shows this message; the colour fades back with no repaint loop.
+            "outline-2 -outline-offset-2 outline-transparent transition-[outline-color] duration-500 data-reference-marked:outline-primary/60",
           )}
           data-user-message-bubble=""
+          data-reference-marked={referenceMarked ? "" : undefined}
         >
           {ctx.threadRef && !cardBody ? (
             <MessageBookmarkMarker threadRef={ctx.threadRef} bookmarks={bookmarks} />
