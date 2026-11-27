@@ -108,7 +108,8 @@ import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as DelegatedTaskQuestionReactor from "./DelegatedTaskQuestionReactor.ts";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
 
 const layerPlatformTest = Layer.merge(
   Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
@@ -356,6 +357,7 @@ const layerProjectionReplayTest = ProjectionReplay.layer.pipe(
 
 const layerTest = Layer.mergeAll(
   layerRuntime,
+  RuntimeLayer.layerThreadWorkspaceProvided,
   layerProjectionReplayTest,
   RuntimeLayer.layerEventSink,
   ProjectStore.layer,
@@ -1892,7 +1894,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
     }).pipe(Effect.provide(Layer.fresh(layerTest))),
   );
 
-  it.effect("resolves delivery intent against the active run and starts after it completes", () =>
+  it.effect("delivers successful steers and requeues declined tracked messages", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -1900,6 +1902,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      const workspace = yield* ThreadWorkspace;
       const threadId = ThreadId.make("runtime-delivery-intent");
       yield* orchestrator.dispatch({
         type: "thread.create",
@@ -2051,6 +2054,76 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       yield* worker.drain();
       assert.include(steerTurn.mock.calls[0]?.[0].message.text, "Tracked as A1");
 
+      yield* workspace.answerAsk({ threadId, id: "A1", text: "The reconnect handler." });
+      yield* workspace.followQuestionDeliveries.pipe(Effect.forkScoped({ startImmediately: true }));
+      steerTurn.mockImplementationOnce((input) =>
+        Effect.fail(
+          new ProviderAdapter.ProviderAdapterSteerDeclinedError({
+            driver,
+            providerThreadId: input.providerThread.id,
+            providerTurnId: input.providerTurnId,
+          }),
+        ),
+      );
+      const declinedId = MessageId.make("runtime-delivery-intent-declined");
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        origin: { kind: "user" },
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-delivery-intent-declined"),
+        threadId,
+        messageId: declinedId,
+        text: "Does a cold restart change the answer?",
+        context: {
+          version: 1,
+          records: [],
+          trackedAsk: { question: "Does a cold restart change the answer?" },
+          discussAnswers: ["A1"],
+        },
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        deliveryIntent: "auto",
+      });
+      yield* worker.drain();
+      assert.include(steerTurn.mock.calls[1]?.[0].message.text, "Tracked as A2");
+      assert.include(steerTurn.mock.calls[1]?.[0].message.text, "About A1");
+      const queued = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
+        (candidate) => candidate.userMessageId === declinedId && candidate.status === "queued",
+      );
+      assert.isDefined(queued);
+      assert.deepEqual(
+        (yield* workspace.get({ threadId })).asks?.map(({ id, state, followUps }) => ({
+          id,
+          state,
+          followUps,
+        })),
+        [
+          { id: "A1", state: "answered", followUps: [] },
+          { id: "A2", state: "queued", followUps: [] },
+        ],
+      );
+      const removed = yield* workspace.changes.pipe(
+        Stream.filterEffect((id) =>
+          Effect.orDie(workspace.get({ threadId })).pipe(
+            Effect.map((value) => id === threadId && !value.asks?.some((ask) => ask.id === "A2")),
+          ),
+        ),
+        Stream.runHead,
+        Effect.forkScoped({ startImmediately: true }),
+      );
+      yield* orchestrator.dispatch({
+        type: "queued-run.cancel",
+        commandId: CommandId.make("runtime-delivery-intent-cancel-declined"),
+        threadId,
+        runId: queued.id,
+      });
+      yield* Fiber.join(removed);
+      assert.deepEqual(
+        (yield* workspace.get({ threadId })).asks?.map(({ id, state }) => ({ id, state })),
+        [{ id: "A1", state: "answered" }],
+      );
+
       yield* eventSink.write({
         commandId: CommandId.make("runtime-delivery-intent-completed"),
         events: [
@@ -2089,7 +2162,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       const restarted = yield* orchestrator.getThreadProjection(threadId);
       assert.deepEqual(
         restarted.runs.map((candidate) => candidate.status),
-        ["completed", "starting"],
+        ["completed", "cancelled", "starting"],
       );
       assert.deepEqual(
         (yield* outbox.listByCommandId(nextCommandId)).map((effect) => effect.request.type),

@@ -544,6 +544,13 @@ export const layer: Layer.Layer<
                   });
                 }),
               ),
+              Effect.tapError((error) =>
+                tracked.length > 0 &&
+                isProviderTurnControlError(error) &&
+                (error.steerDeclined || error.turnCompleted)
+                  ? workspaces.requeueTrackedMessage(input.threadId, message.id)
+                  : Effect.void,
+              ),
             );
         },
         (effect, input) =>

@@ -320,7 +320,7 @@ const layerContextRecordsProvided = ContextRecords.layer.pipe(
 const layerMonitoringSnapshotProvided = MonitoringSnapshot.layer.pipe(
   Layer.provide(layerContextRecordsProvided),
 );
-const layerThreadWorkspaceProvided = ThreadWorkspace.layer.pipe(
+export const layerThreadWorkspaceProvided = ThreadWorkspace.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerOrchestratorProvided,

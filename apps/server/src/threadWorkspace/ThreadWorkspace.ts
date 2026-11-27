@@ -121,6 +121,10 @@ export class ThreadWorkspace extends Context.Service<
       delivered: boolean,
       editing?: boolean,
     ) => Effect.Effect<ReadonlyArray<TrackedAsk>, ThreadWorkspaceError>;
+    readonly requeueTrackedMessage: (
+      threadId: ThreadId,
+      messageId: MessageId,
+    ) => Effect.Effect<void, ThreadWorkspaceError>;
     readonly listRead: (
       input: ThreadListReadInput,
     ) => Effect.Effect<ReadonlyArray<ThreadListEntry>, ThreadWorkspaceError>;
@@ -1000,6 +1004,29 @@ const make = Effect.gen(function* () {
   return ThreadWorkspace.of({
     get,
     recordTrackedMessages,
+    requeueTrackedMessage: Effect.fn("ThreadWorkspace.requeueTrackedMessage")(function* (
+      threadId,
+      messageId,
+    ) {
+      const current = yield* load(threadId);
+      const asks = current.asks ?? [];
+      const next = asks.map((ask): TrackedAsk => {
+        if (ask.askedInMessageId === messageId && ask.state === "owed" && ask.answers.length === 0)
+          return { ...ask, state: "queued" };
+        const followUps = ask.followUps.filter((entry) => entry.messageId !== messageId);
+        if (followUps.length === ask.followUps.length) return ask;
+        const state =
+          ask.state === "owed" &&
+          ask.answers.length > 0 &&
+          ask.followUps.at(-1)?.messageId === messageId
+            ? "answered"
+            : ask.state;
+        return { ...ask, state, followUps };
+      });
+      if (next.some((ask, index) => ask !== asks[index])) {
+        yield* saveAsks(current, { ...current, asks: next });
+      }
+    }, lock.withPermit),
     asksRead: Effect.fn("ThreadWorkspace.asksRead")(function* (input) {
       const all = "all" in input;
       // The history scan reads atomic file snapshots. Checklist repairs belong to the regular load.
