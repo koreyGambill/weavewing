@@ -9,6 +9,7 @@ generated:
 variables:
   T3CODE_PORT: { secret: false }
   T3CODE_WEB_PORT: { secret: false }
+  WEAVEWING_SPARKWING_CHECKOUT: { secret: false }
 commands:
   install:
     argv: [node, scripts/setup-worktree.ts]
@@ -17,10 +18,11 @@ commands:
   build:
     argv: [vp, run, build]
   test:
+    # Linked worktrees share the primary checkout's gate memo.
     argv:
       - sh
       - -c
-      - 'exec sparkwing run test -C "${WEAVEWING_SPARKWING_CHECKOUT:-$PWD}" -- --worktree "$PWD" "$@"'
+      - 'exec sparkwing run test -C "${WEAVEWING_SPARKWING_CHECKOUT:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}" -- --worktree "$PWD" "$@"'
       - test
     description: Run the admitted changed-files landing checks
   suite:

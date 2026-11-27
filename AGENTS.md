@@ -19,7 +19,7 @@ Weavewing is a public fork of T3 Code, a GUI for coding agents. The repository i
 
 ## Verifying
 
-- A landing is gated by `xwing app test` (format, lint, knip, typecheck, and the tests near the changed files), focused tests with `vp test run <files>` (add `-t "<name>"` for big files), and review. Full suites do not gate a landing, so do not run one before landing. A fix for a broken default branch or gate may land on its focused proof alone, with the review following.
+- A landing is gated by `xwing app test` (format, lint, knip, typecheck, and the tests near the changed files), focused tests with `xwing app test -- --files <files>`, and review. Full suites do not gate a landing, so do not run one before landing. A fix for a broken default branch or gate may land on its focused proof alone, with the review following.
 - A test-channel (nightly) release is gated by the release pipeline's own preflight tests and smoke checks: the release builds, the clean-bundle check, and the per-platform CLI and native artifact smoke checks. It runs full CI only when `--force-ci` is passed.
 - A stable release is gated by the full Sparkwing `ci` pipeline, which the release pipeline runs itself or accepts from a matching receipt. See [Weavewing release](docs/operations/weavewing-release.md). When asked to run a full suite, use `xwing app run --command suite -- --suite web` (or `server` or `packages`). Use `--full` in place of `--suite web` to run all three in sequence.
 - While iterating, run focused tests and `vp run typecheck`. The checker is `effect-tsgo`; there is no `typescript` package to run.

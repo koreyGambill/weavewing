@@ -32,6 +32,7 @@ definePipeline({
     }
 
     p.job("test", async (ctx) => {
+      if (ctx.args.ref) throw new Error("Use --ref with the changed-files gate and omit --files");
       const co = checkout(ctx);
       const files = (ctx.args.files ?? "").split(",").map((file) => file.trim()).filter(Boolean);
       if (files.length === 0) throw new Error("--files names no test files");

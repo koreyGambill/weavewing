@@ -225,14 +225,16 @@ local pass does not promise a green full CI run.
 
 Sparkwing pipelines in `.sparkwing/` run these checks under the machine's admission control, so
 checks started from several checkouts queue instead of overloading the machine.
-`xwing app test` runs Sparkwing's `test` pipeline, which calls `gate` for changed files. To reuse a
-pass across checkouts, set `WEAVEWING_SPARKWING_CHECKOUT` to the same absolute pipeline checkout in
-both invocations. Sparkwing shares memo records within that checkout and branch. The gate also
-requires matching inputs, including the comparison base, install state and ignored generated files.
+`xwing app test` runs Sparkwing's `test` pipeline, which calls `gate` for changed files.
+Linked worktrees use their primary checkout's pipeline definitions and share its memo records.
+Set `WEAVEWING_SPARKWING_CHECKOUT` to the absolute pipeline checkout to test a branch's pipeline changes
+before landing or to share a pass with a fresh clone. Use the same pipeline checkout for both runs.
+Memo hits require matching inputs, including the comparison base, environment, install state and ignored
+files the checks can read. The gate clears the calling thread's ID for the checked command and its memo.
 Its key skips installed package files and ignored build, cache and state directories such as `dist`.
 Run `vp i` after editing inside `node_modules`. To bypass memo when a check reads one of those
 directories, use `sparkwing run gate -C <pipeline checkout> --no-memo -- --worktree <checkout>`.
-For an admitted focused test, use `sparkwing run test -- --worktree "$PWD" --files <files>`.
+For admitted focused tests, use `xwing app test -- --files <files>` with comma-separated file paths.
 
 `xwing app run --command suite -- --suite web` runs one full suite as CI
 does (`web`, `server` or `packages`), when someone needs one, and reports every failing file or package.

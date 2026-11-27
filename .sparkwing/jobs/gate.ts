@@ -48,7 +48,8 @@ function pipelineDepsMatchLockfile(root: string): boolean {
 const CHECK_CHANGED_CONCURRENCY = String(GATE_CORES);
 
 /** The environment check:changed runs with, which the key covers. */
-const checksEnv = (co: Checkout) => ({ ...process.env, ...co.env, CHECK_CHANGED_CONCURRENCY });
+const checkChangedEnv = { CHECK_CHANGED_CONCURRENCY, T3CODE_THREAD_ID: "" };
+const checksEnv = (co: Checkout) => ({ ...process.env, ...co.env, ...checkChangedEnv });
 
 definePipeline({
   name: "Gate",
@@ -95,9 +96,7 @@ definePipeline({
       const before: CheckChangedInputs = NodeFS.existsSync(keyFile(co.evidence))
         ? JSON.parse(NodeFS.readFileSync(keyFile(co.evidence), "utf8"))
         : checkChangedInputs(co.root, base, checksEnv(co));
-      const log = await logged(ctx, co, "check-changed", ["vp", "run", "check:changed", ...(ref ? [ref] : [])], {
-        CHECK_CHANGED_CONCURRENCY,
-      });
+      const log = await logged(ctx, co, "check-changed", ["vp", "run", "check:changed", ...(ref ? [ref] : [])], checkChangedEnv);
       const after = checkChangedInputs(co.root, base, checksEnv(co));
       if (after.sources !== before.sources)
         throw new Error("The worktree changed during the gate, so this pass is not recorded; rerun the gate.");
