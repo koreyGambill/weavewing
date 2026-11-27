@@ -1,4 +1,16 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ServerConfig from "../config.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
+import * as XwingOperations from "../xwing/XwingOperations.ts";
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
+import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -28,6 +40,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  XwingEnvironmentId,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
@@ -94,6 +107,12 @@ const decodeScheduleTask = Schema.decodeEffect(OrchestratorMcpScheduleTaskInput)
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(ThreadMarks.layerTest),
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(
+    Layer.merge(
+      Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+    ),
+  ),
   Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
@@ -2340,6 +2359,12 @@ describe("OrchestratorMcpService provider resolution", () => {
             OrchestratorMcpService.layer.pipe(
               Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
               Layer.provide(
+                Layer.merge(
+                  Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+                  Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+                ),
+              ),
+              Layer.provide(
                 Layer.mock(GitVcsDriver.GitVcsDriver)({
                   execute: () =>
                     Effect.succeed({
@@ -2720,7 +2745,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
-  it.effect.each(["xwing", "off"] as const)(
+  it.effect.each(["off"] as const)(
     "refuses worktree isolation when worktreeProvider is %s",
     (worktreeProvider) =>
       Effect.gen(function* () {
@@ -2766,6 +2791,208 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.notInclude(refused.message, "t3_xwing_environment_list");
           assert.notInclude(refused.message, "workspaceStrategy");
         }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+      }),
+  );
+
+  it.effect.each([
+    { case: "an accepted delegation binds its own environment", outcome: "accepted" },
+    { case: "a retried accepted delegation makes no second environment", outcome: "retried" },
+    { case: "a rejected delegation removes the environment it made", outcome: "rejected" },
+    {
+      case: "a rejected retry keeps the environment an earlier attempt made",
+      outcome: "rejected",
+      reused: true,
+    },
+    { case: "an ambiguous failure keeps the environment and its hold", outcome: "ambiguous" },
+    { case: "an unusable checkout removes the environment", outcome: "no-checkout" },
+  ] as const)(
+    "isolates a child in an Xwing environment under worktreeProvider xwing: $case",
+    ({ outcome, ...options }) =>
+      Effect.gen(function* () {
+        const xwingEnvironmentId = XwingEnvironmentId.make("c0ffee0123456789");
+        const prepared: Array<unknown> = [];
+        const discarded: Array<unknown> = [];
+        const holds: Array<string> = [];
+        const commands: Array<OrchestrationV2ServerCommand> = [];
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          origin: "app_owned",
+          childThreadId,
+          providerInstanceId: codexInstanceId,
+          model: "gpt-5.4",
+          status: "running",
+          result: null,
+        };
+        const checkout = {
+          xwingEnvironmentId,
+          repositorySource: "/repo",
+          checkoutPath: "/xwing/envs/7/repo",
+          number: 7,
+          name: "Build it in isolation",
+        };
+        const layerEnvironments = DevelopmentEnvironments.layer.pipe(
+          Layer.provide(DevelopmentEnvironmentHolds.layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(XwingOperations.XwingOperations)({
+                registerHold: (hold) =>
+                  Effect.sync(() => {
+                    holds.push(hold.key);
+                    return { result: "created" } as never;
+                  }),
+              }),
+              Layer.mock(ServerEnvironmentIdentity)({
+                getEnvironmentId: Effect.succeed(EnvironmentId.make("server-environment")),
+              }),
+              Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
+                resolve: () =>
+                  outcome === "no-checkout"
+                    ? Effect.fail(
+                        new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutUnavailableError(
+                          { xwingEnvironmentId, reason: "checkout-missing" },
+                        ),
+                      )
+                    : Effect.succeed({ ...checkout, branch: "t3code/build-it" }),
+              }),
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/projects",
+              }),
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+              Layer.mock(TerminalManager.TerminalManager)({}),
+              Layer.mock(WorkspacePaths.WorkspacePaths)({}),
+              ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-xwing-delegation-" }),
+            ),
+          ),
+        );
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(outcome === "retried"),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(commands.length > 0 ? [task] : [])
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Effect.gen(function* () {
+                commands.push(command);
+                if (outcome === "rejected")
+                  return yield* new Orchestrator.OrchestratorCommandRejectedError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                  });
+                if (outcome === "ambiguous")
+                  return yield* new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: new Error("lost after commit"),
+                  });
+                return {
+                  sequence: 1,
+                  storedEvents: [{ event: { type: "subagent.updated", payload: task } }],
+                } as never;
+              }),
+          }),
+          ServerSettings.layerTest({ worktreeProvider: "xwing" }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () => Effect.succeedSome({ title: "Repo", workspaceRoot: "/repo" } as never),
+          }),
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            resolveCommit: () => Effect.succeed({ commitSha: "abc123" } as never),
+          }),
+          Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({
+            prepareLaunch: (input) =>
+              Effect.sync(() => {
+                prepared.push(input);
+                return { xwingEnvironmentId, created: options.reused !== true };
+              }),
+            discardLaunch: (input) => Effect.sync(() => void discarded.push(input)),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const delegation = yield* service
+            .delegateTask(scope, {
+              task: "Build it in isolation.",
+              isolation: "worktree",
+              mode: "async",
+              clientRequestId: "delegate-xwing",
+            })
+            .pipe(Effect.exit);
+          assert.equal(Exit.isSuccess(delegation), outcome === "accepted" || outcome === "retried");
+          const command = commands[0];
+          if (outcome === "retried") {
+            assert.deepEqual(prepared, []);
+            assert.deepEqual(holds, []);
+            assert.equal(command?.type === "delegated_task.request", true);
+            if (command?.type === "delegated_task.request") {
+              assert.isUndefined(command.workspaceStrategy);
+              assert.isUndefined(command.developmentEnvironment);
+            }
+            return;
+          }
+          const launchKey = (prepared[0] as { readonly launchKey: string } | undefined)?.launchKey;
+          assert.deepEqual(prepared, [
+            {
+              projectId,
+              launchKey,
+              title: "Build it in isolation.",
+              baseRef: "abc123",
+              startFromOrigin: false,
+            },
+          ]);
+          if (outcome === "no-checkout") {
+            assert.deepEqual(commands, []);
+            assert.deepEqual(
+              discarded.map((entry) => (entry as { hold: { threadId: string } }).hold.threadId),
+              [launchKey],
+            );
+            return;
+          }
+          assert.equal(command?.type, "delegated_task.request");
+          if (command?.type !== "delegated_task.request") return;
+          const hold = {
+            threadId: IdAllocator.derive.delegatedTaskThread({ commandId: command.commandId }),
+            period: command.commandId,
+          };
+          // The environment is named for the child thread the orchestrator will create.
+          assert.equal(launchKey, hold.threadId);
+          assert.deepEqual(command.workspaceStrategy, {
+            type: "existing_worktree",
+            worktreePath: "/xwing/envs/7/repo",
+            branch: "t3code/build-it",
+          });
+          assert.deepEqual(command.developmentEnvironment, checkout);
+          assert.deepEqual(holds, [DevelopmentEnvironmentHolds.holdKey(hold)]);
+          assert.deepEqual(
+            discarded,
+            outcome === "rejected" && options.reused !== true ? [{ xwingEnvironmentId, hold }] : [],
+          );
+        }).pipe(
+          Effect.provide(
+            OrchestratorMcpService.layer.pipe(
+              Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+              Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
+              Layer.provide(layerEnvironments),
+              Layer.provide(layerDependencies),
+            ),
+          ),
+        );
       }),
   );
 
@@ -3066,6 +3293,12 @@ describe("OrchestratorMcpService provider resolution", () => {
             OrchestratorMcpService.layer.pipe(
               Layer.provide(ThreadMarks.layerTest),
               Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+              Layer.provide(
+                Layer.merge(
+                  Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+                  Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+                ),
+              ),
               Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
               Layer.provide(
                 Layer.mock(ThreadWorkspace.ThreadWorkspace)({
@@ -3858,6 +4091,12 @@ describe("OrchestratorMcpService provider resolution", () => {
         Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
         Layer.provide(
+          Layer.merge(
+            Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+            Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+          ),
+        ),
+        Layer.provide(
           Layer.mock(GitVcsDriver.GitVcsDriver)({
             resolvePrimaryRemoteName: () => Effect.succeed("origin"),
             resolveDefaultBranchName: () => Effect.succeed("main"),
@@ -4127,6 +4366,12 @@ describe("OrchestratorMcpService provider resolution", () => {
             OrchestratorMcpService.layer.pipe(
               Layer.provide(ThreadMarks.layerTest),
               Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+              Layer.provide(
+                Layer.merge(
+                  Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+                  Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+                ),
+              ),
               Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
               Layer.provide(
                 Layer.mock(GitVcsDriver.GitVcsDriver)({
@@ -4365,6 +4610,12 @@ describe("OrchestratorMcpService provider resolution", () => {
       OrchestratorMcpService.layer.pipe(
         Layer.provide(ThreadMarks.layerTest),
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(
+          Layer.merge(
+            Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+            Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+          ),
+        ),
         Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(git)),
         Layer.provide(

@@ -123,6 +123,7 @@ import {
   runOutcome,
 } from "../orchestration-v2/RestartBackgroundNote.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { dispatchWasNotAccepted } from "../orchestration-v2/ThreadMessageIntake.ts";
 import * as ThreadReplies from "../orchestration-v2/ThreadReplies.ts";
 import { placeholderThreadTitle } from "../orchestration-v2/placeholderThreadTitle.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -135,6 +136,9 @@ import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { readWorktreeProvider } from "../git/worktreeProvider.ts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   clientModeCeiling,
   type McpInvocationScope,
@@ -1413,6 +1417,9 @@ const make = Effect.gen(function* () {
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
   const threadWorkspace = yield* ThreadWorkspace.ThreadWorkspace;
   const threadMarks = yield* ThreadMarks.ThreadMarks;
+  const environmentLifecycle =
+    yield* DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
+  const developmentEnvironments = yield* DevelopmentEnvironments.DevelopmentEnvironments;
   const withParentPreamble = Effect.fn("OrchestratorMcpService.withParentPreamble")(function* (
     parentThreadId: ThreadId,
     task: string,
@@ -1534,6 +1541,82 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+
+  /**
+   * The Xwing environment an isolated child works in, named from its thread id so a retry finds
+   * it. `bind` dispatches the delegation holding the environment for the child, and removes an
+   * environment this call made when the delegation was not accepted.
+   */
+  const prepareChildEnvironment = Effect.fn("OrchestratorMcpService.prepareChildEnvironment")(
+    function* (input: {
+      readonly projectId: ProjectId;
+      readonly childThreadId: ThreadId;
+      readonly commandId: CommandId;
+      readonly title: string;
+      readonly baseRef: string;
+    }) {
+      const prepared = yield* environmentLifecycle
+        .prepareLaunch({
+          projectId: input.projectId,
+          launchKey: input.childThreadId,
+          title: input.title,
+          baseRef: input.baseRef,
+          startFromOrigin: false,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            failure(
+              "orchestration_error",
+              `Unable to create the child's Xwing environment: ${error.message}`,
+            ),
+          ),
+        );
+      const discard = prepared.created
+        ? environmentLifecycle.discardLaunch({
+            xwingEnvironmentId: prepared.xwingEnvironmentId,
+            hold: { threadId: input.childThreadId, period: input.commandId },
+          })
+        : Effect.void;
+      const workspace = yield* developmentEnvironments
+        .resolveLaunchWorkspace({
+          projectId: input.projectId,
+          xwingEnvironmentId: prepared.xwingEnvironmentId,
+        })
+        .pipe(
+          Effect.tapError(() => discard),
+          Effect.mapError((error) =>
+            failure(
+              "orchestration_error",
+              `Unable to use the child's Xwing environment: ${error.message}`,
+            ),
+          ),
+        );
+      const bind = (
+        dispatch: ReturnType<
+          ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
+        >,
+      ) =>
+        developmentEnvironments
+          .bindLaunch(
+            {
+              xwingEnvironmentId: prepared.xwingEnvironmentId,
+              threadId: input.childThreadId,
+              commandId: input.commandId,
+              title: input.title,
+            },
+            dispatch,
+          )
+          .pipe(
+            Effect.tapError((error) =>
+              error._tag === "DevelopmentEnvironmentCheckoutUnavailableError" ||
+              dispatchWasNotAccepted(error)
+                ? discard
+                : Effect.void,
+            ),
+          );
+      return { workspace, bind };
+    },
+  );
 
   const projectDefaultModelSelection = Effect.fn(
     "OrchestratorMcpService.projectDefaultModelSelection",
@@ -3283,13 +3366,13 @@ const make = Effect.gen(function* () {
       if (!isRetryOfAcceptedDelegation) {
         yield* admitSubagent(scope.thread.threadId, target.modelSelection);
       }
-      let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
+      let isolation: { readonly base: string; readonly xwing: boolean } | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const worktreeProvider = yield* readWorktreeProvider(serverSettings);
-        if (worktreeProvider !== "t3") {
+        if (worktreeProvider === "off") {
           return yield* failure(
             "invalid_request",
-            `Cannot start the requested isolated child under the \`worktreeProvider\` server setting (${worktreeProvider}). To allow isolated delegation, select T3 worktrees in Settings → Worktrees.`,
+            `Cannot start the requested isolated child under the \`worktreeProvider\` server setting (${worktreeProvider}). To allow isolated delegation, select T3 worktrees or Xwing environments in Settings → Worktrees.`,
           );
         }
         const project = yield* requireProject(parent.thread.projectId);
@@ -3321,21 +3404,27 @@ const make = Effect.gen(function* () {
               ),
             );
         }
-        workspaceStrategy = {
-          type: "worktree",
-          baseRef: base.commitSha,
-          startFromOrigin: false,
-        };
+        isolation = { base: base.commitSha, xwing: worktreeProvider === "xwing" };
       }
       const context =
         input.context === undefined
           ? undefined
-          : yield* resolveTaskContext(
-              scope,
-              parent,
-              input.context,
-              workspaceStrategy?.type === "worktree" ? workspaceStrategy.baseRef : undefined,
-            );
+          : yield* resolveTaskContext(scope, parent, input.context, isolation?.base);
+      // Prepared after every check that can refuse the task, so a refusal leaves no environment.
+      const childEnvironment = isolation?.xwing
+        ? yield* prepareChildEnvironment({
+            projectId: parent.thread.projectId,
+            childThreadId: IdAllocator.derive.delegatedTaskThread({ commandId }),
+            commandId,
+            title: input.title ?? input.task,
+            baseRef: isolation.base,
+          })
+        : undefined;
+      const workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined =
+        childEnvironment?.workspace.workspaceStrategy ??
+        (isolation === undefined
+          ? undefined
+          : { type: "worktree", baseRef: isolation.base, startFromOrigin: false });
       const withContextNote = (
         response: OrchestratorMcpDelegateTaskResult,
       ): OrchestratorMcpDelegateTaskResult =>
@@ -3345,45 +3434,49 @@ const make = Effect.gen(function* () {
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its
       // receipt-replay exemption, so no separate assert runs here.
-      const result = yield* threadManagement
-        .dispatch({
-          type: "delegated_task.request",
-          createdBy: "agent",
-          creationSource: "mcp",
-          commandId,
-          parentThreadId: scope.thread.threadId,
-          parentRunId: parentRun.id,
-          parentNodeId: parentRun.rootNodeId,
-          task: [
-            taskPrompt({
-              ...input,
-              task: yield* withParentPreamble(scope.thread.threadId, input.task),
-            }),
-            ...(context === undefined ? [] : [context.note]),
-          ].join("\n\n"),
-          ...(input.title === undefined ? {} : { title: input.title }),
-          modelSelection: target.modelSelection,
-          runtimeMode,
-          interactionMode,
-          ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-          ...(context === undefined ? {} : { contextSource: context.contextSource }),
-          // Async delegations wake the parent on every child terminal; wait
-          // delegations deliver through the blocking tool call until `awaitTask`
-          // gives up the wait (timeout, cancelled call) and upgrades the wake.
-          completionWake: input.mode === "wait" ? "settled_only" : "always",
-          ...(input.group === undefined ? {} : { completionGroup: input.group }),
-          ...storedDelegateRole(input.role),
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            error._tag === "ThreadManagementProviderInstanceDisabledError"
-              ? threadManagementFailure(error)
-              : failure(
-                  "orchestration_error",
-                  `Unable to create delegated task: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                ),
-          ),
-        );
+      const dispatch = threadManagement.dispatch({
+        type: "delegated_task.request",
+        createdBy: "agent",
+        creationSource: "mcp",
+        commandId,
+        parentThreadId: scope.thread.threadId,
+        parentRunId: parentRun.id,
+        parentNodeId: parentRun.rootNodeId,
+        task: [
+          taskPrompt({
+            ...input,
+            task: yield* withParentPreamble(scope.thread.threadId, input.task),
+          }),
+          ...(context === undefined ? [] : [context.note]),
+        ].join("\n\n"),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        modelSelection: target.modelSelection,
+        runtimeMode,
+        interactionMode,
+        ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
+        ...(childEnvironment === undefined
+          ? {}
+          : { developmentEnvironment: childEnvironment.workspace.developmentEnvironment }),
+        ...(context === undefined ? {} : { contextSource: context.contextSource }),
+        // Async delegations wake the parent on every child terminal; wait
+        // delegations deliver through the blocking tool call until `awaitTask`
+        // gives up the wait (timeout, cancelled call) and upgrades the wake.
+        completionWake: input.mode === "wait" ? "settled_only" : "always",
+        ...(input.group === undefined ? {} : { completionGroup: input.group }),
+        ...storedDelegateRole(input.role),
+      });
+      const result = yield* (
+        childEnvironment === undefined ? dispatch : childEnvironment.bind(dispatch)
+      ).pipe(
+        Effect.mapError((error) =>
+          error._tag === "ThreadManagementProviderInstanceDisabledError"
+            ? threadManagementFailure(error)
+            : failure(
+                "orchestration_error",
+                `Unable to create delegated task: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
+              ),
+        ),
+      );
       const taskEvent = result.storedEvents.find(
         (stored) =>
           stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
@@ -4376,4 +4469,6 @@ export const layer: Layer.Layer<
   | SecretRequests.SecretRequests
   | ServerSettings.ServerSettingsService
   | RemoteDelegation.RemoteDelegation
+  | DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle
+  | DevelopmentEnvironments.DevelopmentEnvironments
 > = Layer.effect(OrchestratorMcpService, make);

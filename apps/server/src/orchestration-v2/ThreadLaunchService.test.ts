@@ -1588,6 +1588,63 @@ it.effect("removes the Xwing environment it made when the launch is not accepted
   }).pipe(Effect.provide(intake.layer));
 });
 
+it.effect(
+  "prepares a delegated child in the Xwing checkout its delegation binds, without T3 setup",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const parent = yield* launches.launch(
+        launchInput({
+          command: "command:xwing-parent",
+          thread: "thread:xwing-parent",
+          message: "lead",
+        }),
+      );
+      const parentRun = parent.projection.runs[0]!;
+      const checkout = {
+        xwingEnvironmentId: "0123abcd",
+        repositorySource: "/repo",
+        checkoutPath: "/xwing/envs/4/repo",
+        number: 4,
+        name: "child",
+      };
+      const commandId = CommandId.make("command:xwing-delegate");
+      yield* threads.dispatch({
+        type: "delegated_task.request",
+        commandId,
+        parentThreadId: parent.threadId,
+        parentRunId: parentRun.id,
+        parentNodeId: parentRun.rootNodeId!,
+        task: "Work in the environment",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: {
+          type: "existing_worktree",
+          worktreePath: checkout.checkoutPath,
+          branch: "feature/xwing",
+        },
+        developmentEnvironment: checkout,
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const task = (yield* threads.getThreadProjection(parent.threadId)).subagents[0]!;
+      const childThreadId = task.childThreadId!;
+      const childRun = (yield* threads.getThreadProjection(childThreadId)).runs[0]!;
+      yield* launches.prepareRun({ commandId, threadId: childThreadId, runId: childRun.id });
+      const child = yield* preparationSettled(childThreadId);
+      assert.equal(child.runs[0]?.status, "starting");
+      assert.equal(child.thread.worktreePath, checkout.checkoutPath);
+      assert.equal(child.thread.branch, "feature/xwing");
+      assert.equal(child.thread.developmentEnvironment?.xwingEnvironmentId, "0123abcd");
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+      assert.equal(harness.runSetup.mock.calls.length, 0);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
 it.effect.each(
   (["t3", "xwing", "off"] as const).flatMap((worktreeProvider) => [
     { scratch: true, worktreeProvider },

@@ -3,6 +3,7 @@ import {
   CheckpointId,
   CheckpointScopeId,
   CommandId,
+  EnvironmentId,
   NodeId,
   ProjectId,
   ProviderInstanceId,
@@ -14,6 +15,8 @@ import {
   RuntimeRequestId,
   ThreadId,
   VcsProcessExitError,
+  XwingEnvironmentId,
+  XwingUnavailableError,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -44,6 +47,9 @@ import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationServic
 import * as MessageSummaryService from "./MessageSummaryService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
+import * as XwingOperations from "../xwing/XwingOperations.ts";
 
 const threadId = ThreadId.make("thread:effect-worker-restart");
 const oldSessionId = ProviderSessionId.make("provider-session:effect-worker-restart:old");
@@ -94,6 +100,7 @@ function layerExecutorFor(input: {
   readonly interrupt?: ProviderTurnControlService.ProviderTurnControlServiceV2Shape["interrupt"];
   readonly rollback?: CheckpointRollbackService.CheckpointRollbackServiceV2Shape["execute"];
   readonly respond?: RuntimeRequestService.RuntimeRequestServiceV2["Service"]["respond"];
+  readonly holds?: Layer.Layer<DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds>;
 }) {
   const record = (event: string) => Ref.update(input.events, (events) => [...events, event]);
   const layerDependencies = Layer.mergeAll(
@@ -180,6 +187,7 @@ function layerExecutorFor(input: {
         ServerSettings.layerTest(
           input.continueAfterRestart === true ? { continueThreadsAfterServerUpdate: true } : {},
         ),
+        input.holds ?? Layer.mock(DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds)({}),
       ),
     ),
   );
@@ -838,5 +846,88 @@ it.effect.each([3, 4])(
         yield* Ref.get(events),
         processLossCount > 3 ? ["recover-child"] : ["dispatch", "recover-child"],
       );
+    }),
+);
+
+it.effect.each(["available", "unavailable"] as const)(
+  "releasing a thread's environment holds removes only this server's holds for that thread, and repeats harmlessly (Xwing %s)",
+  (xwing) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const environmentId = XwingEnvironmentId.make("c0ffee0123456789");
+      const owner = DevelopmentEnvironmentHolds.holdOwner("server-environment");
+      const child = ThreadId.make("thread:effect-worker-child");
+      const hold = (holder: string, holdThread: string, period: string) => ({
+        environmentId,
+        owner: holder,
+        key: DevelopmentEnvironmentHolds.holdKey({ threadId: holdThread, period }),
+        label: "T3 Code: child",
+        createdAt: "now",
+        updatedAt: "now",
+        environmentStatus: "active" as const,
+      });
+      const kept = [
+        hold(owner, "thread:effect-worker-sibling", "delegate-2"),
+        hold("t3-server-other", child, "delegate-1"),
+      ];
+      let held = [hold(owner, child, "delegate-1"), hold(owner, child, "select-1"), ...kept];
+      const releases: Array<string> = [];
+      const unavailable = new XwingUnavailableError({ command: "xwing", cause: "spawn ENOENT" });
+      const operations = Layer.mock(XwingOperations.XwingOperations)({
+        listHolds: (input) =>
+          xwing === "unavailable"
+            ? Effect.fail(unavailable)
+            : Effect.sync(() =>
+                held.filter(
+                  (entry) => entry.environmentId === input.id && entry.owner === input.owner,
+                ),
+              ),
+        releaseHold: (input) =>
+          Effect.sync(() => {
+            releases.push(input.key);
+            held = held.filter((entry) => entry.owner !== input.owner || entry.key !== input.key);
+            return {
+              ...input,
+              environmentId,
+              environmentStatus: "active" as const,
+              result: "released" as const,
+            };
+          }),
+      });
+      const layer = layerExecutorFor({
+        events: yield* Ref.make<ReadonlyArray<string>>([]),
+        holds: DevelopmentEnvironmentHolds.layer.pipe(
+          Layer.provide(
+            Layer.merge(
+              operations,
+              Layer.mock(ServerEnvironmentIdentity)({
+                getEnvironmentId: Effect.succeed(EnvironmentId.make("server-environment")),
+              }),
+            ),
+          ),
+        ),
+      });
+      const release = {
+        ...restartEffect(now, { type: "detach" }),
+        threadId: child,
+        request: {
+          type: "development-environment.release-holds" as const,
+          xwingEnvironmentId: environmentId,
+        },
+      };
+      yield* Effect.gen(function* () {
+        const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+        yield* executor.execute(release);
+        yield* executor.execute(release);
+      }).pipe(Effect.provide(layer));
+      if (xwing === "unavailable") {
+        assert.deepEqual(releases, []);
+        return;
+      }
+      assert.deepEqual(releases, [
+        DevelopmentEnvironmentHolds.holdKey({ threadId: child, period: "delegate-1" }),
+        DevelopmentEnvironmentHolds.holdKey({ threadId: child, period: "select-1" }),
+      ]);
+      assert.deepEqual(held, kept);
     }),
 );

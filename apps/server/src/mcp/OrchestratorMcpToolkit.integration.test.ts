@@ -1,4 +1,6 @@
 import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginText";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -63,6 +65,12 @@ const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
 
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(
+    Layer.merge(
+      Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
+    ),
+  ),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 

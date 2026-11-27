@@ -624,7 +624,14 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
   }),
 );
 
+const layerXwingOperations = XwingOperations.layer.pipe(Layer.provide(ProcessRunner.layer));
+// One instance: binding, cleanup and the effect worker's releases serialize on its per-environment lock.
+const layerDevelopmentEnvironmentHolds = DevelopmentEnvironmentHolds.layer.pipe(
+  Layer.provide(layerXwingOperations),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  Layer.provide(layerDevelopmentEnvironmentHolds),
   Layer.provide(UsageLimitSources.layerResetFallback),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
@@ -637,12 +644,6 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
       Layer.provide(RuntimeLayer.layerProjectService),
     ),
   ),
-);
-
-const layerXwingOperations = XwingOperations.layer.pipe(Layer.provide(ProcessRunner.layer));
-// One instance: binding and cleanup serialize on its per-environment lock.
-const layerDevelopmentEnvironmentHolds = DevelopmentEnvironmentHolds.layer.pipe(
-  Layer.provide(layerXwingOperations),
 );
 
 const layerOrchestrationApplication = Layer.mergeAll(

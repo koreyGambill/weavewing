@@ -1,6 +1,7 @@
 import {
   DevelopmentEnvironmentCheckoutUnavailableError,
   XwingEnvironmentId,
+  type XwingOperationError,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- hold keys are pure digests cleanup recomputes.
@@ -71,6 +72,15 @@ export class DevelopmentEnvironmentHolds extends Context.Service<
       xwingEnvironmentId: string,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
+    /**
+     * Releases every hold this server owns on the environment for `threadId`, whichever binding
+     * registered it. Releasing holds already gone succeeds, and so does an unreachable Xwing:
+     * environment cleanup can still release what remains.
+     */
+    readonly releaseThread: (input: {
+      readonly xwingEnvironmentId: XwingEnvironmentId;
+      readonly threadId: string;
+    }) => Effect.Effect<void, XwingOperationError>;
   }
 >()("t3/developmentEnvironments/DevelopmentEnvironmentHolds") {}
 
@@ -123,10 +133,33 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const releaseThread: DevelopmentEnvironmentHolds["Service"]["releaseThread"] = Effect.fn(
+    "DevelopmentEnvironmentHolds.releaseThread",
+  )(
+    function* ({ xwingEnvironmentId: id, threadId }) {
+      const ownHolds = yield* owner;
+      yield* locks.withLock(
+        id,
+        Effect.gen(function* () {
+          const held = yield* operations.listHolds({ id, owner: ownHolds });
+          for (const hold of held) {
+            if (holdThread(hold.key, [threadId]) === null) continue;
+            yield* operations.releaseHold({ id, owner: ownHolds, key: hold.key });
+          }
+        }),
+      );
+    },
+    Effect.catchTags({
+      XwingUnavailableError: (cause) =>
+        Effect.logWarning("Xwing was unavailable to release a thread's holds", cause),
+    }),
+  );
+
   return DevelopmentEnvironmentHolds.of({
     owner,
     retain,
     exclusive: locks.withLock,
+    releaseThread,
   });
 });
 

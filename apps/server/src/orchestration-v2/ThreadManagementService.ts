@@ -142,8 +142,11 @@ export function withCreationProvenance(
       return { ...rest, ...provenance };
     }
     case "thread.merge_back":
-    case "delegated_task.request":
       return { ...command, ...provenance };
+    case "delegated_task.request": {
+      const { developmentEnvironment: _developmentEnvironment, ...rest } = command;
+      return { ...rest, ...provenance };
+    }
     default:
       return command;
   }

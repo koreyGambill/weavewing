@@ -15,6 +15,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  XwingEnvironmentId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -141,6 +142,11 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     reason: Schema.optional(Schema.String),
   }),
   Schema.Struct({ type: Schema.Literal("message-summary.generate"), messageId: MessageId }),
+  // Releases this server's holds on the environment that name the effect's thread.
+  Schema.Struct({
+    type: Schema.Literal("development-environment.release-holds"),
+    xwingEnvironmentId: XwingEnvironmentId,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -157,6 +163,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "thread-title.generate",
   "delegated-tasks.stop",
   "message-summary.generate",
+  "development-environment.release-holds",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

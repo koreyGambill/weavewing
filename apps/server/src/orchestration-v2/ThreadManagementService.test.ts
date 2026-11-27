@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2Run,
   type OrchestrationV2ProviderThread,
@@ -126,6 +127,32 @@ it("stamps authoritative provenance on commands that create threads or messages"
       { createdBy: "user", creationSource: "web" },
     ),
   ).not.toHaveProperty("workspaceChange");
+  expect(
+    ThreadManagementService.withCreationProvenance(
+      {
+        type: "delegated_task.request",
+        commandId: CommandId.make("command:forged-checkout"),
+        parentThreadId: ThreadId.make("thread:thread-management:create"),
+        parentRunId: RunId.make("run:forged-checkout"),
+        parentNodeId: NodeId.make("node:forged-checkout"),
+        task: "Work in someone else's checkout",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: { type: "existing_worktree", worktreePath: "/elsewhere" },
+        developmentEnvironment: {
+          xwingEnvironmentId: "c0ffee0123456789",
+          repositorySource: "/elsewhere",
+          checkoutPath: "/elsewhere",
+          number: null,
+          name: "Not this client's to bind",
+        },
+        createdBy: "agent",
+        creationSource: "mcp",
+      },
+      { createdBy: "user", creationSource: "web" },
+    ),
+  ).not.toHaveProperty("developmentEnvironment");
   expect(stamped).not.toHaveProperty("initialMessage");
 });
 

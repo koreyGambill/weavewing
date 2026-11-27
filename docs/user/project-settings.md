@@ -296,10 +296,11 @@ are, and cleanup covers both the default folder and the custom one.
 
 **Settings → Worktrees → Isolated checkouts** decides what happens on this machine when a thread,
 agent or pull request asks for its own checkout. **T3 worktrees** is the default. **Xwing
-environments** gives each new isolated thread its own Xwing environment instead, and the composer
+environments** gives each new isolated thread, and each delegated task with worktree isolation, its
+own Xwing environment instead, and the composer
 offers **Xwing environment** in place of **New worktree**. **Off** keeps every thread in an existing
 checkout. Under either of those, the server refuses anything else that would create a T3 worktree,
-including delegated tasks with worktree isolation, worktree handoffs, pull request checkouts in a
+including worktree handoffs, pull request checkouts in a
 worktree, pull request review guides, scheduled tasks that start in a new worktree, and restoring
 a deleted worktree. The refusal names the setting. You can edit or pause a saved task while
 keeping its worktree settings. To run it, choose an existing checkout or re-enable T3 worktrees.
