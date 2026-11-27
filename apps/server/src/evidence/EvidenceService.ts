@@ -53,7 +53,8 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
-import { currentUserMessage, NEEDS_USER_MESSAGE } from "../orchestration-v2/currentUserMessage.ts";
+import { NEEDS_USER_MESSAGE } from "../orchestration-v2/currentUserMessage.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
@@ -431,6 +432,7 @@ export function coveringLandings(
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const projections = yield* ProjectionStoreV2;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const changes = yield* PubSub.sliding<number>(1);
@@ -1012,9 +1014,7 @@ const make = Effect.gen(function* () {
   }, Effect.mapError(passStorage));
 
   const agentSetQa = Effect.fn("EvidenceService.agentSetQa")(function* (input: AgentSetQaInput) {
-    const messageId = yield* currentUserMessage(input.threadId).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-    );
+    const messageId = yield* projections.getCurrentUserMessageId(input.threadId);
     if (messageId === null) return yield* invalid(AGENT_QA_NEEDS_USER_MESSAGE);
     const [landing] = yield* sql<{
       readonly qa_thread_id: string | null;
