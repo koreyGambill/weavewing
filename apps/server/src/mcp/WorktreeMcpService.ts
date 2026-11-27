@@ -28,11 +28,13 @@ import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/Dev
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import type * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import { dispatchWasNotAccepted } from "../orchestration-v2/ThreadMessageIntake.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import type { McpInvocationScope, McpThreadInvocationScope } from "./McpInvocationContext.ts";
 
@@ -175,6 +177,7 @@ const make = Effect.gen(function* () {
   const environmentLifecycle =
     yield* DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
   const developmentEnvironments = yield* DevelopmentEnvironments.DevelopmentEnvironments;
+  const gitDriver = yield* GitVcsDriver.GitVcsDriver;
 
   // Serialize handoffs per thread to avoid creating two worktrees and orphaning one.
   const handoffThreadsInFlight = new Set<string>();
@@ -325,7 +328,6 @@ const make = Effect.gen(function* () {
 
     let worktreeBaseRef = baseRef;
     let baseRefName = baseRef;
-    let environmentBaseRef = baseRef;
     let startedFromOrigin = false;
     if (startFromOrigin) {
       const resolvedRemoteBase = yield* gitWorkflow
@@ -334,7 +336,6 @@ const make = Effect.gen(function* () {
       if (resolvedRemoteBase !== null) {
         worktreeBaseRef = resolvedRemoteBase.commitSha;
         baseRefName = `refs/remotes/${resolvedRemoteBase.remoteRefName}`;
-        environmentBaseRef = resolvedRemoteBase.remoteRefName;
         startedFromOrigin = true;
       }
     }
@@ -384,6 +385,21 @@ const make = Effect.gen(function* () {
     };
 
     if (worktreeProvider === "xwing") {
+      // Xwing resolves a ref name itself and can land elsewhere, so it gets the commit.
+      const baseCommit = startedFromOrigin
+        ? worktreeBaseRef
+        : baseRef.startsWith("-")
+          ? yield* failure("invalid_request", `Base '${baseRef}' is not a valid ref.`)
+          : (yield* gitDriver
+              .resolveCommit({ cwd: projectCwd, revision: baseRef })
+              .pipe(
+                Effect.mapError(() =>
+                  failure(
+                    "invalid_request",
+                    `Base '${baseRef}' does not name a commit in the project repository.`,
+                  ),
+                ),
+              )).commitSha;
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const prepared = yield* restore(
@@ -392,12 +408,14 @@ const make = Effect.gen(function* () {
               launchKey: ids.commandId,
               title: projection.thread.title,
               branch: input.branch,
-              // Already the fetched remote-tracking ref when starting from origin.
-              baseRef: environmentBaseRef,
+              baseRef: baseCommit,
               startFromOrigin: false,
             }),
           ).pipe(asOperationFailed("Unable to create the Xwing environment"));
           const hold = { threadId: target.threadId, period: ids.commandId };
+          // Only a failure proven to precede the binding's commit may remove the environment.
+          let bindAttempted = false;
+          let bindRefused = false;
           const bound = yield* Effect.gen(function* () {
             const workspace = yield* developmentEnvironments
               .resolveLaunchWorkspace({
@@ -406,6 +424,7 @@ const make = Effect.gen(function* () {
               })
               .pipe(asOperationFailed("Unable to resolve the Xwing environment's checkout"));
             yield* recheck("Xwing environment");
+            bindAttempted = true;
             const dispatched = yield* developmentEnvironments
               .bindLaunch(
                 {
@@ -430,16 +449,46 @@ const make = Effect.gen(function* () {
                   ...bindingFields,
                 }),
               )
-              .pipe(asBindFailure);
+              .pipe(
+                Effect.tapError((error) =>
+                  Effect.sync(() => {
+                    bindRefused =
+                      error._tag === "DevelopmentEnvironmentCheckoutUnavailableError" ||
+                      error._tag === "OrchestratorWorkspaceSelectionRejectedError" ||
+                      dispatchWasNotAccepted(error);
+                  }),
+                ),
+                asBindFailure,
+              );
             return { workspace, dispatched };
           }).pipe(
-            Effect.tapCause((cause) =>
-              prepared.created && !Cause.hasInterruptsOnly(cause)
-                ? environmentLifecycle.discardLaunch({
-                    xwingEnvironmentId: prepared.xwingEnvironmentId,
-                    hold,
-                  })
-                : Effect.void,
+            Effect.catchCauseIf(
+              (cause) => prepared.created && !Cause.hasInterruptsOnly(cause),
+              (cause) => {
+                if (!bindAttempted || bindRefused) {
+                  return environmentLifecycle
+                    .discardLaunch({
+                      xwingEnvironmentId: prepared.xwingEnvironmentId,
+                      hold,
+                      newBranch: prepared.newBranch,
+                    })
+                    .pipe(Effect.andThen(Effect.failCause(cause)));
+                }
+                const original = Cause.squash(cause);
+                const kept = `The thread may already be bound to it, so Xwing environment ${prepared.xwingEnvironmentId} and its hold were kept; check the thread before cleaning the environment up.`;
+                return Effect.logWarning("Kept the Xwing environment of an ambiguous handoff", {
+                  threadId: target.threadId,
+                  xwingEnvironmentId: prepared.xwingEnvironmentId,
+                }).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      isWorktreeMcpFailure(original)
+                        ? failure(original.code, `${original.message} ${kept}`)
+                        : failure("operation_failed", `${errorMessage(original)} ${kept}`),
+                    ),
+                  ),
+                );
+              },
             ),
           );
           const worktreePath = bound.workspace.workspaceStrategy.worktreePath;
@@ -698,4 +747,5 @@ export const layer: Layer.Layer<
   | VcsStatusBroadcaster.VcsStatusBroadcaster
   | DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle
   | DevelopmentEnvironments.DevelopmentEnvironments
+  | GitVcsDriver.GitVcsDriver
 > = Layer.effect(WorktreeMcpService, make);

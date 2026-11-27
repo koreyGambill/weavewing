@@ -74,6 +74,15 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
     refuseDelete: false,
     environments: [] as Array<{ name: string; sourcePaths: Array<string> }>,
     attachBases: [] as Array<string | undefined>,
+    // Real Xwing creates a worktree on attach and removes it on delete, keeping the branch.
+    onAttach: undefined as
+      | ((input: {
+          readonly sourcePath: string;
+          readonly branch: string;
+          readonly base?: string;
+        }) => void)
+      | undefined,
+    onDelete: undefined as (() => void) | undefined,
   };
   const blockers = () => [
     ...state.holds.map(
@@ -124,6 +133,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
           return Effect.fail(failed("attachRepository", "baseNotFound"));
         }
         state.environments.at(-1)?.sourcePaths.push(input.sourcePath);
+        state.onAttach?.(input);
         return Effect.succeed({
           environmentId: ID,
           name: "app",
@@ -211,6 +221,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
         }
         state.deleted = true;
         state.environments.pop();
+        state.onDelete?.();
         return Effect.succeed({
           environmentId: ID,
           outcome: "deleted" as const,
@@ -570,6 +581,99 @@ describe("DevelopmentEnvironmentLifecycle", () => {
         assert.deepEqual(xwing.state.holds, []);
         assert.isTrue(xwing.state.deleted);
       }).pipe(Effect.provide(makeLayer({ xwing })));
+    },
+  );
+
+  it.effect(
+    "deletes a failed launch's unchanged new branch so its name works again, and keeps others",
+    () => {
+      const repository = cloneBehindOrigin();
+      const xwing = makeXwing({});
+      const identity = ["-c", "user.email=t@example.com", "-c", "user.name=t"];
+      const checkoutOf = (branch: string) =>
+        NodePath.join(repository.root, "env", branch.replaceAll("/", "-"));
+      const branchTip = (branch: string) => {
+        try {
+          return runGit(repository.clone, [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            `refs/heads/${branch}`,
+          ]);
+        } catch {
+          return null;
+        }
+      };
+      let removeOnDelete: Array<string> = [];
+      xwing.state.onAttach = (input) => {
+        const existing = branchTip(input.branch) !== null;
+        runGit(input.sourcePath, [
+          "worktree",
+          "add",
+          "--quiet",
+          ...(existing ? [] : ["-b"]),
+          ...(existing
+            ? [checkoutOf(input.branch), input.branch]
+            : [input.branch, checkoutOf(input.branch), input.base ?? "HEAD"]),
+        ]);
+        removeOnDelete.push(checkoutOf(input.branch));
+      };
+      xwing.state.onDelete = () => {
+        for (const checkout of removeOnDelete) {
+          runGit(repository.clone, ["worktree", "remove", "--force", checkout]);
+        }
+        removeOnDelete = [];
+      };
+      const launchOn = (launchKey: string, branch: string) => ({
+        ...launch(launchKey),
+        branch,
+      });
+      const hold = { threadId: "thread-retry", period: "command-retry" };
+      return Effect.gen(function* () {
+        const service = yield* lifecycle;
+        const first = yield* service.prepareLaunch(launchOn("retry-1", "feature/retry"));
+        assert.equal(first.newBranch?.name, "feature/retry");
+        assert.equal(first.newBranch?.tip, repository.localHead);
+        yield* service.discardLaunch({ xwingEnvironmentId: ID, hold, newBranch: first.newBranch });
+        assert.isNull(branchTip("feature/retry"));
+
+        // The same name works again, and a branch that gained commits is kept.
+        const retried = yield* service.prepareLaunch(launchOn("retry-2", "feature/retry"));
+        assert.equal(retried.newBranch?.tip, repository.localHead);
+        runGit(checkoutOf("feature/retry"), [
+          ...identity,
+          "commit",
+          "--quiet",
+          "--allow-empty",
+          "-m",
+          "work",
+        ]);
+        const worked = branchTip("feature/retry");
+        assert.notEqual(worked, repository.localHead);
+        yield* service.discardLaunch({
+          xwingEnvironmentId: ID,
+          hold,
+          newBranch: retried.newBranch,
+        });
+        assert.equal(branchTip("feature/retry"), worked);
+
+        // A branch still checked out somewhere is kept.
+        const inUse = yield* service.prepareLaunch(launchOn("retry-3", "feature/in-use"));
+        removeOnDelete = [];
+        yield* service.discardLaunch({ xwingEnvironmentId: ID, hold, newBranch: inUse.newBranch });
+        assert.equal(branchTip("feature/in-use"), repository.localHead);
+
+        // A branch that existed before the launch is never reported as new.
+        runGit(repository.clone, ["branch", "feature/existing", "main"]);
+        const existing = yield* service.prepareLaunch(launchOn("retry-4", "feature/existing"));
+        assert.isTrue(existing.created);
+        assert.isUndefined(existing.newBranch);
+      }).pipe(
+        Effect.provide(makeLayer({ xwing, git: realGit, workspaceRoot: repository.clone })),
+        Effect.ensuring(
+          Effect.sync(() => NodeFS.rmSync(repository.root, { recursive: true, force: true })),
+        ),
+      );
     },
   );
 

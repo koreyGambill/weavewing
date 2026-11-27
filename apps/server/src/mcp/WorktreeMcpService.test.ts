@@ -31,6 +31,7 @@ import * as ServerConfig from "../config.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
+  OrchestratorWorkspaceSelectionRejectedError,
 } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -123,7 +124,13 @@ interface HarnessOptions {
   readonly existsFails?: boolean;
   readonly worktreeProvider?: "t3" | "xwing" | "off";
   readonly prepareLaunchFails?: boolean;
+  /** A typed refusal the binding dispatch fails with, which proves nothing committed. */
+  readonly dispatchRefusal?: OrchestratorWorkspaceSelectionRejectedError;
+  readonly baseUnresolvable?: boolean;
 }
+
+const localBaseCommit = "1111111111111111111111111111111111111111";
+const newBranch = { sourcePath: workspaceRoot, name: "feature/xwing", tip: localBaseCommit };
 
 const makeHarness = (options: HarnessOptions = {}) => {
   const thread = options.thread === undefined ? {} : options.thread;
@@ -139,7 +146,9 @@ const makeHarness = (options: HarnessOptions = {}) => {
             ? Effect.die(new Error("dispatch defect"))
             : options.dispatchFails
               ? (Effect.fail("simulated dispatch failure") as never)
-              : Effect.succeed({ sequence: 1, storedEvents: [] }),
+              : options.dispatchRefusal !== undefined
+                ? (Effect.fail(options.dispatchRefusal) as never)
+                : Effect.succeed({ sequence: 1, storedEvents: [] }),
       ),
     ),
   );
@@ -284,6 +293,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     }
   });
 
+  const resolveCommit = vi.fn((input: { readonly cwd: string; readonly revision: string }) =>
+    options.baseUnresolvable
+      ? (Effect.fail("simulated unknown revision") as never)
+      : Effect.succeed({ commitSha: input.revision === "dev" ? localBaseCommit : "unexpected" }),
+  );
   const prepareLaunch = vi.fn(
     (
       _: Parameters<
@@ -299,7 +313,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
           )
         : Effect.sync(() => {
             steps.push("prepare");
-            return { xwingEnvironmentId, created: true };
+            return { xwingEnvironmentId, created: true, newBranch };
           }),
   );
   const discardLaunch = vi.fn(
@@ -390,6 +404,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
           resolveLaunchWorkspace,
           bindLaunch,
         }),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({ resolveCommit }),
         NodeServices.layer,
         NodeCrypto.layer,
         options.existsFails
@@ -424,6 +439,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     prepareLaunch,
     discardLaunch,
     holds,
+    resolveCommit,
   };
 };
 
@@ -851,7 +867,7 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
         launchKey: binding.commandId,
         title: "Worktree test thread",
         branch: "feature/xwing",
-        baseRef: "dev",
+        baseRef: localBaseCommit,
         startFromOrigin: false,
       });
       expect(harness.holds).toHaveBeenCalledWith({
@@ -910,9 +926,11 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
         startFromOrigin: true,
       });
       expect(harness.fetchWorktreeBaseCommit).toHaveBeenCalled();
+      // The commit the fetch resolved, so a later move of the remote ref cannot change it.
       expect(harness.prepareLaunch).toHaveBeenCalledWith(
-        expect.objectContaining({ baseRef: "origin/dev", startFromOrigin: false }),
+        expect.objectContaining({ baseRef: "abc123", startFromOrigin: false }),
       );
+      expect(harness.resolveCommit).not.toHaveBeenCalled();
       expect(result).toMatchObject({ baseRef: "dev", startedFromOrigin: true });
     });
   });
@@ -934,8 +952,15 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
     });
   });
 
-  it.effect("discards the new environment when the binding fails", () => {
-    const harness = makeHarness({ worktreeProvider: "xwing", dispatchFails: true });
+  it.effect("discards the new environment and its branch when the binding is refused", () => {
+    const harness = makeHarness({
+      worktreeProvider: "xwing",
+      dispatchRefusal: new OrchestratorWorkspaceSelectionRejectedError({
+        commandId: CommandId.make("command:test:refused"),
+        threadId,
+        reason: "work-in-progress",
+      }),
+    });
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/unbound" }));
       expectTypedFailure(exit, {
@@ -947,8 +972,53 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
       expect(harness.discardLaunch).toHaveBeenCalledWith({
         xwingEnvironmentId,
         hold: { threadId, period: binding.commandId },
+        newBranch,
       });
       expect(harness.steps.at(-1)).toBe("discard");
+    });
+  });
+
+  it.effect.each([
+    ["fails without proving it was refused", { dispatchFails: true }],
+    ["dies", { dispatchDies: true }],
+  ] as const)("keeps the environment and its hold when the binding %s", ([, failure]) => {
+    const harness = makeHarness({ worktreeProvider: "xwing", ...failure });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/ambiguous" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "operation_failed",
+        message: expect.stringContaining(
+          `Xwing environment ${xwingEnvironmentId} and its hold were kept`,
+        ),
+      });
+      expect(harness.dispatch).toHaveBeenCalledTimes(1);
+      expect(harness.discardLaunch).not.toHaveBeenCalled();
+    });
+  });
+
+  it.effect("creates the environment at the local base's commit, not its name", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing" });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, { branch: "feature/local", baseRef: "dev" });
+      expect(harness.resolveCommit).toHaveBeenCalledWith({ cwd: workspaceRoot, revision: "dev" });
+      expect(harness.prepareLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({ baseRef: localBaseCommit, startFromOrigin: false }),
+      );
+      expect(result).toMatchObject({ baseRef: "dev", startedFromOrigin: false });
+    });
+  });
+
+  it.effect("refuses a base that names no commit before creating any environment", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing", baseUnresolvable: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/nowhere" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "invalid_request",
+        message: expect.stringContaining("Base 'dev' does not name a commit"),
+      });
+      expect(harness.prepareLaunch).not.toHaveBeenCalled();
     });
   });
 

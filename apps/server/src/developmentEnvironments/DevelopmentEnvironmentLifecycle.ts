@@ -57,6 +57,13 @@ export { DevelopmentEnvironmentLifecycleError };
 
 type Failure<A> = Effect.Effect<A, DevelopmentEnvironmentLifecycleError>;
 
+/** A branch `prepareLaunch` created in the project's repository, and the commit it started at. */
+export interface LaunchBranch {
+  readonly sourcePath: string;
+  readonly name: string;
+  readonly tip: string;
+}
+
 /**
  * Creates, sets up, runs apps in and cleans up Xwing environments for T3 Code. Every error it
  * returns is safe to send to a client: Xwing's output stays in the server log. Cleanup is only
@@ -93,6 +100,7 @@ export class DevelopmentEnvironmentLifecycle extends Context.Service<
      * The environment for one isolated thread launch, named from its stable launch key: a retry
      * finds the environment an earlier attempt made, and separate launches each get their own.
      * `startFromOrigin` bases a new branch on the base branch's remote-tracking ref.
+     * `newBranch` names the branch this call created, for `discardLaunch`.
      */
     readonly prepareLaunch: (input: {
       readonly projectId: ProjectId;
@@ -101,11 +109,20 @@ export class DevelopmentEnvironmentLifecycle extends Context.Service<
       readonly branch?: string | undefined;
       readonly baseRef: string;
       readonly startFromOrigin: boolean;
-    }) => Failure<{ readonly xwingEnvironmentId: XwingEnvironmentId; readonly created: boolean }>;
-    /** Releases a launch's hold and deletes the environment `prepareLaunch` made for it. */
+    }) => Failure<{
+      readonly xwingEnvironmentId: XwingEnvironmentId;
+      readonly created: boolean;
+      readonly newBranch?: LaunchBranch | undefined;
+    }>;
+    /**
+     * Releases a launch's hold and deletes the environment `prepareLaunch` made for it. Xwing
+     * keeps branches, so `newBranch` is deleted too while it is still at its first commit and no
+     * checkout uses it; anything else keeps it.
+     */
     readonly discardLaunch: (input: {
       readonly xwingEnvironmentId: XwingEnvironmentId;
       readonly hold: { readonly threadId: string; readonly period: string };
+      readonly newBranch?: LaunchBranch | undefined;
     }) => Effect.Effect<void>;
   }
 >()("t3/developmentEnvironments/DevelopmentEnvironmentLifecycle") {}
@@ -656,17 +673,18 @@ const make = Effect.gen(function* () {
     const sourcePath = yield* projectSource("create", input.projectId);
     const key = NodeCrypto.createHash("sha256").update(input.launchKey).digest("hex").slice(0, 8);
     const marker = `[t3 ${key}]`;
+    const branch =
+      input.branch ??
+      `${WORKTREE_BRANCH_PREFIX}/${sanitizeBranchFragment(input.title).slice(0, 40)}-${key}`;
     const attachLaunch = (id: XwingEnvironmentId) =>
       launchBase(sourcePath, input.baseRef, input.startFromOrigin).pipe(
-        Effect.flatMap((base) =>
-          attachProject(id, sourcePath, {
-            branch:
-              input.branch ??
-              `${WORKTREE_BRANCH_PREFIX}/${sanitizeBranchFragment(input.title).slice(0, 40)}-${key}`,
-            base,
-          }),
-        ),
+        Effect.flatMap((base) => attachProject(id, sourcePath, { branch, base })),
       );
+    const branchTip = gitStdout(
+      "DevelopmentEnvironmentLifecycle.prepareLaunch.branch",
+      sourcePath,
+      ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`],
+    );
     const existing = yield* catalog.list().pipe(
       Effect.map((environments) =>
         environments.find(
@@ -688,6 +706,7 @@ const make = Effect.gen(function* () {
     const created = yield* operations
       .create({ name: `${title.slice(0, 180)} ${marker}` })
       .pipe(Effect.catch((error) => Effect.flip(sanitized("create")(error))));
+    const branchExisted = (yield* branchTip) !== "";
     const result = yield* attachLaunch(created.id);
     if (result.failure !== null) {
       yield* operations
@@ -695,8 +714,57 @@ const make = Effect.gen(function* () {
         .pipe(Effect.ignore({ log: true }));
       return yield* lifecycleError("attach", result.failure.reason, created.id);
     }
-    return { xwingEnvironmentId: created.id, created: true };
+    const tip = branchExisted ? "" : yield* branchTip;
+    return {
+      xwingEnvironmentId: created.id,
+      created: true,
+      ...(tip === "" ? {} : { newBranch: { sourcePath, name: branch, tip } }),
+    };
   });
+
+  // Never fails: a branch it cannot prove unused and unchanged is kept and logged.
+  const deleteLaunchBranch = Effect.fn("DevelopmentEnvironmentLifecycle.deleteLaunchBranch")(
+    function* (branch: LaunchBranch) {
+      const ref = `refs/heads/${branch.name}`;
+      const checkouts = yield* git
+        .execute({
+          operation: "DevelopmentEnvironmentLifecycle.deleteLaunchBranch.worktrees",
+          cwd: branch.sourcePath,
+          args: ["worktree", "list", "--porcelain"],
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        })
+        .pipe(Effect.option);
+      const listed = Option.getOrUndefined(checkouts);
+      if (
+        listed === undefined ||
+        listed.exitCode !== 0 ||
+        listed.stdout.split("\n").some((line) => line.trim() === `branch ${ref}`)
+      ) {
+        return yield* Effect.logInfo("Kept the branch of a failed launch; a checkout may use it", {
+          branch: branch.name,
+        });
+      }
+      // Deletes only while the branch still points at its first commit.
+      const deleted = yield* git
+        .execute({
+          operation: "DevelopmentEnvironmentLifecycle.deleteLaunchBranch.delete",
+          cwd: branch.sourcePath,
+          args: ["update-ref", "-d", ref, branch.tip],
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        })
+        .pipe(
+          Effect.map((result) => result.exitCode === 0),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!deleted) {
+        yield* Effect.logInfo("Kept the branch of a failed launch; it has moved", {
+          branch: branch.name,
+        });
+      }
+    },
+  );
 
   const discardLaunch: DevelopmentEnvironmentLifecycle["Service"]["discardLaunch"] = Effect.fn(
     "DevelopmentEnvironmentLifecycle.discardLaunch",
@@ -707,6 +775,9 @@ const make = Effect.gen(function* () {
       id,
       operations.releaseHold({ id, owner, key: holdKey(input.hold) }).pipe(
         Effect.andThen(operations.delete({ id, confirmId: id })),
+        Effect.andThen(
+          input.newBranch === undefined ? Effect.void : deleteLaunchBranch(input.newBranch),
+        ),
         Effect.catch((error) =>
           Effect.logWarning(
             "Could not remove the Xwing environment of a failed launch",
