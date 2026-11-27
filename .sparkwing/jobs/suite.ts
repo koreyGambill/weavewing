@@ -9,11 +9,10 @@ import {
   everySuite,
   isSuiteName,
   receiptsDir,
+  recordReceipt,
   SUITES,
   type SuiteName,
-  type SuiteReceipt,
   testedTree,
-  writeReceipt,
 } from "../lib/suites.ts";
 
 /**
@@ -51,7 +50,8 @@ definePipeline({
     "Runs the named suite as ci does and reports every failing file or package. Admission holds the suite's " +
     "cores (web 6, server 6, packages 4) for the whole run. Without --worktree it installs and tests its own " +
     "checkout. --full runs all three one after another as batch work, which is the full result main-health " +
-    "reads, and records a receipt of each suite's result when the tested tree was committed and clean.",
+    "reads. Only a run in a checkout Sparkwing made for a branch, as confirm-main starts, records a receipt " +
+    "that confirms main; a run on --worktree reports but confirms nothing.",
   args: [
     ...checkoutArgs.map((arg) =>
       arg.name === "worktree"
@@ -84,16 +84,11 @@ definePipeline({
       const before = testedTree(co.root);
       const results = await everySuite(ctx, co);
       const after = testedTree(co.root);
-      const ran = Object.values(results).every((result) => result !== "not-run");
-      // A receipt says these files were tested, so only a clean tree that stayed put, where every
-      // suite got as far as running its tests, earns one; otherwise the next confirmation retries.
-      if (ran && before && after && before.commit === after.commit && before.tree === after.tree)
-        writeReceipt(receiptsDir(), {
-          ...before,
-          results: results as SuiteReceipt["results"],
-          finishedAt: new Date().toISOString(),
-        });
-      else ctx.log.warn("No receipt: a suite did not reach its tests, or the worktree was not clean and unchanged.");
+      if (!recordReceipt(receiptsDir(), co.root, results, before, after))
+        ctx.log.warn(
+          "No receipt: this run reports but confirms nothing, because it was not in a Sparkwing branch checkout, " +
+            "a suite did not reach its tests, or the tree changed.",
+        );
       const failed = (Object.entries(results) as Array<[SuiteName, string]>)
         .filter(([, result]) => result !== "passed")
         .map(([each, result]) => `${each} (${result})`);

@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import * as CP from "node:child_process";
 
-import { failingTestFiles, parseTaskList, receiptFor, suiteRan, testedTree, writeReceipt } from "./suites.ts";
+import { failingTestFiles, parseTaskList, receiptFor, recordReceipt, suiteRan, testedTree, writeReceipt } from "./suites.ts";
 
 const list = `  typecheck: vp run -r --cache --concurrency-limit 4 typecheck
   @t3tools/contracts#typecheck: effect-tsgo tsrs --noEmit
@@ -108,6 +108,41 @@ test("a suite counts as run only when vitest reported test files in every one of
     assert.equal(suiteRan(dir, "packages"), false, "one package never started");
     FS.writeFileSync(Path.join(dir, "packages-b.log"), summary);
     assert.equal(suiteRan(dir, "packages"), true);
+  } finally {
+    FS.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only a run in a Sparkwing branch checkout writes a receipt, never a clean ordinary checkout", () => {
+  const dir = FS.realpathSync(FS.mkdtempSync(Path.join(OS.tmpdir(), "record-receipt-")));
+  const git = (root: string, ...args: string[]) =>
+    CP.execFileSync("git", ["-C", root, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" }).trim();
+  const repo = (root: string) => {
+    FS.mkdirSync(root, { recursive: true });
+    git(root, "init", "--initial-branch=main");
+    FS.writeFileSync(Path.join(root, "a.ts"), "1\n");
+    git(root, "add", ".");
+    git(root, "commit", "-m", "first");
+  };
+  try {
+    const receipts = Path.join(dir, "receipts");
+    const ordinary = Path.join(dir, "code/weavewing");
+    repo(ordinary);
+    const clean = testedTree(ordinary)!;
+    assert.equal(recordReceipt(receipts, ordinary, results, clean, clean), false);
+    assert.equal(receiptFor(receipts, { tree: clean.tree }), undefined);
+
+    const revision = Path.join(dir, "home/workspaces/revision-1");
+    const committed = Path.join(revision, "checkout");
+    repo(committed);
+    git(committed, "checkout", "--quiet", "--detach");
+    FS.chmodSync(Path.join(dir, "home/workspaces"), 0o700);
+    FS.chmodSync(revision, 0o700);
+    const tested = testedTree(committed)!;
+    assert.equal(recordReceipt(receipts, committed, { ...results, packages: "not-run" }, tested, tested), false);
+    assert.equal(recordReceipt(receipts, committed, results, tested, { ...tested, tree: "f".repeat(40) }), false);
+    assert.equal(recordReceipt(receipts, committed, results, tested, tested), true);
+    assert.equal(receiptFor(receipts, { tree: tested.tree })?.commit, tested.commit);
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
   }

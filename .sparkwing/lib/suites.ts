@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import type { Context } from "@sparkwing/sdk";
 
-import { type Checkout, git, logged } from "./checkout.ts";
+import { type Checkout, git, isCommittedCheckout, logged } from "./checkout.ts";
 
 /**
  * The workspace's own tasks, from the `  [package#]task: command` lines `vp run` prints without a
@@ -156,6 +156,27 @@ export function writeReceipt(dir: string, receipt: SuiteReceipt): void {
   const temporary = `${file}.${process.pid}.tmp`;
   NodeFS.writeFileSync(temporary, JSON.stringify(receipt, null, 2));
   NodeFS.renameSync(temporary, file);
+}
+
+/**
+ * Writes the receipt for a `suite --full` run and returns whether it did. Like Sparkwing's own rule
+ * that only a host-made checkout of the sealed commit proves that commit passed, only a run in a
+ * Sparkwing branch checkout counts: a clean developer checkout can still hold ignored files that
+ * change a build. Every suite must have reached its tests and the tree must not have moved. The
+ * host runs as the same user as any agent, so this guards against accidents, not forgery.
+ */
+export function recordReceipt(
+  dir: string,
+  root: string,
+  results: Record<SuiteName, SuiteResult>,
+  before: { commit: string; tree: string } | undefined,
+  after: { commit: string; tree: string } | undefined,
+): boolean {
+  const ran = Object.values(results).every((result) => result !== "not-run");
+  const unchanged = before !== undefined && after?.commit === before.commit && after.tree === before.tree;
+  if (!ran || !unchanged || !isCommittedCheckout(root)) return false;
+  writeReceipt(dir, { ...before, results: results as SuiteReceipt["results"], finishedAt: new Date().toISOString() });
+  return true;
 }
 
 /** The receipt whose full commit or tree id equals the one given, compared exactly. */
