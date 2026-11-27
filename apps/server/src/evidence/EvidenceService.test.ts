@@ -1600,6 +1600,44 @@ it.effect("names no message for a QA outcome recorded after a later unrelated me
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("can name a later message when a re-record moves the landing time past the reply", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const threadId = ThreadId.make("rerecorded");
+      yield* seedThread({ id: "rerecorded" });
+      const record = (landedAt: string) =>
+        evidence.record(recordInput("landing-rerecorded", [change("a")], { threadId, landedAt }));
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:05:00.000Z"));
+      yield* record("2026-11-20T11:00:00.000Z");
+      // The user approves in A; the agent notes it is checking, then re-records the landing with a
+      // corrected landing time after A.
+      yield* nextTurn("rerecorded", 1, "message-a", "2026-11-20T11:10:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:12:00.000Z"));
+      yield* evidence.agentSetQa({
+        threadId,
+        landingId: "landing-rerecorded",
+        changeId: "a",
+        state: "pending",
+        note: "Checking the toast",
+      });
+      yield* record("2026-11-20T11:14:00.000Z");
+      // Only during B, an unrelated message, does the agent confirm the earlier approval.
+      yield* nextTurn("rerecorded", 2, "message-b", "2026-11-20T11:20:00.000Z");
+      yield* TestClock.setTime(Date.parse("2026-11-20T11:21:00.000Z"));
+      const confirmed = yield* evidence.agentSetQa({
+        threadId,
+        landingId: "landing-rerecorded",
+        changeId: "a",
+        state: "confirmed",
+      });
+      // The landing time is the only cutoff the service has, and the re-record moved it past A, so
+      // the stored message is B. Next reference therefore never reads this field (qaPointers).
+      assert.deepStrictEqual([confirmed.state, confirmed.messageId], ["confirmed", "message-b"]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("closes an agent's problem when a later landing names it in fixes", () =>
   withHome(() =>
     Effect.gen(function* () {

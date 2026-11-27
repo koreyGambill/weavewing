@@ -1,6 +1,7 @@
 import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
+  type EvidenceChangeQa,
   type MessageId,
   type OrchestrationMessageContext,
   type ThreadQuestion,
@@ -117,6 +118,15 @@ export const questionPointers = (
   question.discussedInMessageId,
   question.settledFromMessageId,
 ];
+
+/**
+ * The messages a QA change names itself: only the user's Discuss message. The message an agent
+ * recorded its outcome from is left out, because a landing re-recorded with a later landing time
+ * can make that pointer name a later, unrelated message; messages that cite the card still count.
+ */
+export const qaPointers = (
+  qa: Pick<EvidenceChangeQa, "discussedMessageId">,
+): ReadonlyArray<MessageId | undefined> => [qa.discussedMessageId];
 
 /**
  * Which reference the control shows next: the oldest first, then each following one, wrapping

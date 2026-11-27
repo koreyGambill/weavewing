@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   itemReferences,
   nextReferencePosition,
+  qaPointers,
   questionPointers,
   waitingItemReferenceIndex,
 } from "./waitingItemReferences.ts";
@@ -117,6 +118,22 @@ describe("itemReferences", () => {
         }),
       ),
     ).toEqual(["m3"]);
+  });
+
+  it("leaves out the message an agent recorded a QA outcome from, even when it is loaded", () => {
+    // The reviewer's sequence: the agent confirmed the user's earlier approval during an unrelated
+    // message, and a re-recorded landing time let the service name that message.
+    expect(
+      ids(
+        itemReferences({
+          index,
+          item: { kind: "qa", landingId: "landing", changeId: "toast" },
+          messageOrder,
+          pointers: qaPointers({ messageId: MessageId.make("m3") } as const),
+        }),
+      ),
+    ).toEqual([]);
+    expect(qaPointers({ discussedMessageId: MessageId.make("m1") })).toEqual(["m1"]);
   });
 
   it("leaves out pointers to messages that are not loaded", () => {

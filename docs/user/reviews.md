@@ -108,6 +108,14 @@ Deferred questions, items you are discussing, and changes the agent is fixing
 leave the count. A QA card or task card has **Discuss** too, which works as it
 does on a question.
 
+A card that your messages refer to shows a counter such as **1/2** beside its
+status. Press it to scroll the chat to each of your messages about the item in
+turn. It counts the messages that cite the card, such as a Discuss or an answer,
+and for a question or task the message the agent recorded your answer or outcome
+from. A QA card counts only Discuss messages and messages that cite it, not the
+message the agent recorded its outcome from, because that message cannot always
+be told apart from a later, unrelated one.
+
 ### Your tasks
 
 When an agent needs something only you can do, such as granting access,

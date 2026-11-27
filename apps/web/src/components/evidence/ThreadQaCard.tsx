@@ -9,6 +9,7 @@ import {
   type QaCardStatus,
   type QaChange,
 } from "@t3tools/client-runtime/qa-card";
+import { qaPointers } from "@t3tools/client-runtime/state/waiting-item-references";
 import type { EvidenceChangeQa, EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpRightIcon } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
@@ -197,7 +198,7 @@ export function ThreadQaCard({
     <NextReferenceButton
       item={{ kind: "qa", landingId: landing.id, changeId: change.id }}
       refLabel={ref}
-      pointers={[qa.messageId, qa.discussedMessageId]}
+      pointers={qaPointers(qa)}
     />
   );
   const note = qa.note.trim();
