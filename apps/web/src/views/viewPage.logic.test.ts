@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   resolveHostedViewLayout,
   resolveViewPage,
+  viewHosts,
   viewPagePaletteDefinitions,
 } from "./viewPage.logic";
 import type { ViewDefinition } from "./viewRegistry";
@@ -21,7 +22,12 @@ function view(overrides: Partial<ViewDefinition> & Pick<ViewDefinition, "id">): 
 }
 
 const calendar = view({ id: "calendar", page: "/view/$viewId" });
-const pullRequests = view({ id: "pull-requests", page: "/pull-requests", minWidthPx: 720 });
+const pullRequests = view({
+  id: "pull-requests",
+  page: "/pull-requests",
+  minWidthPx: 720,
+  hosts: [],
+});
 const links = view({ id: "links", scope: "thread" });
 // A wide global view without a page, such as a board before it gets one.
 const board = view({ id: "status", minWidthPx: 720 });
@@ -63,6 +69,12 @@ describe("view pages", () => {
       layout: "compact",
       openFullSize: false,
     });
+  });
+
+  it("hosts a view in the panel and tiles by default, and a page-only view nowhere", () => {
+    expect(viewHosts(calendar)).toEqual(["panel", "tile", "page"]);
+    expect(viewHosts(links)).toEqual(["panel", "tile"]);
+    expect(viewHosts(pullRequests)).toEqual([]);
   });
 
   it("offers palette pages only for views on the shared page", () => {
