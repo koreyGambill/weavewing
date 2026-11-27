@@ -74,13 +74,14 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
     refuseDelete: false,
     environments: [] as Array<{ name: string; sourcePaths: Array<string> }>,
     attachBases: [] as Array<string | undefined>,
-    // Real Xwing creates a worktree on attach and removes it on delete, keeping the branch.
+    // Real Xwing creates a worktree on attach, reporting the commit it started the branch from,
+    // and removes it on delete, keeping the branch.
     onAttach: undefined as
       | ((input: {
           readonly sourcePath: string;
           readonly branch: string;
           readonly base?: string | undefined;
-        }) => void)
+        }) => string | undefined)
       | undefined,
     onDelete: undefined as (() => void) | undefined,
   };
@@ -133,7 +134,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
           return Effect.fail(failed("attachRepository", "baseNotFound"));
         }
         state.environments.at(-1)?.sourcePaths.push(input.sourcePath);
-        state.onAttach?.(input);
+        const baseRevision = state.onAttach?.(input);
         return Effect.succeed({
           environmentId: ID,
           name: "app",
@@ -141,6 +142,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
           branch: input.branch,
           created: true,
           stale: false,
+          ...(baseRevision === undefined ? {} : { baseRevision }),
           dependencies: [],
           dependencyWarnings: [],
         });
@@ -605,6 +607,7 @@ describe("DevelopmentEnvironmentLifecycle", () => {
         }
       };
       let removeOnDelete: Array<string> = [];
+      let commitDuringAttach = false;
       xwing.state.onAttach = (input) => {
         const existing = branchTip(input.branch) !== null;
         runGit(input.sourcePath, [
@@ -617,6 +620,19 @@ describe("DevelopmentEnvironmentLifecycle", () => {
             : [input.branch, checkoutOf(input.branch), input.base ?? "HEAD"]),
         ]);
         removeOnDelete.push(checkoutOf(input.branch));
+        const started = branchTip(input.branch) ?? undefined;
+        // A checkout hook or dependency setup can commit before Xwing returns.
+        if (commitDuringAttach) {
+          runGit(checkoutOf(input.branch), [
+            ...identity,
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "setup",
+          ]);
+        }
+        return started;
       };
       xwing.state.onDelete = () => {
         for (const checkout of removeOnDelete) {
@@ -662,6 +678,16 @@ describe("DevelopmentEnvironmentLifecycle", () => {
         removeOnDelete = [];
         yield* service.discardLaunch({ xwingEnvironmentId: ID, hold, newBranch: inUse.newBranch });
         assert.equal(branchTip("feature/in-use"), repository.localHead);
+
+        // A commit made while Xwing attached the branch keeps it.
+        commitDuringAttach = true;
+        const hooked = yield* service.prepareLaunch(launchOn("retry-5", "feature/hooked"));
+        commitDuringAttach = false;
+        assert.equal(hooked.newBranch?.tip, repository.localHead);
+        const committed = branchTip("feature/hooked");
+        assert.notEqual(committed, repository.localHead);
+        yield* service.discardLaunch({ xwingEnvironmentId: ID, hold, newBranch: hooked.newBranch });
+        assert.equal(branchTip("feature/hooked"), committed);
 
         // A branch that existed before the launch is never reported as new.
         runGit(repository.clone, ["branch", "feature/existing", "main"]);

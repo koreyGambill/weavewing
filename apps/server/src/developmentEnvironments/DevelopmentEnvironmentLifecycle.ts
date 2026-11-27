@@ -680,11 +680,19 @@ const make = Effect.gen(function* () {
       launchBase(sourcePath, input.baseRef, input.startFromOrigin).pipe(
         Effect.flatMap((base) => attachProject(id, sourcePath, { branch, base })),
       );
-    const branchTip = gitStdout(
-      "DevelopmentEnvironmentLifecycle.prepareLaunch.branch",
-      sourcePath,
-      ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`],
-    );
+    // Exit 1 is git's "no such ref"; any other outcome leaves the branch's absence unproven.
+    const branchAbsent = git
+      .execute({
+        operation: "DevelopmentEnvironmentLifecycle.prepareLaunch.branch",
+        cwd: sourcePath,
+        args: ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`],
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+      })
+      .pipe(
+        Effect.map((result) => result.exitCode === 1),
+        Effect.orElseSucceed(() => false),
+      );
     const existing = yield* catalog.list().pipe(
       Effect.map((environments) =>
         environments.find(
@@ -706,7 +714,7 @@ const make = Effect.gen(function* () {
     const created = yield* operations
       .create({ name: `${title.slice(0, 180)} ${marker}` })
       .pipe(Effect.catch((error) => Effect.flip(sanitized("create")(error))));
-    const branchExisted = (yield* branchTip) !== "";
+    const branchWasAbsent = yield* branchAbsent;
     const result = yield* attachLaunch(created.id);
     if (result.failure !== null) {
       yield* operations
@@ -714,11 +722,13 @@ const make = Effect.gen(function* () {
         .pipe(Effect.ignore({ log: true }));
       return yield* lifecycleError("attach", result.failure.reason, created.id);
     }
-    const tip = branchExisted ? "" : yield* branchTip;
+    // The commit Xwing started the branch from, so a commit a checkout hook or setup made during
+    // the attach keeps the branch.
+    const tip = branchWasAbsent ? result.repository?.baseRevision : undefined;
     return {
       xwingEnvironmentId: created.id,
       created: true,
-      ...(tip === "" ? {} : { newBranch: { sourcePath, name: branch, tip } }),
+      ...(tip === undefined || tip === "" ? {} : { newBranch: { sourcePath, name: branch, tip } }),
     };
   });
 
