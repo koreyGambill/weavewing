@@ -33,6 +33,7 @@ vi.mock(import("./waitingOnYou"), () => ({
     severity: null,
     machines: null,
     visible: true,
+    enabledCount: 1,
   }),
 }));
 
