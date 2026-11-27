@@ -87,7 +87,7 @@ export function testPackages(ctx: Context, co: Checkout, names = packageTestName
 export const SUITES = {
   // Vite and Chromium run beside Vitest in the browser project.
   web: {
-    cores: 7,
+    cores: 8,
     run: async (ctx, co) => {
       await logged(ctx, co, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test", `--maxWorkers=${WEB_WORKERS}`]);
     },
