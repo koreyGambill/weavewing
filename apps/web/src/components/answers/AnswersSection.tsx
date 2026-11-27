@@ -1,14 +1,19 @@
+import { RegistryContext } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
+import {
+  createEnvironmentRpcQueryAtomFamily,
+  executeAtomQuery,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
 import { WS_METHODS, type ScopedThreadRef, type TrackedAnswersPage } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { useEnvironmentQuery } from "../../state/query";
+import { DeferEnvironmentQueries, formatEnvironmentQueryError } from "../../state/query";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../../threadRoutes";
 import { focusThreadDraft, showThreadConversation } from "../../lib/sideChatPane";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
@@ -49,6 +54,48 @@ const rank = { answered: 0, owed: 1, queued: 1, closed: 2, withdrawn: 2 };
 const byPriority = (a: Entry, b: Entry) =>
   rank[a.ask.state] - rank[b.ask.state] || b.ask.createdAt.localeCompare(a.ask.createdAt);
 
+function useAnswersPage(
+  environmentId: ScopedThreadRef["environmentId"],
+  cursor: string | undefined,
+  visible: boolean,
+) {
+  const registry = useContext(RegistryContext);
+  const deferred = useContext(DeferEnvironmentQueries);
+  const [revision, setRevision] = useState(0);
+  const [settled, setSettled] = useState<{
+    readonly key: string;
+    readonly result: AtomCommandResult<TrackedAnswersPage, unknown>;
+  } | null>(null);
+  const key = JSON.stringify([environmentId, cursor, revision]);
+  const result = settled?.key === key ? settled.result : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The RPC belongs to the committed, visible section and is cancelled when it leaves.
+  useEffect(() => {
+    if (!visible || deferred || result !== null) return;
+    const controller = new AbortController();
+    // A discarded mount releases its scope before the request can start.
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      void executeAtomQuery(
+        registry,
+        asksRead({
+          environmentId,
+          input: { all: true, ...(cursor === undefined ? {} : { cursor }) },
+        }),
+        { signal: controller.signal, reportFailure: false },
+      ).then((next) => {
+        if (!controller.signal.aborted) setSettled({ key, result: next });
+      });
+    });
+    return () => controller.abort();
+  }, [cursor, deferred, environmentId, key, registry, result, visible]);
+  return {
+    data: result?._tag === "Success" ? result.value : null,
+    isSuccess: result?._tag === "Success",
+    error: result?._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
+    refresh: () => setRevision((current) => current + 1),
+  };
+}
+
 export function AnswersSection({
   threadRef,
   scope,
@@ -67,14 +114,7 @@ export function AnswersSection({
     previous: [],
   });
   const asks = useThreadTrackedAsks(threadRef);
-  const query = useEnvironmentQuery(
-    visible && scope === "all"
-      ? asksRead({
-          environmentId: threadRef.environmentId,
-          input: { all: true, ...(pages.cursor === undefined ? {} : { cursor: pages.cursor }) },
-        })
-      : null,
-  );
+  const query = useAnswersPage(threadRef.environmentId, pages.cursor, visible && scope === "all");
   const entries =
     scope === "thread"
       ? (asks ?? []).map((ask) => ({
@@ -99,6 +139,10 @@ export function AnswersSection({
     .filter(Boolean)
     .join(" · ");
   const next = query.data?.cursor;
+  const refreshAll = () => {
+    setPages({ previous: [] });
+    query.refresh();
+  };
   return (
     <section
       aria-label="Tracked answers"
@@ -107,7 +151,7 @@ export function AnswersSection({
     >
       {actions && countLabel
         ? createPortal(
-            <span className="max-w-44 truncate text-muted-foreground">{countLabel}</span>,
+            <span className="max-w-44 truncate text-xs text-muted-foreground">{countLabel}</span>,
             actions,
           )
         : null}
@@ -129,7 +173,7 @@ export function AnswersSection({
             key={`${entry.threadId}:${entry.ask.id}`}
             entry={entry}
             current={threadRef}
-            onSaved={scope === "all" ? query.refresh : undefined}
+            onSaved={scope === "all" ? refreshAll : undefined}
           />
         ))
       )}

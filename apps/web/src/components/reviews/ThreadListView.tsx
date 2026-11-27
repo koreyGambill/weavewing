@@ -859,7 +859,12 @@ export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
       {waitingCardsEnabled ? (
         <ViewSection id="checklist:answers" title="Answers">
           {(actions) => (
-            <AnswersSection key={scope} threadRef={threadRef} scope={scope} actions={actions} />
+            <AnswersSection
+              key={`${threadRef.environmentId}:${threadRef.threadId}:${scope}`}
+              threadRef={threadRef}
+              scope={scope}
+              actions={actions}
+            />
           )}
         </ViewSection>
       ) : null}
