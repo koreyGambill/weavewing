@@ -87,7 +87,7 @@ folder with the conversation carried over. Finish or stop any work before moving
 
 The thread's five views open in the side panel on the right:
 
-- **Checklist**: the agent's checklist and your follow-up flags.
+- **Checklist**: the agent's checklist, your follow-up flags, and tracked answers.
 - **Artifacts**: documents agents publish, with their questions.
 - **Links**: the ticket, pull requests, web links and files, then the threads this
   one delegated to, forked, messaged or heard from.
@@ -514,8 +514,9 @@ follow-up or **Got it** to close the answer. You can also close it from
 **Waiting on you** above the composer. An unanswered question stays tracked
 until you withdraw it.
 
-Choose **Show tracked answers** in the command palette to find earlier answers.
-Use **Thread** for this conversation or **All** to look across the environment.
+Open **Checklist** and expand **Answers** to find earlier answers. **Show
+tracked answers** in the command palette opens the same section. Use **Thread**
+for this conversation or **All** to look across the environment.
 
 ## Inspect agent work
 
