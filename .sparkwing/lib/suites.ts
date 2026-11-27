@@ -108,3 +108,16 @@ export function failingTestFiles(dir: string): Array<{ readonly log: string; rea
   }
   return [...found.values()];
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Removes `clone-*` directories directly inside root that are more than a day old; returns them. */
+export function removeStaleClones(root: string, now = Date.now()): string[] {
+  if (!NodeFS.existsSync(root)) return [];
+  const stale = NodeFS.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("clone-"))
+    .map((entry) => NodePath.join(root, entry.name))
+    .filter((dir) => now - NodeFS.lstatSync(dir).mtimeMs > DAY_MS);
+  for (const dir of stale) NodeFS.rmSync(dir, { recursive: true, force: true });
+  return stale;
+}

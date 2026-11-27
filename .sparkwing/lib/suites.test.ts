@@ -4,7 +4,7 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { test } from "node:test";
 
-import { failingTestFiles, parseTaskList } from "./suites.ts";
+import { failingTestFiles, parseTaskList, removeStaleClones } from "./suites.ts";
 
 const list = `  typecheck: vp run -r --cache --concurrency-limit 4 typecheck
   @t3tools/contracts#typecheck: effect-tsgo tsrs --noEmit
@@ -36,5 +36,20 @@ test("failing test files are read from every suite log, once each", () => {
     assert.deepEqual(failingTestFiles(Path.join(dir, "missing")), []);
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only clone directories in the cache folder older than a day are removed", () => {
+  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "confirm-clones-"));
+  try {
+    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    for (const name of ["clone-old", "clone-new", "keep-old"]) FS.mkdirSync(Path.join(root, name));
+    FS.writeFileSync(Path.join(root, "clone-file"), "not a directory\n");
+    for (const name of ["clone-old", "keep-old", "clone-file"]) FS.utimesSync(Path.join(root, name), old, old);
+    assert.deepEqual(removeStaleClones(root), [Path.join(root, "clone-old")]);
+    assert.deepEqual(FS.readdirSync(root).sort(), ["clone-file", "clone-new", "keep-old"]);
+    assert.deepEqual(removeStaleClones(Path.join(root, "missing")), []);
+  } finally {
+    FS.rmSync(root, { recursive: true, force: true });
   }
 });

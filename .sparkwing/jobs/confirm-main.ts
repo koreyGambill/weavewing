@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import { type Context, definePipeline, workDir } from "@sparkwing/sdk";
 
 import { checkoutAt, evidenceDir } from "../lib/checkout.ts";
-import { failingTestFiles } from "../lib/suites.ts";
+import { failingTestFiles, removeStaleClones } from "../lib/suites.ts";
 
 const BRANCH = "main";
 
@@ -110,6 +110,8 @@ definePipeline({
           ctx.args.clones ||
           NodePath.join(process.env.XDG_CACHE_HOME || NodePath.join(NodeOS.homedir(), ".cache"), "weavewing-confirm-main");
         NodeFS.mkdirSync(root, { recursive: true });
+        // A run cancelled between prepare and suites leaves its clone behind.
+        for (const stale of removeStaleClones(root)) ctx.log.info(`Removed a clone left by an earlier run: ${stale}`);
         const clone = NodeFS.mkdtempSync(NodePath.join(root, "clone-"));
         try {
           await ctx
