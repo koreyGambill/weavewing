@@ -1,16 +1,26 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import type { Context } from "@sparkwing/sdk";
 
-import { type Checkout, logged } from "./checkout.ts";
+import { type Checkout, git, logged } from "./checkout.ts";
 
-/** The workspace's own tasks, from the `package#task: command` list `vp run` prints without a terminal. */
+/**
+ * The workspace's own tasks, from the `  [package#]task: command` lines `vp run` prints without a
+ * terminal. A line in any other shape fails, so a changed format cannot silently drop packages.
+ */
 export function parseTaskList(list: string, task: string): string[] {
-  return [...list.matchAll(/^ {2}([^\s#:]+)#([^\s:]+): /gm)]
-    .filter(([, name, found]) => found === task && name !== "@t3tools/monorepo")
-    .map(([, name]) => name!);
+  const lines = list.split("\n").filter((line) => line.trim());
+  const ids = lines.map((line) => /^ {2}(\S+): /.exec(line)?.[1]);
+  const unread = lines.find((_, index) => ids[index] === undefined);
+  if (lines.length === 0 || unread !== undefined)
+    throw new Error(`vp run printed a task list this pipeline cannot read: ${JSON.stringify(unread ?? "")}`);
+  return ids
+    .map((id) => id!.split("#"))
+    .filter(([name, found]) => found === task && name !== "@t3tools/monorepo")
+    .map(([name]) => name!);
 }
 
 /** Packages that define `task` as Vite+ itself resolves them: manifest scripts and vite.config tasks. */
@@ -82,15 +92,70 @@ export const SUITES = {
 export type SuiteName = keyof typeof SUITES;
 
 /** Runs web, server and packages one after another, then fails naming every suite that failed. */
-export async function everySuite(ctx: Context, co: Checkout): Promise<void> {
-  const failed: string[] = [];
-  for (const [name, suite] of Object.entries(SUITES)) {
-    await suite.run(ctx, co).catch((error: unknown) => {
-      ctx.log.error(`${name} failed: ${error instanceof Error ? error.message : String(error)}`);
-      failed.push(name);
-    });
+export async function everySuite(ctx: Context, co: Checkout): Promise<Record<SuiteName, "passed" | "failed">> {
+  const results = {} as Record<SuiteName, "passed" | "failed">;
+  for (const [name, suite] of Object.entries(SUITES) as Array<[SuiteName, Suite]>) {
+    results[name] = await suite.run(ctx, co).then(
+      () => "passed" as const,
+      (error: unknown) => {
+        ctx.log.error(`${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+        return "failed" as const;
+      },
+    );
   }
-  if (failed.length > 0) throw new Error(`Suites failed: ${failed.join(", ")}`);
+  return results;
+}
+
+/** Evidence that every suite ran to a result against one committed tree. */
+export interface SuiteReceipt {
+  readonly commit: string;
+  readonly tree: string;
+  readonly results: Record<SuiteName, "passed" | "failed">;
+  readonly finishedAt: string;
+}
+
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/** Where `suite --full` keeps its receipts on this machine. */
+export function receiptsDir(): string {
+  const home = NodeOS.homedir();
+  if (!NodePath.isAbsolute(home)) throw new Error(`The home directory must be absolute, got "${home}"`);
+  return NodePath.join(home, "evidence/t3code/sparkwing/full-suites");
+}
+
+/** The full commit and tree ids of a checkout with no uncommitted or untracked files, else undefined. */
+export function testedTree(root: string): { commit: string; tree: string } | undefined {
+  if (git(root, "status", "--porcelain", "--untracked-files=all")) return undefined;
+  return { commit: git(root, "rev-parse", "HEAD"), tree: git(root, "rev-parse", "HEAD^{tree}") };
+}
+
+export function writeReceipt(dir: string, receipt: SuiteReceipt): void {
+  if (!OBJECT_ID.test(receipt.tree) || !OBJECT_ID.test(receipt.commit)) throw new Error("Receipts need full object ids");
+  NodeFS.mkdirSync(dir, { recursive: true });
+  const file = NodePath.join(dir, `${receipt.tree}.json`);
+  const temporary = `${file}.${process.pid}.tmp`;
+  NodeFS.writeFileSync(temporary, JSON.stringify(receipt, null, 2));
+  NodeFS.renameSync(temporary, file);
+}
+
+/** The receipt whose full commit or tree id equals the one given, compared exactly. */
+export function receiptFor(dir: string, match: { commit?: string; tree?: string }): SuiteReceipt | undefined {
+  if (!NodeFS.existsSync(dir)) return undefined;
+  for (const name of NodeFS.readdirSync(dir).filter((entry) => entry.endsWith(".json"))) {
+    let receipt: SuiteReceipt;
+    try {
+      receipt = JSON.parse(NodeFS.readFileSync(NodePath.join(dir, name), "utf8"));
+    } catch {
+      continue;
+    }
+    const complete =
+      OBJECT_ID.test(receipt.commit) &&
+      OBJECT_ID.test(receipt.tree) &&
+      name === `${receipt.tree}.json` &&
+      Object.keys(SUITES).every((suite) => ["passed", "failed"].includes(receipt.results?.[suite as SuiteName]));
+    if (complete && (receipt.commit === match.commit || receipt.tree === match.tree)) return receipt;
+  }
+  return undefined;
 }
 
 export function isSuiteName(name: string): name is SuiteName {
@@ -107,17 +172,4 @@ export function failingTestFiles(dir: string): Array<{ readonly log: string; rea
       found.set(`${log}\0${file}`, { log, file: file! });
   }
   return [...found.values()];
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Removes `clone-*` directories directly inside root that are more than a day old; returns them. */
-export function removeStaleClones(root: string, now = Date.now()): string[] {
-  if (!NodeFS.existsSync(root)) return [];
-  const stale = NodeFS.readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("clone-"))
-    .map((entry) => NodePath.join(root, entry.name))
-    .filter((dir) => now - NodeFS.lstatSync(dir).mtimeMs > DAY_MS);
-  for (const dir of stale) NodeFS.rmSync(dir, { recursive: true, force: true });
-  return stale;
 }

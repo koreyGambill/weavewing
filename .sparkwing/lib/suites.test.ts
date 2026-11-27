@@ -4,7 +4,9 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { test } from "node:test";
 
-import { failingTestFiles, parseTaskList, removeStaleClones } from "./suites.ts";
+import * as CP from "node:child_process";
+
+import { failingTestFiles, parseTaskList, receiptFor, testedTree, writeReceipt } from "./suites.ts";
 
 const list = `  typecheck: vp run -r --cache --concurrency-limit 4 typecheck
   @t3tools/contracts#typecheck: effect-tsgo tsrs --noEmit
@@ -17,7 +19,13 @@ const list = `  typecheck: vp run -r --cache --concurrency-limit 4 typecheck
 test("the task list names each package that defines the task, without the workspace root", () => {
   assert.deepEqual(parseTaskList(list, "typecheck"), ["@t3tools/contracts", "@t3tools/web"]);
   assert.deepEqual(parseTaskList(list, "test"), ["@t3tools/contracts"]);
-  assert.deepEqual(parseTaskList("error: no tasks\n", "typecheck"), []);
+  assert.deepEqual(parseTaskList("  t3#typecheck:watch: tsgo --watch\n  t3#typecheck: tsgo\n", "typecheck"), ["t3"]);
+});
+
+test("a task list with any line it cannot read fails instead of dropping packages", () => {
+  assert.throws(() => parseTaskList(`${list}   @t3tools/web#test: vp test run\n`, "test"), /cannot read/);
+  assert.throws(() => parseTaskList("error: no tasks\n", "typecheck"), /cannot read/);
+  assert.throws(() => parseTaskList("\n", "typecheck"), /cannot read/);
 });
 
 test("failing test files are read from every suite log, once each", () => {
@@ -39,16 +47,47 @@ test("failing test files are read from every suite log, once each", () => {
   }
 });
 
-test("only clone directories in the cache folder older than a day are removed", () => {
-  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "confirm-clones-"));
+const tree = "a".repeat(40);
+const commit = "b".repeat(40);
+const results = { web: "passed", server: "failed", packages: "passed" } as const;
+
+test("a receipt matches only the full commit or tree id it records, with every suite's result", () => {
+  const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "suite-receipts-"));
   try {
-    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    for (const name of ["clone-old", "clone-new", "keep-old"]) FS.mkdirSync(Path.join(root, name));
-    FS.writeFileSync(Path.join(root, "clone-file"), "not a directory\n");
-    for (const name of ["clone-old", "keep-old", "clone-file"]) FS.utimesSync(Path.join(root, name), old, old);
-    assert.deepEqual(removeStaleClones(root), [Path.join(root, "clone-old")]);
-    assert.deepEqual(FS.readdirSync(root).sort(), ["clone-file", "clone-new", "keep-old"]);
-    assert.deepEqual(removeStaleClones(Path.join(root, "missing")), []);
+    assert.equal(receiptFor(dir, { tree }), undefined);
+    writeReceipt(dir, { commit, tree, results, finishedAt: "2026-11-27T02:00:00.000Z" });
+    assert.equal(receiptFor(dir, { tree })?.commit, commit);
+    assert.equal(receiptFor(dir, { commit })?.tree, tree);
+    assert.equal(receiptFor(dir, { tree: tree.slice(0, 12) }), undefined);
+    assert.equal(receiptFor(dir, { commit: "c".repeat(40) }), undefined);
+    const other = "d".repeat(40);
+    FS.writeFileSync(Path.join(dir, `${other}.json`), JSON.stringify({ commit, tree: other, results: { web: "passed" } }));
+    assert.equal(receiptFor(dir, { tree: other }), undefined, "a receipt missing a suite");
+    FS.writeFileSync(Path.join(dir, `${"e".repeat(40)}.json`), JSON.stringify({ commit, tree: other, results }));
+    assert.equal(receiptFor(dir, { tree: other }), undefined, "a receipt filed under another tree");
+    assert.throws(() => writeReceipt(dir, { commit: "abc", tree, results, finishedAt: "" }), /full object ids/);
+  } finally {
+    FS.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only a clean checkout has a tested tree", () => {
+  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "tested-tree-"));
+  const git = (...args: string[]) =>
+    CP.execFileSync("git", ["-C", root, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" }).trim();
+  try {
+    git("init", "--initial-branch=main");
+    FS.writeFileSync(Path.join(root, ".gitignore"), "node_modules/\n");
+    FS.writeFileSync(Path.join(root, "a.ts"), "1\n");
+    git("add", ".");
+    git("commit", "-m", "first");
+    FS.mkdirSync(Path.join(root, "node_modules"));
+    assert.deepEqual(testedTree(root), { commit: git("rev-parse", "HEAD"), tree: git("rev-parse", "HEAD^{tree}") });
+    FS.writeFileSync(Path.join(root, "b.ts"), "2\n");
+    assert.equal(testedTree(root), undefined, "an untracked file");
+    FS.rmSync(Path.join(root, "b.ts"));
+    FS.writeFileSync(Path.join(root, "a.ts"), "3\n");
+    assert.equal(testedTree(root), undefined, "an edited file");
   } finally {
     FS.rmSync(root, { recursive: true, force: true });
   }

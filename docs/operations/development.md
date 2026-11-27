@@ -237,11 +237,12 @@ does (`web`, `server` or `packages`), when someone needs one, and reports every 
 the main checkout's env files that a clean clone must not contain.
 `sparkwing run gate --help` and `sparkwing run suite --help` list their arguments.
 
-`sparkwing run confirm-main` confirms `origin/main` and gates nothing. It waits as batch work for a
-suite's cores, then stops when a finished `suite --full` run already covers the head's tree (pass
-`-- --force` to run anyway). Otherwise it clones `origin/main` into a new directory under its cache,
-runs `suite --full` there, appends any failing files to the known-failures list, and removes the
-clone. Its daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
+`sparkwing run confirm-main` confirms `origin/main` and gates nothing. It fetches `origin/main` and
+stops when a receipt from `suite --full` already records that commit or tree (pass `-- --force` to
+run anyway). Otherwise it runs `suite --full` as batch work in a fresh checkout of `origin/main`
+that Sparkwing makes, which installs itself, and appends any failing files to the known-failures
+list. `suite --full` writes a receipt only when the tree it tested was committed and clean. The
+daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB
 of available memory. On a large machine a run takes about as long as its slowest step, usually
