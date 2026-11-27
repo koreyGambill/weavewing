@@ -2636,11 +2636,12 @@ it.effect(
 );
 
 it.effect.each([
-  { relationshipToParent: null, subagent: false },
-  { relationshipToParent: "subagent", subagent: true },
+  { relationshipToParent: null, remote: false, subagent: false },
+  { relationshipToParent: "subagent", remote: false, subagent: true },
+  { relationshipToParent: null, remote: true, subagent: false },
 ] as const)(
-  "ProviderSessionManagerV2 marks MCP credentials of delegated children ($relationshipToParent)",
-  ({ relationshipToParent, subagent }) =>
+  "ProviderSessionManagerV2 scopes question tools by local lineage ($relationshipToParent, remote $remote)",
+  ({ relationshipToParent, remote, subagent }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2669,6 +2670,15 @@ it.effect.each([
                   relationshipToParent === null
                     ? created.payload.lineage
                     : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+                ...(remote
+                  ? {
+                      delegatedFrom: {
+                        environmentId: EnvironmentId.make("remote-environment"),
+                        threadId: parentThreadId,
+                        title: "Remote parent",
+                      },
+                    }
+                  : {}),
               },
             },
           ],
@@ -2680,11 +2690,22 @@ it.effect.each([
           "",
         );
         assert.isDefined(token);
-        assert.equal((yield* registry.resolve(token!))?.thread.subagent, subagent);
+        const credential = yield* registry.resolve(token!);
+        assert.equal(credential?.thread.subagent, subagent);
+        assert.equal(credential?.capabilities.has("questions"), !subagent);
         yield* manager.close(providerSessionId);
       });
 
-      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+      yield* effect.pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1_000,
+            mcpConfigs,
+            serverSettingsLayer: ServerSettings.layerTest({ waitingCardsEnabled: true }),
+          }),
+        ),
+      );
     }),
 );
 

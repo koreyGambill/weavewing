@@ -582,11 +582,7 @@ export const layerWithOptions = (
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const lineage = yield* projectionStore.getThread(threadId).pipe(
-                  Effect.map(
-                    (thread) =>
-                      thread.lineage.relationshipToParent === "subagent" ||
-                      thread.delegatedFrom != null,
-                  ),
+                  Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
                   Effect.option,
                 );
                 const subagent = Option.getOrElse(lineage, () => false);
