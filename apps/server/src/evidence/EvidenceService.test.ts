@@ -1662,8 +1662,9 @@ it.effect(
         const evidence = yield* Service.EvidenceService;
         for (let index = 0; index < 52; index++) {
           const minute = String(index).padStart(2, "0");
+          // Notes, so no waiting card pulls an old landing into the read.
           yield* evidence.record(
-            recordInput(`landing-${minute}`, [change("a")], {
+            recordInput(`landing-${minute}`, [change("a", { attention: "note" })], {
               landedAt: `2026-11-20T10:${minute}:00.000Z`,
             }),
           );
@@ -2234,43 +2235,39 @@ it.effect("a lead's Notes list its delegated children's notes, as its timeline d
   ).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("a lead's thread read holds every landing its waiting strip lists, however old", () =>
-  withHome(() =>
-    Effect.gen(function* () {
-      const evidence = yield* Service.EvidenceService;
-      const sql = yield* SqlClient.SqlClient;
-      yield* seedThread({ id: "lead" });
-      yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
-      yield* evidence.record(
-        recordInput("old-child", [unmarked("old-note")], {
-          threadId: ThreadId.make("child"),
-          landedAt: "2026-11-01T10:00:00.000Z",
-        }),
-      );
-      for (let index = 0; index < 50; index++)
+it.effect(
+  "a lead's thread read holds every landing its waiting strip lists, as soon as it is raised",
+  () =>
+    withHome(() =>
+      Effect.gen(function* () {
+        const evidence = yield* Service.EvidenceService;
+        yield* seedThread({ id: "lead" });
+        yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
         yield* evidence.record(
-          recordInput(`newer-${index}`, [change("c", { attention: "note", gaps: [] })], {
-            landedAt: `2026-11-2${index % 5}T1${index % 10}:00:${String(index).padStart(2, "0")}.000Z`,
+          recordInput("old-child", [unmarked("old-note")], {
+            threadId: ThreadId.make("child"),
+            landedAt: "2026-11-01T10:00:00.000Z",
           }),
         );
-      const read = () =>
-        evidence
-          .thread({ threadId: lead })
-          .pipe(Effect.map((result) => result.landings.map((landing) => landing.id)));
-      assert.notInclude(yield* read(), "old-child");
+        for (let index = 0; index < 50; index++)
+          yield* evidence.record(
+            recordInput(`newer-${index}`, [change("c", { attention: "note", gaps: [] })], {
+              landedAt: `2026-11-2${index % 5}T1${index % 10}:00:${String(index).padStart(2, "0")}.000Z`,
+            }),
+          );
+        const read = () =>
+          evidence
+            .thread({ threadId: lead })
+            .pipe(Effect.map((result) => result.landings.map((landing) => landing.id)));
+        assert.notInclude(yield* read(), "old-child");
 
-      yield* evidence.setQa({ landingId: "old-child", changeId: "old-note", state: "pending" });
-      const [waiting] = yield* evidence.waitingQa(lead);
-      assert.strictEqual(waiting?.key, "old-child/old-note");
-      // The waiting mirror stores what the strip lists, as the thread's projection does.
-      yield* sql`UPDATE orchestration_v2_projection_threads
-        SET payload_json = json_set(payload_json, '$.waiting', json(${JSON.stringify([waiting])}))
-        WHERE thread_id = 'lead'`;
-      const landings = yield* read();
-      assert.strictEqual(landings.length, 51);
-      assert.include(landings, "old-child");
-    }),
-  ).pipe(Effect.provide(testLayer)),
+        yield* evidence.setQa({ landingId: "old-child", changeId: "old-note", state: "pending" });
+        // Read as soon as the promotion commits, before anything mirrors it to the strip.
+        const landings = yield* read();
+        assert.strictEqual(landings.length, 51);
+        assert.include(landings, "old-child");
+      }),
+    ).pipe(Effect.provide(testLayer)),
 );
 
 it.effect("a Notes page lists at most 50 notes, each shortened, and pages on to the rest", () =>

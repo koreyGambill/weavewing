@@ -12,11 +12,7 @@ import {
 import { useThreadEvidence } from "../../state/evidence";
 import { useThreadHasSubagents, useThreadWaitsOnQa } from "../../state/entities";
 import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
-import {
-  placedLandingIds,
-  timelineMayHoldQa,
-  withChildLandingCards,
-} from "../evidence/qaCard.logic";
+import { placedLandingIds, timelineMayHoldQa, withLandingCards } from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
@@ -72,7 +68,7 @@ export function ThreadTimeline({
   const hasSubagents = useThreadHasSubagents(threadDetailRef);
   const waitsOnQa = useThreadWaitsOnQa(threadDetailRef);
   const evidence = useThreadEvidence(
-    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents || waitsOnQa)
+    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents, waitsOnQa)
       ? threadDetailRef
       : null,
     placedLandingIds(plainEntries),
@@ -80,7 +76,7 @@ export function ThreadTimeline({
   const entries =
     evidence.data === null || threadDetailRef === null
       ? plainEntries
-      : withChildLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
+      : withLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({
