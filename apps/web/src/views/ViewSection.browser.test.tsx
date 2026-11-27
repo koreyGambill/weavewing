@@ -2,6 +2,7 @@ import { expect, it } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { useThreadContextSidebarStore } from "~/threadContextSidebarStore";
+import { useToolSidebarStore } from "~/toolSidebarStore";
 import { act, render } from "../../test/render";
 import { ViewSection, ViewSectionGroup } from "./ViewSection";
 
@@ -21,6 +22,7 @@ function Panel() {
 }
 
 function setup() {
+  useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
   useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
 }
 

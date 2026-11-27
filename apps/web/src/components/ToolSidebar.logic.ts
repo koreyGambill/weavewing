@@ -66,6 +66,10 @@ export interface SideAreaState {
   readonly maximized: boolean;
   /** The last thread view shown, which the thread views shortcut opens. */
   readonly threadView: ThreadViewId;
+  /** A destination the last thread view shortcut should reopen. */
+  readonly threadSection: ViewSectionId | null;
+  /** A section waiting to scroll into view. */
+  readonly revealSection: ViewSectionId | null;
   /** A thread a view was opened for while navigating to it; arriving there keeps it open. */
   readonly arrival: ScopedThreadRef | null;
 }
@@ -78,6 +82,8 @@ export const INITIAL_SIDE_AREA: SideAreaState = {
   locked: null,
   maximized: false,
   threadView: "details",
+  threadSection: null,
+  revealSection: null,
   arrival: null,
 };
 
@@ -96,6 +102,7 @@ export type SideAreaAction =
   | {
       type: "show";
       view: ViewId;
+      section?: ViewSectionId;
       thread?: ScopedThreadRef;
       /** Set while navigating to `thread`, so arriving there keeps the view open. */
       arriving?: boolean;
@@ -143,9 +150,11 @@ export function restoreSideArea(value: unknown): SideAreaState {
   const current = decodePersistedSideArea(value);
   if (current._tag === "Some") {
     const { open, width, pinned, locked } = current.value;
-    const view = migrateViewId(current.value.view);
-    if (view === null) return INITIAL_SIDE_AREA;
-    const threadView = migrateViewId(current.value.threadView);
+    const shown = migrateViewTarget(current.value.view);
+    if (shown === null) return INITIAL_SIDE_AREA;
+    const { view } = shown;
+    const remembered = migrateViewTarget(current.value.threadView);
+    const last = remembered && isThreadViewId(remembered.view) ? remembered : shown;
     return {
       open,
       view,
@@ -154,12 +163,9 @@ export function restoreSideArea(value: unknown): SideAreaState {
       locked,
       maximized: false,
       arrival: null,
-      threadView:
-        threadView !== null && isThreadViewId(threadView)
-          ? threadView
-          : isThreadViewId(view)
-            ? view
-            : INITIAL_SIDE_AREA.threadView,
+      revealSection: shown.section ?? null,
+      threadView: isThreadViewId(last.view) ? last.view : INITIAL_SIDE_AREA.threadView,
+      threadSection: last.section ?? null,
     };
   }
   const legacy = decodeLegacyToolSidebar(value);
@@ -218,7 +224,13 @@ export function migrateViewTarget(
  * The id to store for a view, so a build from before the five merged views reads it: Checklist
  * and Activity keep the ids of the views they replaced, and `migrateViewTarget` maps them back.
  */
-export function storedViewId(view: ViewId): string {
+export function storedViewId(view: ViewId, section: ViewSectionId | null = null): string {
+  if (section) {
+    const legacy = Object.entries(RETIRED_VIEWS).find(
+      ([, target]) => target?.view === view && target.section === section,
+    );
+    if (legacy) return legacy[0];
+  }
   switch (view) {
     case "checklist":
       return "todos";
@@ -246,16 +258,20 @@ export interface RetiredRailSelection {
  * becomes the one the thread views shortcut opens.
  */
 export function adoptRetiredRail(state: SideAreaState, rail: RetiredRailSelection): SideAreaState {
-  const shown = migrateViewId(rail.view);
-  const last = migrateViewId(rail.lastTool);
-  const threadView =
-    shown !== null && isThreadViewId(shown)
-      ? shown
-      : last !== null && isThreadViewId(last)
-        ? last
-        : state.threadView;
-  if (shown === null || state.open) return { ...state, threadView };
-  return { ...state, open: true, view: shown, threadView };
+  const shown = migrateViewTarget(rail.view);
+  const last = shown && isThreadViewId(shown.view) ? shown : migrateViewTarget(rail.lastTool);
+  const remembered =
+    last && isThreadViewId(last.view)
+      ? { threadView: last.view, threadSection: last.section ?? null }
+      : {};
+  if (shown === null || state.open) return { ...state, ...remembered };
+  return {
+    ...state,
+    ...remembered,
+    open: true,
+    view: shown.view,
+    revealSection: shown.section ?? null,
+  };
 }
 
 function sameThread(a: ScopedThreadRef | null, b: ScopedThreadRef | null) {
@@ -270,8 +286,17 @@ function targetFor(thread: ScopedThreadRef, selected: ScopedThreadRef | null) {
   return sameThread(selected, thread) ? null : thread;
 }
 
-function withView(state: SideAreaState, view: ViewId): SideAreaState {
-  return { ...state, view, threadView: isThreadViewId(view) ? view : state.threadView };
+function withView(
+  state: SideAreaState,
+  view: ViewId,
+  section: ViewSectionId | null = null,
+): SideAreaState {
+  return {
+    ...state,
+    view,
+    revealSection: section,
+    ...(isThreadViewId(view) ? { threadView: view, threadSection: section } : {}),
+  };
 }
 
 export function transitionSideArea(state: SideAreaState, action: SideAreaAction): SideAreaState {
@@ -279,7 +304,7 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
     case "toggle":
       return { ...state, open: !state.open, maximized: false };
     case "show": {
-      const opened = { ...withView(state, action.view), open: true };
+      const opened = { ...withView(state, action.view, action.section), open: true };
       const { thread, context } = action;
       if (thread === undefined) return opened;
       // Navigating there: the target is settled on arrival, against the thread followed there.
@@ -299,7 +324,7 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
     case "toggleThreadViews":
       return state.open && isThreadViewId(state.view)
         ? { ...state, open: false, maximized: false }
-        : { ...state, open: true, view: state.threadView };
+        : { ...state, open: true, view: state.threadView, revealSection: state.threadSection };
     case "toggleView":
       if (
         state.open &&

@@ -262,8 +262,8 @@ describe("thread views store", () => {
       "details",
       { thread: owner, section: "details:environments" },
       {},
-      { view: "details", locked: null },
-      { revealSection: "details:environments" },
+      { view: "details", locked: null, revealSection: "details:environments" },
+      {},
     ],
     ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: child }, {}],
     [
@@ -361,8 +361,8 @@ describe("thread views store", () => {
       "details",
       { thread: child, environmentId: "e", section: "details:environments" },
       lockedElsewhere,
-      { view: "details", locked: child },
-      { environmentSelection: { thread: child, id: "e" }, revealSection: "details:environments" },
+      { view: "details", locked: child, revealSection: "details:environments" },
+      { environmentSelection: { thread: child, id: "e" } },
     ],
   ] as const)("opens %s in the side panel", (_entry, view, target, before, after, remembered) => {
     reset();
@@ -393,12 +393,12 @@ describe("thread views store", () => {
     store.show("details", { section: "details:environments" });
     expect(useThreadContextSidebarStore.getState()).toMatchObject({
       collapsedSections: ["activity:landings"],
-      revealSection: "details:environments",
     });
-    store.consumeRevealSection("details:inspect");
-    expect(useThreadContextSidebarStore.getState().revealSection).toBe("details:environments");
-    store.consumeRevealSection("details:environments");
-    expect(useThreadContextSidebarStore.getState().revealSection).toBeNull();
+    const panel = useToolSidebarStore.getState();
+    panel.consumeRevealSection("details:inspect");
+    expect(useToolSidebarStore.getState().revealSection).toBe("details:environments");
+    panel.consumeRevealSection("details:environments");
+    expect(useToolSidebarStore.getState().revealSection).toBeNull();
     vi.unstubAllGlobals();
   });
 

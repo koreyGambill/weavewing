@@ -182,6 +182,8 @@ describe("side area", () => {
       width: 640,
       maximized: false,
       threadView: "links",
+      threadSection: null,
+      revealSection: null,
       arrival: null,
     });
     expect(restoreSideArea({ ...stored, view: "status", threadView: "timeline" })).toMatchObject({
@@ -285,15 +287,21 @@ describe("side area", () => {
     ],
     [
       { view: "inbox", lastTool: "timeline" },
-      { open: true, view: "inbox", threadView: "activity" },
+      { open: true, view: "inbox", threadView: "activity", threadSection: "activity:runs" },
     ],
     [
       { view: "related", lastTool: "related" },
-      { open: true, view: "links", threadView: "links" },
+      {
+        open: true,
+        view: "links",
+        threadView: "links",
+        threadSection: "links:threads",
+        revealSection: "links:threads",
+      },
     ],
     [
       { view: "threads", lastTool: "inspect" },
-      { open: false, view: "details" },
+      { open: false, view: "details", threadSection: "details:inspect" },
     ],
     [
       { view: "threads", lastTool: "automations" },

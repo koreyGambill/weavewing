@@ -13,10 +13,12 @@ import {
   type SideAreaContext,
   type SideAreaState,
   type ViewId,
+  type ViewSectionId,
 } from "./components/ToolSidebar.logic";
 
 interface SideAreaStore extends SideAreaState {
   dispatch: (action: SideAreaAction) => void;
+  consumeRevealSection: (section: ViewSectionId) => void;
 }
 
 // What had focus when the side area opened; closing hands focus back to it.
@@ -106,6 +108,8 @@ export const useToolSidebarStore = create<SideAreaStore>()(
   persist(
     (set, get) => ({
       ...INITIAL_SIDE_AREA,
+      consumeRevealSection: (section) =>
+        set((state) => (state.revealSection === section ? { revealSection: null } : state)),
       dispatch: (request) => {
         const action: SideAreaAction =
           request.type === "show" && request.thread !== undefined && request.context === undefined
@@ -142,13 +146,22 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       name: "weavewing_tool_sidebar",
       version: 1,
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
-      partialize: ({ open, view, width, pinned, locked, threadView }) => ({
+      partialize: ({
         open,
-        view: storedViewId(view),
+        view,
         width,
         pinned,
         locked,
-        threadView: storedViewId(threadView),
+        threadView,
+        threadSection,
+        revealSection,
+      }) => ({
+        open,
+        view: storedViewId(view, revealSection),
+        width,
+        pinned,
+        locked,
+        threadView: storedViewId(threadView, threadSection),
       }),
       // Before version 1 no handoff had happened; the shape is read by `restoreSideArea`.
       migrate: (persisted) => {
@@ -157,6 +170,7 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       },
       merge: (persisted, current) => {
         railHandoffPending = persisted === undefined || storedBeforeHandoff;
+        storedBeforeHandoff = false;
         return { ...current, ...restoreSideArea(persisted) };
       },
     },

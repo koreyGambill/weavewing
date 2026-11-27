@@ -4,6 +4,7 @@ import { observeIntersection } from "../lib/observeIntersection";
 import { cn } from "../lib/utils";
 import type { ViewSectionId } from "../components/ToolSidebar.logic";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
+import { useToolSidebarStore } from "../toolSidebarStore";
 
 interface SectionGroup {
   readonly order: ReadonlyArray<ViewSectionId>;
@@ -47,9 +48,9 @@ export function ViewSection({
 }) {
   const group = use(SectionGroupContext);
   const collapsedSections = useThreadContextSidebarStore((state) => state.collapsedSections);
-  const collapsed = collapsedSections.includes(id);
-  const requestedSection = useThreadContextSidebarStore((state) => state.revealSection);
+  const requestedSection = useToolSidebarStore((state) => state.revealSection);
   const reveal = requestedSection === id;
+  const collapsed = !reveal && collapsedSections.includes(id);
   const order = group?.order ?? [];
   const index = order.indexOf(id);
   const revealIndex = requestedSection === null ? -1 : order.indexOf(requestedSection);
@@ -77,7 +78,9 @@ export function ViewSection({
   useLayoutEffect(() => {
     if (!reveal || !aboveDone || !section.current) return;
     section.current.scrollIntoView({ block: "start" });
-    useThreadContextSidebarStore.getState().consumeRevealSection(id);
+    const preferences = useThreadContextSidebarStore.getState();
+    if (preferences.collapsedSections.includes(id)) preferences.toggleSection(id);
+    useToolSidebarStore.getState().consumeRevealSection(id);
   }, [reveal, aboveDone, id]);
   const headingId = `view-section-${id}`;
   return (

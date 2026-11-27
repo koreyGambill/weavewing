@@ -84,21 +84,19 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-async function mountApp(threads: ReadonlyArray<FakeThread>, width: number, path?: string) {
+async function mountApp(
+  threads: ReadonlyArray<FakeThread>,
+  width: number,
+  path?: string,
+  restore?: () => Promise<void>,
+) {
   const stack = new AsyncDisposableStack();
   const initialSize = { width: window.innerWidth, height: window.innerHeight };
   stack.defer(() => page.viewport(initialSize.width, initialSize.height));
   await page.viewport(width, 800);
-  useToolSidebarStore.setState({
-    open: false,
-    view: "details",
-    width: 300,
-    pinned: false,
-    locked: null,
-    maximized: false,
-    threadView: "details",
-    arrival: null,
-  });
+  useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
+  useThreadContextSidebarStore.setState(useThreadContextSidebarStore.getInitialState());
+  await restore?.();
   useRightPanelStore.setState({ byThreadKey: {} });
   stack.use(installFakeEnvironment(threads));
   __setClientSettingsForTests({
@@ -696,3 +694,51 @@ it("counts Checklist and flags Links in the picker from held data only", async (
   expect(page.getByRole("menuitemradio", { name: /Checklist.*2/ }).query()).toBeNull();
   expect(requested).not.toContain(other.id);
 });
+
+it.each(["panel", "rail", "shortcut"] as const)(
+  "reveals Context and usage from a legacy %s snapshot",
+  async (source) => {
+    const { stack, screen } = await mountApp(
+      [threadWithHistory("legacy-inspect", 1)],
+      390,
+      undefined,
+      async () => {
+        await page.viewport(390, 450);
+        localStorage.setItem(
+          "weavewing_tool_sidebar",
+          JSON.stringify({
+            version: 0,
+            state: {
+              open: source === "panel",
+              view: source === "panel" ? "inspect" : "details",
+              width: 360,
+              pinned: false,
+              locked: null,
+            },
+          }),
+        );
+        await useToolSidebarStore.persist.rehydrate();
+        if (source === "panel") return;
+        localStorage.setItem(
+          "t3code:thread-context-sidebar",
+          JSON.stringify({
+            version: 2,
+            state: { view: source === "rail" ? "inspect" : "threads", lastTool: "inspect" },
+          }),
+        );
+        await useThreadContextSidebarStore.persist.rehydrate();
+      },
+    );
+    await using _app = stack;
+    if (source === "shortcut") await userEvent.keyboard(THREAD_VIEWS_SHORTCUT);
+    const panel = screen.getByRole("complementary", { name: "Side panel" });
+    await expect
+      .element(panel.getByRole("button", { name: "Context and usage" }))
+      .toBeInViewport({ ratio: 1 });
+    await vi.waitFor(() =>
+      expect(
+        panel.getByRole("region", { name: "Details", exact: true }).element().scrollTop,
+      ).toBeGreaterThan(0),
+    );
+  },
+);

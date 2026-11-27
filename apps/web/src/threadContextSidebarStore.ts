@@ -3,12 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 import type { TodoFilter } from "./components/reviews/todoList.logic";
-import {
-  isGlobalViewId,
-  migrateViewId,
-  type ViewId,
-  type ViewSectionId,
-} from "./components/ToolSidebar.logic";
+import { isGlobalViewId, type ViewId, type ViewSectionId } from "./components/ToolSidebar.logic";
 import { adoptRetiredRailSelection, useToolSidebarStore } from "./toolSidebarStore";
 
 export type InboxTab = "inbox" | "snoozed" | "dismissed";
@@ -72,9 +67,6 @@ interface ThreadContextSidebarState {
   /** Sections of merged views the viewer collapsed; every other section is expanded. */
   collapsedSections: ReadonlyArray<ViewSectionId>;
   toggleSection: (section: ViewSectionId) => void;
-  /** A section an opener asked to see, which scrolls into view once it renders. */
-  revealSection: ViewSectionId | null;
-  consumeRevealSection: (section: ViewSectionId) => void;
   /** Opens a view in the side panel on the item `target` names. */
   show: (view: ViewId, target?: ShowTarget) => void;
   selectArtifact: (thread: ScopedThreadRef, id: string | null) => void;
@@ -106,9 +98,6 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
             ? state.collapsedSections.filter((entry) => entry !== section)
             : [...state.collapsedSections, section],
         })),
-      revealSection: null,
-      consumeRevealSection: (section) =>
-        set((state) => (state.revealSection === section ? { revealSection: null } : state)),
       evidenceScope: "all",
       evidenceShow: "all",
       evidenceCoverageDismissed: {},
@@ -128,7 +117,6 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
         set((state) => ({
           ...(section
             ? {
-                revealSection: section,
                 collapsedSections: state.collapsedSections.filter((entry) => entry !== section),
               }
             : {}),
@@ -164,6 +152,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
         useToolSidebarStore.getState().dispatch({
           type: "show",
           view,
+          ...(section ? { section } : {}),
           ...(target.thread && !isGlobalViewId(view)
             ? {
                 thread: target.thread,
@@ -213,7 +202,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
           hidden?: unknown;
         };
         adoptRetiredRailSelection(
-          version === 0 ? { lastTool: migrateViewId(view) ?? "checklist" } : { view, lastTool },
+          version === 0 ? { lastTool: view ?? "checklist" } : { view, lastTool },
         );
         return rest as Partial<ThreadContextSidebarState>;
       },
