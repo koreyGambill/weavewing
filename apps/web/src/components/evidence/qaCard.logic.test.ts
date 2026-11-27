@@ -2,7 +2,7 @@ import { MessageId, RunId, ThreadId, type EvidenceChangeQa } from "@t3tools/cont
 import { describe, expect, it } from "vite-plus/test";
 
 import type { TimelineEntry } from "../../session-logic";
-import { placedLandingIds, timelineMayHoldQa, withChildLandingCards } from "./qaCard.logic";
+import { placedLandingIds, timelineMayHoldQa, withLandingCards } from "./qaCard.logic";
 
 const qa = (overrides: Partial<EvidenceChangeQa>): EvidenceChangeQa => ({
   state: "pending",
@@ -13,7 +13,7 @@ const qa = (overrides: Partial<EvidenceChangeQa>): EvidenceChangeQa => ({
   ...overrides,
 });
 
-describe("withChildLandingCards", () => {
+describe("withLandingCards", () => {
   const lead = ThreadId.make("lead");
   const child = ThreadId.make("child");
   const work = (id: string, createdAt: string, runId: string): TimelineEntry => ({
@@ -63,7 +63,7 @@ describe("withChildLandingCards", () => {
       work("next", "2026-11-25T10:40:00Z", "run-2"),
     ];
     expect(
-      ids(withChildLandingCards(lead, entries, [landing("l1", "2026-11-25T10:10:00Z") as never])),
+      ids(withLandingCards(lead, entries, [landing("l1", "2026-11-25T10:10:00Z") as never])),
     ).toEqual(["delegate", "done-other", "done-child", "cards:l1", "next"]);
   });
 
@@ -75,7 +75,7 @@ describe("withChildLandingCards", () => {
       work("later", "2026-11-25T10:40:00Z", "run-3"),
     ];
     const grandchild = landing("l1", "2026-11-25T10:10:00Z", ThreadId.make("grandchild"));
-    expect(ids(withChildLandingCards(lead, entries, [grandchild as never]))).toEqual([
+    expect(ids(withLandingCards(lead, entries, [grandchild as never]))).toEqual([
       "before",
       "turn-start",
       "turn-end",
@@ -83,7 +83,7 @@ describe("withChildLandingCards", () => {
       "later",
     ]);
     const late = landing("l2", "2026-11-25T11:00:00Z");
-    expect(ids(withChildLandingCards(lead, entries, [late as never])).at(-1)).toBe("cards:l2");
+    expect(ids(withLandingCards(lead, entries, [late as never])).at(-1)).toBe("cards:l2");
   });
 
   it("reads and places a child's landing in a lead whose timeline names no child or landing", () => {
@@ -93,10 +93,10 @@ describe("withChildLandingCards", () => {
       work("next-start", "2026-11-25T10:20:00Z", "run-2"),
       work("next-end", "2026-11-25T10:25:00Z", "run-2"),
     ];
-    expect(timelineMayHoldQa(entries, false)).toBe(false);
-    expect(timelineMayHoldQa(entries, true)).toBe(true);
+    expect(timelineMayHoldQa(entries, false, false)).toBe(false);
+    expect(timelineMayHoldQa(entries, true, false)).toBe(true);
     expect(
-      ids(withChildLandingCards(lead, entries, [landing("l1", "2026-11-25T10:10:00Z") as never])),
+      ids(withLandingCards(lead, entries, [landing("l1", "2026-11-25T10:10:00Z") as never])),
     ).toEqual(["ask", "next-start", "next-end", "cards:l1"]);
   });
 
@@ -131,10 +131,61 @@ describe("withChildLandingCards", () => {
     ).toEqual(["landing-a", "landing-b"]);
   });
 
-  it("leaves the lead's own landings and other threads' landings to their own rows", () => {
-    const entries = [work("a", "2026-11-25T10:00:00Z", "run-1")];
+  it("leaves the lead's placed or settled landings and other threads' landings alone", () => {
+    const call: TimelineEntry = {
+      id: "call",
+      kind: "thread-evidence",
+      createdAt: "2026-11-25T10:00:00Z",
+      runId: null,
+      landingIds: ["own"],
+    };
+    const entries = [call, work("a", "2026-11-25T10:01:00Z", "run-1")];
     const own = { ...landing("own", "2026-11-25T09:00:00Z"), threadId: lead };
+    const settled = {
+      ...landing("settled", "2026-11-25T08:00:00Z"),
+      threadId: lead,
+      changes: [{ qa: qa({ state: "confirmed", by: "user" }) }],
+    };
     const elsewhere = { ...landing("x", "2026-11-25T09:00:00Z"), qaThreadId: child };
-    expect(withChildLandingCards(lead, entries, [own, elsewhere] as never)).toBe(entries);
+    expect(withLandingCards(lead, entries, [own, settled, elsewhere] as never)).toBe(entries);
+  });
+
+  it("puts the lead's waiting card whose call is not loaded at the loaded edge", () => {
+    const entries = [
+      work("loaded-start", "2026-11-25T10:00:00Z", "run-9"),
+      work("later", "2026-11-25T10:05:00Z", "run-9"),
+    ];
+    const old = { ...landing("old-own", "2026-11-01T09:00:00Z"), threadId: lead };
+    const fixing = {
+      ...landing("fixing-own", "2026-11-02T09:00:00Z"),
+      threadId: lead,
+      changes: [{ qa: qa({ state: "problem", by: "agent" }) }],
+    };
+    expect(ids(withLandingCards(lead, entries, [fixing, old] as never))).toEqual([
+      "cards:old-own,fixing-own",
+      "loaded-start",
+      "later",
+    ]);
+  });
+});
+
+describe("timelineMayHoldQa", () => {
+  it("reads landings while the strip lists a QA change, even with nowhere else to put them", () => {
+    const entries: ReadonlyArray<TimelineEntry> = [
+      {
+        id: "ask",
+        kind: "work",
+        createdAt: "2026-11-25T10:00:00Z",
+        entry: {
+          id: "ask",
+          createdAt: "2026-11-25T10:00:00Z",
+          label: "ask",
+          tone: "tool",
+          runId: RunId.make("run-1"),
+        },
+      },
+    ];
+    expect(timelineMayHoldQa(entries, false, false)).toBe(false);
+    expect(timelineMayHoldQa(entries, false, true)).toBe(true);
   });
 });

@@ -27,6 +27,7 @@ import {
   type EvidenceThreadInput,
   type EvidenceThreadResult,
   threadQuestionTitle,
+  waitingDisplayRows,
   type WaitingItemSummary,
   EVIDENCE_BULK_DISMISS_LIMIT,
   EVIDENCE_THREAD_LANDING_LIMIT,
@@ -772,19 +773,24 @@ const make = Effect.gen(function* () {
 
   const thread = Effect.fn("EvidenceService.thread")(function* (input: EvidenceThreadInput) {
     const requested = [...new Set(input.landingIds ?? [])];
+    // Every card the strip can list opens: the landings of the waiting QA changes it shows, read
+    // from the committed QA rows, so this read already holds a change raised a moment ago.
+    const waiting = [
+      ...new Set(
+        waitingDisplayRows(yield* readWaitingQa(input.threadId)).map(
+          (item) => item.key.split("/", 1)[0]!,
+        ),
+      ),
+    ];
     const rows = yield* sql<LandingRow>`WITH mine AS (
           SELECT landing_id, landed_at FROM evidence_landings WHERE thread_id = ${input.threadId}
           UNION SELECT landing_id, landed_at FROM evidence_landings WHERE qa_thread_id = ${input.threadId}),
         newest AS (SELECT landing_id FROM mine
-          ORDER BY landed_at DESC, landing_id DESC LIMIT ${EVIDENCE_THREAD_LANDING_LIMIT}),
-        -- The strip lists the thread's waiting mirror, so every QA change it holds can be opened.
-        mirrored AS (SELECT substr(json_extract(w.value, '$.key'), 1,
-            instr(json_extract(w.value, '$.key'), '/') - 1) AS landing_id
-          FROM orchestration_v2_projection_threads t, json_each(t.payload_json, '$.waiting') w
-          WHERE t.thread_id = ${input.threadId} AND json_extract(w.value, '$.kind') = 'qa')
+          ORDER BY landed_at DESC, landing_id DESC LIMIT ${EVIDENCE_THREAD_LANDING_LIMIT})
         SELECT * FROM evidence_landings WHERE landing_id IN (
           SELECT landing_id FROM newest
-          UNION SELECT landing_id FROM mine WHERE landing_id IN (SELECT landing_id FROM mirrored)
+          UNION SELECT landing_id FROM mine
+            WHERE ${waiting.length === 0 ? sql`0 = 1` : sql`landing_id IN ${sql.in(waiting)}`}
           UNION SELECT landing_id FROM mine
             WHERE ${requested.length === 0 ? sql`0 = 1` : sql`landing_id IN ${sql.in(requested)}`})
         ORDER BY landed_at DESC, landing_id DESC`;
@@ -944,39 +950,50 @@ const make = Effect.gen(function* () {
     }
   }, Effect.mapError(passStorage));
 
-  const waitingQa = Effect.fn("EvidenceService.waitingQa")(function* (threadId: ThreadId) {
+  // The thread's QA changes still waiting on someone, in strip order, untitled.
+  const readWaitingQa = Effect.fnUntraced(function* (threadId: ThreadId) {
     const rows = yield* sql<{
       readonly landing_id: string;
       readonly change_id: string;
       readonly state: EvidenceQaState;
       readonly ref: number | null;
       readonly discussed_message_id: string | null;
-      readonly record_json: string;
-    }>`SELECT q.landing_id, q.change_id, q.state, q.ref, q.discussed_message_id, l.record_json
+    }>`SELECT q.landing_id, q.change_id, q.state, q.ref, q.discussed_message_id
         FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
         WHERE coalesce(l.qa_thread_id, l.thread_id) = ${threadId}
           AND q.state IN ('pending', 'problem')
         ORDER BY q.ref, l.landed_at, q.landing_id, q.change_id`;
+    return rows.map((row): WaitingItemSummary => ({
+      kind: "qa",
+      ref: `QA${row.ref ?? ""}`,
+      key: `${row.landing_id}/${row.change_id}`,
+      title: "",
+      state:
+        row.state === "problem"
+          ? "problem"
+          : row.discussed_message_id === null
+            ? "open"
+            : "discussing",
+    }));
+  });
+
+  const waitingQa = Effect.fn("EvidenceService.waitingQa")(function* (threadId: ThreadId) {
+    const keyed = yield* readWaitingQa(threadId);
+    const landingIds = [...new Set(keyed.map((item) => item.key.split("/", 1)[0]!))];
+    const stored =
+      landingIds.length === 0
+        ? []
+        : yield* sql<{
+            readonly landing_id: string;
+            readonly record_json: string;
+          }>`SELECT landing_id, record_json FROM evidence_landings WHERE landing_id IN ${sql.in(landingIds)}`;
     const records = new Map<string, EvidenceRecord>();
-    const items: WaitingItemSummary[] = [];
-    for (const row of rows) {
-      const record = records.get(row.landing_id) ?? (yield* decodeRecord(row.record_json));
-      records.set(row.landing_id, record);
-      const change = record.changes.find((entry) => entry.id === row.change_id);
-      items.push({
-        kind: "qa",
-        ref: `QA${row.ref ?? ""}`,
-        key: `${row.landing_id}/${row.change_id}`,
-        title: threadQuestionTitle(change?.summary || change?.ask || row.change_id),
-        state:
-          row.state === "problem"
-            ? "problem"
-            : row.discussed_message_id === null
-              ? "open"
-              : "discussing",
-      });
-    }
-    return items;
+    for (const row of stored) records.set(row.landing_id, yield* decodeRecord(row.record_json));
+    return keyed.map((item) => {
+      const [landingId = "", changeId = ""] = item.key.split("/");
+      const change = records.get(landingId)?.changes.find((entry) => entry.id === changeId);
+      return { ...item, title: threadQuestionTitle(change?.summary || change?.ask || changeId) };
+    });
   }, Effect.mapError(passStorage));
 
   const waitingQaThreads = Effect.fn("EvidenceService.waitingQaThreads")(function* () {
