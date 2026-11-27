@@ -5,8 +5,11 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { render } from "../../../../test/render";
+import { useThreadContextSidebarStore } from "../../../threadContextSidebarStore";
 import { useToolSidebarStore } from "../../../toolSidebarStore";
+import { openInbox } from "../../inbox/openInbox";
 import { SidebarProvider } from "../../ui/sidebar";
+import { openWaitingList } from "./waitingListCommand";
 import type { WaitingThread } from "./waitingThreads.logic";
 import { WaitingOnYouRow } from "./WaitingOnYouRow";
 
@@ -20,7 +23,6 @@ const entry = (id: string, title: string): WaitingThread => ({
 });
 
 vi.mock(import("./waitingOnYou"), () => ({
-  waitingThreadsAtom: null as never,
   useWaitingOnYou: () => ({
     threads: {
       waiting: [entry("t1", "Retry toast"), entry("t2", "Webhook backoff")],
@@ -28,6 +30,8 @@ vi.mock(import("./waitingOnYou"), () => ({
     },
     inboxes: [],
     unread: 0,
+    severity: null,
+    machines: null,
     visible: true,
   }),
 }));
@@ -75,4 +79,33 @@ it("opens the Inbox view in the side panel from the list", async () => {
   await userEvent.click(screen.getByRole("button", { name: /^Waiting on you/ }));
   await userEvent.click(screen.getByRole("button", { name: /Open Inbox/ }));
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
+});
+
+it("opens the Inbox instead of a list anchored to a row the thread list hides", async () => {
+  await page.viewport(1280, 800);
+  await using screen = await render(
+    <SidebarProvider defaultOpen>
+      {/* A rail view covering the thread list hides it the same way. */}
+      <div hidden>
+        <WaitingOnYouRow />
+      </div>
+    </SidebarProvider>,
+  );
+  expect(openWaitingList()).toBe(false);
+  expect(screen.container.querySelector("[data-waiting-list-item]")).toBeNull();
+});
+
+it("opens the Inbox beside the thread list on desktop and in the sidebar on a phone", async () => {
+  await page.viewport(1280, 800);
+  useToolSidebarStore.getState().dispatch({ type: "close" });
+  useThreadContextSidebarStore.getState().selectView("threads");
+  openInbox();
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
+  expect(useThreadContextSidebarStore.getState().view).toBe("threads");
+
+  await page.viewport(390, 844);
+  useToolSidebarStore.getState().dispatch({ type: "close" });
+  openInbox();
+  expect(useToolSidebarStore.getState().open).toBe(false);
+  expect(useThreadContextSidebarStore.getState().view).toBe("inbox");
 });

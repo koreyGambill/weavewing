@@ -112,7 +112,8 @@ tool from elsewhere, such as an artifact reminder, shows it again.
 something waits on you: a question, a change to check or a task. It also shows
 how many notifications are unread, and hides when nothing waits and nothing is
 unread. Click it, or press Enter on it, to list those threads, most recently
-changed first, with each kind's count; choose one to open it. Threads where you
+changed first, with each kind's count and, when more than one machine is
+connected, the machine's name; choose one to open it. Threads where you
 are only discussing something with the agent follow under **Waiting on the
 agent** and are not counted. Unread alerts that belong to no thread, such as a
 failing status source or an automation that keeps failing, come next, and
@@ -120,8 +121,9 @@ choosing one opens it in the Inbox. **Open Inbox** opens the whole Inbox in the
 side panel. Arrow keys move through the list and Escape closes it. On narrow
 windows the list opens as a sheet. **Show what is waiting on me** in the command
 palette opens it too, and you can bind a shortcut to it under **Settings →
-Keybindings**. With **Waiting-on-you cards** off in **Settings → Threads**, the
-row shows only notifications.
+Keybindings**; when the thread list is not on screen, both open the Inbox
+instead. Turning **Waiting-on-you cards** off in **Settings → Threads** hides
+the row and its palette command; the Inbox keeps its own entry points.
 
 The **Inbox**, the bell under Threads in the strip and a view in the side panel, collects notifications that
 need urgent action or are important enough that you must not miss them, newest first.
@@ -135,7 +137,9 @@ alert to **Dismissed**. The inbox badge counts unread alerts and turns
 red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
 Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.
-Critical notifications also send a desktop notification and play a sound, and
+**Open inbox** in the command palette, a notification's **Open inbox** button
+and a desktop notification open it in the side panel, so the thread list stays in
+view; on a phone they open the sidebar's Inbox. Critical notifications also send a desktop notification and play a sound, and
 warnings do when Weavewing is in the background,
 following your settings under **Settings → General → Notifications**.
 

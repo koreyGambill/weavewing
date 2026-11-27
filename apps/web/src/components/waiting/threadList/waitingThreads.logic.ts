@@ -98,7 +98,7 @@ export const WAITING_ALERTS_LIMIT = 5;
 
 /**
  * Unread notifications in the Inbox tab that no thread owns, such as status sources and
- * automation failures, newest first. Thread-owned ones lead to a thread the list already offers.
+ * automation failures, newest first. Thread-owned ones stay in the Inbox, which the list opens.
  */
 export function selectWaitingAlerts(
   groups: ReadonlyArray<{
@@ -129,4 +129,51 @@ export function waitingRowLabel(threads: number, unread: number): string {
     unread > 0 ? `${unread} unread ${unread === 1 ? "notification" : "notifications"}` : null,
   ].filter((part) => part !== null);
   return parts.length === 0 ? "Waiting on you" : `Waiting on you: ${parts.join(", ")}`;
+}
+
+export interface WaitingInbox {
+  readonly environmentId: EnvironmentId;
+  /** Exact, from the stream's counts, never from its capped items. */
+  readonly unreadCount: number;
+  readonly items: ReadonlyArray<Notification>;
+}
+
+/**
+ * What the row and its palette entry show, or null to hide both. Only environments with waiting
+ * cards on take part, so turning the setting off hides the row whatever is unread; the Inbox
+ * keeps its own entry points.
+ */
+export function waitingRowState(
+  threads: WaitingThreads,
+  inboxes: ReadonlyArray<WaitingInbox>,
+  enabledEnvironmentIds: ReadonlyArray<EnvironmentId>,
+): { readonly inboxes: ReadonlyArray<WaitingInbox>; readonly unread: number } | null {
+  const enabled = inboxes.filter((inbox) => enabledEnvironmentIds.includes(inbox.environmentId));
+  const unread = enabled.reduce((total, inbox) => total + inbox.unreadCount, 0);
+  return threads.waiting.length > 0 || unread > 0 ? { inboxes: enabled, unread } : null;
+}
+
+/** Said in place of the list when only thread-owned notifications are unread. */
+export function waitingListNote(
+  threads: WaitingThreads,
+  alerts: number,
+  unread: number,
+): string | null {
+  return threads.waiting.length === 0 && threads.onAgent.length === 0 && alerts === 0 && unread > 0
+    ? `${unread} unread in Inbox`
+    : null;
+}
+
+/** Each connected machine's name, or null while only one is connected and names add nothing. */
+export function machineLabels(
+  environments: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly connected: boolean;
+  }>,
+): ReadonlyMap<EnvironmentId, string> | null {
+  const connected = environments.filter((environment) => environment.connected);
+  return connected.length > 1
+    ? new Map(connected.map((environment) => [environment.environmentId, environment.label]))
+    : null;
 }

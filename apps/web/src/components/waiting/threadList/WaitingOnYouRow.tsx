@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { maxNotificationSeverity } from "@t3tools/client-runtime/state/notifications";
 import type { NotificationSeverity, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { BellIcon, UserRoundIcon } from "lucide-react";
@@ -12,10 +11,9 @@ import { shortcutLabelForCommand } from "../../../keybindings";
 import { cn } from "../../../lib/utils";
 import { registerCommands } from "../../../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../../../state/server";
-import { useThreadContextSidebarStore } from "../../../threadContextSidebarStore";
 import { buildThreadRouteParams } from "../../../threadRoutes";
-import { useToolSidebarStore } from "../../../toolSidebarStore";
 import { SIDE_AREA_WIDE_MEDIA_QUERY } from "../../ToolSidebar.logic";
+import { openInboxView } from "../../inbox/openInbox";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
@@ -29,6 +27,7 @@ import { registerWaitingListOpener } from "./waitingListCommand";
 import { useWaitingOnYou } from "./waitingOnYou";
 import {
   selectWaitingAlerts,
+  waitingListNote,
   waitingRowLabel,
   type WaitingAlert,
   type WaitingThread,
@@ -54,7 +53,7 @@ const SEVERITY_BADGE: Record<NotificationSeverity, "error" | "warning" | "second
  * list of them with alerts no thread owns. It reads only what the client already streams.
  */
 export function WaitingOnYouRow() {
-  const { threads, inboxes, unread, visible } = useWaitingOnYou();
+  const { threads, inboxes, unread, severity, machines, visible } = useWaitingOnYou();
   const [open, setOpen] = useState(false);
   // Closing with nothing left keeps the list from reopening when something next waits.
   if (!visible && open) setOpen(false);
@@ -64,14 +63,18 @@ export function WaitingOnYouRow() {
   const shortcut = shortcutLabelForCommand(keybindings, "waiting.show");
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  const show = useStableCallback(() => {
-    if (!visible) {
-      toastManager.add({ type: "info", title: "Nothing is waiting on you", timeout: 2000 });
-      return;
+  // Opens the list only where the row is on screen to anchor it: a rail view covering the thread
+  // list hides the row, while a collapsed desktop sidebar only slides it away and reopens.
+  const show = useStableCallback((): boolean => {
+    const row = triggerRef.current;
+    if (!visible || row === null || !row.checkVisibility()) return false;
+    if (sidebar.isMobile) {
+      if (!sidebar.openMobile) return false;
+    } else {
+      sidebar.setOpen(true);
     }
-    if (sidebar.isMobile) sidebar.setOpenMobile(true);
-    else sidebar.setOpen(true);
     setOpen(true);
+    return true;
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Holds the shortcut handler and the palette opener while the thread list is mounted.
   useEffect(() => {
@@ -80,21 +83,22 @@ export function WaitingOnYouRow() {
       "waiting.show": (event) => {
         event.preventDefault();
         event.stopPropagation();
-        show();
+        if (!visible) {
+          toastManager.add({ type: "info", title: "Nothing is waiting on you", timeout: 2000 });
+        } else if (!show()) {
+          openInboxView();
+        }
       },
     });
     return () => {
       stopOpener();
       stopCommands();
     };
-  }, [show]);
+  }, [show, visible]);
 
   if (!visible) return null;
 
   const waitingCount = threads.waiting.length;
-  const severity = maxNotificationSeverity(
-    inboxes.map((group) => group.inbox?.maxUnreadSeverity ?? null),
-  );
   const label = waitingRowLabel(waitingCount, unread);
   const close = () => setOpen(false);
   const trigger = (
@@ -107,7 +111,7 @@ export function WaitingOnYouRow() {
       onClick={wide ? undefined : () => setOpen(true)}
     >
       <UserRoundIcon />
-      <span className="min-w-0 flex-1 truncate">Waiting on you</span>
+      <span className="min-w-0 flex-1 truncate text-sidebar-foreground">Waiting on you</span>
       <span className="flex shrink-0 items-center gap-1">
         {unread > 0 ? (
           <span
@@ -133,6 +137,7 @@ export function WaitingOnYouRow() {
       threads={threads}
       inboxes={inboxes}
       unread={unread}
+      machines={machines}
       onDone={close}
       returnFocus={() => triggerRef.current?.focus({ preventScroll: true })}
       titled={!wide}
@@ -202,6 +207,7 @@ function WaitingList({
   threads,
   inboxes,
   unread,
+  machines,
   onDone,
   returnFocus,
   titled,
@@ -209,6 +215,7 @@ function WaitingList({
   threads: WaitingThreads;
   inboxes: ReturnType<typeof useWaitingOnYou>["inboxes"];
   unread: number;
+  machines: ReturnType<typeof useWaitingOnYou>["machines"];
   onDone: () => void;
   returnFocus: () => void;
   /** The sheet already says "Waiting on you" in its title. */
@@ -217,13 +224,8 @@ function WaitingList({
   const navigate = useNavigate();
   const sidebar = useSidebar();
   const now = Date.parse(`${useNowMinute()}Z`);
-  const alerts = selectWaitingAlerts(
-    inboxes.map((group) => ({
-      environmentId: group.environment.environmentId,
-      items: group.inbox?.items ?? [],
-    })),
-    now,
-  );
+  const alerts = selectWaitingAlerts(inboxes, now);
+  const note = waitingListNote(threads, alerts.length, unread);
 
   const openThread = (ref: ScopedThreadRef) => {
     onDone();
@@ -235,16 +237,9 @@ function WaitingList({
     onDone();
     if (sidebar.isMobile) sidebar.setOpenMobile(false);
     else returnFocus();
-    const inbox = useThreadContextSidebarStore.getState();
-    inbox.setInboxTab("inbox");
-    if (alert) {
-      inbox.selectInbox({
-        kind: "notification",
-        environmentId: alert.environmentId,
-        id: alert.notification.id,
-      });
-    }
-    useToolSidebarStore.getState().dispatch({ type: "show", view: "inbox" });
+    openInboxView(
+      alert ? { environmentId: alert.environmentId, id: alert.notification.id } : undefined,
+    );
   };
 
   return (
@@ -258,14 +253,25 @@ function WaitingList({
           }
         >
           {threads.waiting.map((thread) => (
-            <ThreadEntry key={thread.key} thread={thread} onOpen={openThread} />
+            <ThreadEntry
+              key={thread.key}
+              thread={thread}
+              machine={machines?.get(thread.ref.environmentId) ?? null}
+              onOpen={openThread}
+            />
           ))}
         </Section>
       ) : null}
       {threads.onAgent.length > 0 ? (
         <Section title="Waiting on the agent" quiet>
           {threads.onAgent.map((thread) => (
-            <ThreadEntry key={thread.key} thread={thread} quiet onOpen={openThread} />
+            <ThreadEntry
+              key={thread.key}
+              thread={thread}
+              machine={machines?.get(thread.ref.environmentId) ?? null}
+              quiet
+              onOpen={openThread}
+            />
           ))}
         </Section>
       ) : null}
@@ -290,6 +296,7 @@ function WaitingList({
           ))}
         </Section>
       ) : null}
+      {note ? <p className="px-2 text-muted-foreground">{note}</p> : null}
       <Button
         variant="outline"
         size="sm"
@@ -332,10 +339,13 @@ function Section({
 
 function ThreadEntry({
   thread,
+  machine,
   quiet = false,
   onOpen,
 }: {
   thread: WaitingThread;
+  /** Shown beside the title while more than one machine is connected. */
+  machine: string | null;
   quiet?: boolean;
   onOpen: (ref: ScopedThreadRef) => void;
 }) {
@@ -351,7 +361,7 @@ function ThreadEntry({
       <button
         type="button"
         data-waiting-list-item=""
-        aria-label={`${thread.title}: ${spoken}`}
+        aria-label={`${thread.title}${machine ? ` on ${machine}` : ""}: ${spoken}`}
         className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
         onClick={() => onOpen(thread.ref)}
       >
@@ -363,6 +373,7 @@ function ThreadEntry({
           }
         >
           {thread.title}
+          {machine ? <span className="text-xs text-muted-foreground"> · {machine}</span> : null}
         </span>
         {thread.counts.map(({ kind, count }) => {
           const Icon = WAITING_KIND_ICON[kind];

@@ -1,13 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
+import { maxNotificationSeverity } from "@t3tools/client-runtime/state/notifications";
 import { Atom } from "effect/reactivity";
 
+import { useEnvironments } from "../../../state/environments";
 import { useInboxEnvironments } from "../../../state/inbox";
 import { waitingCardsEnvironmentIdsAtom } from "../../../state/threadQuestions";
 import { environmentThreadShells } from "../../../state/threads";
 import {
   NO_WAITING_THREADS,
+  machineLabels,
   selectWaitingThreads,
   sameWaitingThreads,
+  waitingRowState,
 } from "./waitingThreads.logic";
 
 /**
@@ -27,15 +31,37 @@ export const waitingThreadsAtom = Atom.make((get) => {
     : next;
 }).pipe(Atom.withLabel("web-waiting-threads"));
 
-/** What the "Waiting on you" row shows, and whether it shows at all. */
+/** What the "Waiting on you" row shows, and whether it and its palette entry show at all. */
 export function useWaitingOnYou() {
   const threads = useAtomValue(waitingThreadsAtom);
-  const inboxes = useInboxEnvironments();
-  const unread = inboxes.reduce((total, group) => total + (group.inbox?.unreadCount ?? 0), 0);
+  const enabled = useAtomValue(waitingCardsEnvironmentIdsAtom);
+  const groups = useInboxEnvironments();
+  const { environments } = useEnvironments();
+  const row = waitingRowState(
+    threads,
+    groups.map((group) => ({
+      environmentId: group.environment.environmentId,
+      unreadCount: group.inbox?.unreadCount ?? 0,
+      items: group.inbox?.items ?? [],
+    })),
+    enabled,
+  );
   return {
     threads,
-    inboxes,
-    unread,
-    visible: threads.waiting.length > 0 || unread > 0,
+    inboxes: row?.inboxes ?? [],
+    unread: row?.unread ?? 0,
+    severity: maxNotificationSeverity(
+      groups
+        .filter((group) => enabled.includes(group.environment.environmentId))
+        .map((group) => group.inbox?.maxUnreadSeverity ?? null),
+    ),
+    machines: machineLabels(
+      environments.map((environment) => ({
+        environmentId: environment.environmentId,
+        label: environment.label,
+        connected: environment.connection.phase === "connected",
+      })),
+    ),
+    visible: row !== null,
   };
 }

@@ -30,7 +30,6 @@ import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings
 import { isWindowsPlatform } from "../lib/utils";
 import { environmentSummaries } from "../state/presentation";
 import { serverEnvironment } from "../state/server";
-import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { environmentShell } from "../state/shell";
 import { environmentThreadShells } from "../state/threads";
 import { isThreadVisible, showThreadAttention } from "../threadAttention";
@@ -44,6 +43,7 @@ import {
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveBackgroundThreadRequest } from "./backgroundThreadAnnouncement";
+import { openInbox } from "./inbox/openInbox";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
 import {
   createThreadNotificationGate,
@@ -270,10 +270,8 @@ export function startThreadNotifications(
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
     const critical = item.severity === "critical";
     const looking = document.visibilityState === "visible" && document.hasFocus();
-    const openInbox = () => {
-      useThreadContextSidebarStore
-        .getState()
-        .show("inbox", { notification: { environmentId, id: item.id } });
+    const openNotification = () => {
+      openInbox({ environmentId, id: item.id });
       void runAtomCommand(
         registry,
         serverEnvironment.updateNotifications,
@@ -306,7 +304,7 @@ export function startThreadNotifications(
           children: "Open inbox",
           onClick: () => {
             toastManager.close(toastId);
-            openInbox();
+            openNotification();
           },
         },
       });
@@ -328,7 +326,7 @@ export function startThreadNotifications(
         notification.close();
         window.focus();
         void window.desktopBridge?.revealWindow().catch(() => undefined);
-        openInbox();
+        openNotification();
       });
     } catch {
       // Some browsers expose Notification but reject desktop presentation.

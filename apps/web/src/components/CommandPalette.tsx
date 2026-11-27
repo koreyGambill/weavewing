@@ -197,8 +197,9 @@ import {
 } from "../commandPaletteStore";
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { openInbox, openInboxView } from "./inbox/openInbox";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
-import { waitingThreadsAtom } from "./waiting/threadList/waitingOnYou";
+import { useWaitingOnYou } from "./waiting/threadList/waitingOnYou";
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
@@ -552,7 +553,7 @@ function OpenCommandPaletteDialog(props: {
   });
   const markAllNotificationsRead = useAtomCommand(serverEnvironment.markAllNotificationsRead);
   const inboxes = useInboxEnvironments();
-  const waitingThreads = useAtomValue(waitingThreadsAtom);
+  const waitingOnYouVisible = useWaitingOnYou().visible;
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -1939,7 +1940,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (waitingThreads.waiting.length > 0 || inboxes.some((group) => group.inbox?.unreadCount)) {
+  if (waitingOnYouVisible) {
     actionItems.push({
       kind: "action",
       value: "action:waiting-on-you",
@@ -1949,8 +1950,7 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "waiting.show",
       run: async () => {
         // Without a thread list on screen, the Inbox is where the same things wait.
-        if (!openWaitingList())
-          useToolSidebarStore.getState().dispatch({ type: "show", view: "inbox" });
+        if (!openWaitingList()) openInboxView();
       },
     });
   }
@@ -1961,7 +1961,7 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["inbox", "notifications", "alerts", "snoozed", "dismissed"],
     icon: <BellIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      useThreadContextSidebarStore.getState().show("inbox");
+      openInbox();
     },
   });
   if (inboxes.some((group) => group.inbox?.unreadCount)) {

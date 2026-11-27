@@ -9,9 +9,13 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  NO_WAITING_THREADS,
   WAITING_ALERTS_LIMIT,
+  machineLabels,
   selectWaitingAlerts,
   selectWaitingThreads,
+  waitingListNote,
+  waitingRowState,
   type WaitingThreadSource,
 } from "./waitingThreads.logic";
 
@@ -160,6 +164,51 @@ describe("selectWaitingAlerts", () => {
     );
     expect(selectWaitingAlerts([{ environmentId: ENV, items }], now)).toHaveLength(
       WAITING_ALERTS_LIMIT,
+    );
+  });
+});
+
+describe("waitingRowState", () => {
+  const inbox = (environmentId: EnvironmentId, unreadCount: number) => ({
+    environmentId,
+    unreadCount,
+    items: [],
+  });
+  const waiting = selectWaitingThreads([thread("t1", 1, counts({ qa: 1 }))], [ENV]);
+
+  it("hides the row and its palette entry with waiting cards off, whatever is unread", () => {
+    expect(waitingRowState(NO_WAITING_THREADS, [inbox(ENV, 3)], [])).toBeNull();
+  });
+
+  it("counts unread only from machines with waiting cards on", () => {
+    expect(
+      waitingRowState(NO_WAITING_THREADS, [inbox(ENV, 2), inbox(OTHER_ENV, 5)], [ENV]),
+    ).toMatchObject({ unread: 2, inboxes: [{ environmentId: ENV }] });
+    expect(waitingRowState(NO_WAITING_THREADS, [inbox(OTHER_ENV, 5)], [ENV])).toBeNull();
+    expect(waitingRowState(waiting, [], [ENV])).toMatchObject({ unread: 0 });
+  });
+});
+
+describe("waitingListNote", () => {
+  it("says what is unread only when the list would otherwise be empty", () => {
+    expect(waitingListNote(NO_WAITING_THREADS, 0, 2)).toBe("2 unread in Inbox");
+    expect(waitingListNote(NO_WAITING_THREADS, 1, 2)).toBeNull();
+    expect(
+      waitingListNote(selectWaitingThreads([thread("t1", 1, counts({ qa: 1 }))], [ENV]), 0, 2),
+    ).toBeNull();
+  });
+});
+
+describe("machineLabels", () => {
+  it("names machines only while more than one is connected", () => {
+    const machine = (environmentId: EnvironmentId, connected: boolean) => ({
+      environmentId,
+      label: `Machine ${environmentId}`,
+      connected,
+    });
+    expect(machineLabels([machine(ENV, true), machine(OTHER_ENV, false)])).toBeNull();
+    expect(machineLabels([machine(ENV, true), machine(OTHER_ENV, true)])?.get(OTHER_ENV)).toBe(
+      "Machine env-b",
     );
   });
 });
