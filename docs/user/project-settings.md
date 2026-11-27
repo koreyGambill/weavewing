@@ -296,13 +296,17 @@ are, and cleanup covers both the default folder and the custom one.
 
 **Settings → Worktrees → Isolated checkouts** decides what happens on this machine when a thread,
 agent or pull request asks for its own checkout. **T3 worktrees** is the default. **Xwing
-environments** gives each new isolated thread, and each delegated task with worktree isolation, its
-own Xwing environment instead, and the composer
-offers **Xwing environment** in place of **New worktree**. **Off** keeps every thread in an existing
-checkout. Under either of those, the server refuses anything else that would create a T3 worktree,
-including worktree handoffs, pull request checkouts in a
-worktree, pull request review guides, scheduled tasks that start in a new worktree, and restoring
-a deleted worktree. The refusal names the setting. You can edit or pause a saved task while
+environments** gives each new isolated thread its own Xwing environment instead, and the composer
+offers **Xwing environment** in place of **New worktree**. Delegated tasks with worktree isolation
+and worktree handoffs get an Xwing environment too; a delegated task's environment is held while
+the task runs. Pull request review guides read the pull request in a temporary checkout that is
+removed when the guide is written. A thread whose Xwing environment was archived gets its checkout
+back when it next runs or rewinds; if the environment was deleted, the thread stays put and the
+message names the branch its work is on. **Off** keeps every thread in an existing checkout. Under
+either of those, the server refuses anything else that would create a T3 worktree, including pull
+request checkouts in a worktree and scheduled tasks that start in a new worktree; under **Off** it
+also refuses delegated worktree isolation, worktree handoffs and review guides. The refusal names
+the setting. You can edit or pause a saved task while
 keeping its worktree settings. To run it, choose an existing checkout or re-enable T3 worktrees.
 
 ## Fast worktree checkout on macOS
