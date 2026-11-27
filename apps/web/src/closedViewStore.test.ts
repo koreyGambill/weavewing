@@ -60,7 +60,9 @@ describe("closedViewStore", () => {
       { ...saved.surface, viewId: "checklist" },
     ]);
     useClosedViewStore.getState().remember(diff(refA));
-    expect((await storage!.getItem(name!))?.state.entries).toContainEqual(saved);
+    expect(await storage!.getItem(name!)).toMatchObject({
+      state: { entries: expect.arrayContaining([saved]) },
+    });
   });
 
   it("retains distinct area instances when migrating closed history", async () => {
