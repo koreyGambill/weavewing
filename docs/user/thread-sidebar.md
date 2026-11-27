@@ -172,7 +172,8 @@ or to **Notes**. Notes lists each noted change with the start of its gaps, newes
 first, 50 at a time, and a lead's thread includes the notes its delegated agents recorded.
 Expand a note or open its landing to read all of it, or choose **Needs me** to show a note
 as a QA card. A later record of that landing keeps the card, and keeps any card you
-discussed, reopened or answered as it was.
+discussed, reopened or answered as it was. The agent can turn a card back into a note only
+while you have not touched it and no review or check outcome holds it.
 Open a landing to see its changes and load their captures; click a capture to view it
 full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
 change it at any time. Changes waiting for your QA count in each thread's

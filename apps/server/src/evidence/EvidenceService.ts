@@ -169,7 +169,8 @@ export function qaRaiseReasons(
 /**
  * The reasons a recorded change raises, given what its stored QA row raised. Left unmarked, a
  * change keeps its earlier mark, and one whose gaps raised a card keeps it, so a re-record never
- * turns a card into a note by omission. The user's `needs_you` also outlasts the agent's `note`.
+ * turns a card into a note by omission. An agent's `note` withdraws only a card no server-forced
+ * reason holds; the user's `needs_you` outlasts it, and the record keeps any card the user touched.
  */
 function recordedRaiseReasons(
   change: EvidenceChange,
@@ -519,8 +520,9 @@ const make = Effect.gen(function* () {
               raised.set(id, reasons);
               continue;
             }
-            // A settled change, or a card the user or an agent acted on, keeps its state, attribution
-            // and presence; only the server's own untouched pending or quiet follows the reasons.
+            // A settled change, or a card the user or an agent acted on, keeps its state, attribution,
+            // reasons and presence; only the server's own untouched pending or quiet follows the
+            // reasons, so an agent's note demotes a card only with no forced reason and no user action.
             const stands =
               (row.state !== "pending" && row.state !== "quiet") ||
               (row.state === "pending" &&
@@ -529,11 +531,7 @@ const make = Effect.gen(function* () {
                   row.message_id !== null ||
                   row.discussed_message_id !== null));
             const state = stands ? row.state : reasons.length > 0 ? "pending" : "quiet";
-            const raisedJson =
-              stands &&
-              (row.state !== "pending" || row.raised_json === null || reasons.length === 0)
-                ? row.raised_json
-                : yield* encodeRaised(reasons);
+            const raisedJson = stands ? row.raised_json : yield* encodeRaised(reasons);
             const ref =
               state === "pending" && row.ref === null ? yield* allocateRef(qaThreadId) : row.ref;
             yield* sql`UPDATE evidence_qa SET raised_json = ${raisedJson}, ref = ${ref}, state = ${state},
