@@ -298,6 +298,15 @@ vi.mock("./openExternalUrl", () => ({}));
 vi.mock("./attachmentDownload", () => ({}));
 vi.mock("./uuid", () => ({}));
 vi.mock("../features/threads/thread-context-divider", () => ({}));
+// Message cards load native navigation and haptics, and no case here renders one.
+vi.mock("../features/threads/SenderCard", () => ({
+  SENDER_CARD_BODY_INSET: 0,
+  SenderCard: () => null,
+}));
+vi.mock("../features/threads/OutgoingMessageLabel", () => ({
+  OutgoingMessageLabel: () => null,
+  useOutgoingMessageCard: () => null,
+}));
 vi.mock("../features/threads/thread-handoff-row", () => ({ ThreadModelSwitchDivider: () => null }));
 vi.mock("../features/threads/ThreadGuestShareBar", () => ({ useThreadGuestShare: () => null }));
 vi.mock("../features/threads/SecretRequestCard", () => ({}));
