@@ -262,6 +262,7 @@ export function ThreadQuestionCard({
         title={question.prompt}
         outcome={outcome}
         onExpand={() => setExpanded(true)}
+        stackOnNarrow
       >
         {replacesLink}
         {statusControl}

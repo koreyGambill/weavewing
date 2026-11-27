@@ -82,6 +82,24 @@ it("expands a closed question into the full card, read-only, with its answer cho
   await expect.element(screen.getByRole("radio")).not.toBeInTheDocument();
 });
 
+it("moves a closed question's controls under its title on a phone-width card", async () => {
+  // router: false because the card never navigates.
+  await using screen = await render(
+    <div style={{ width: 358 }}>
+      <ThreadQuestionCard question={answered} threadRef={threadRef} />
+    </div>,
+    { router: false },
+  );
+  const title = screen.getByRole("button", { name: /Which machine/ });
+  const reopen = screen.getByRole("button", { name: "Reopen" });
+  await expect.element(reopen).toBeVisible();
+  const line = title.element().getBoundingClientRect();
+  expect(reopen.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(line.bottom);
+  expect(
+    screen.getByText("Which machine should agents drive?").element().clientWidth,
+  ).toBeGreaterThan(100);
+});
+
 const longDescription =
   "Runs every agent on the Mac today, then measures whether the PC can take over the long builds.";
 
