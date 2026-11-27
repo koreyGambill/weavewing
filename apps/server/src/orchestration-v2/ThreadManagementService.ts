@@ -561,6 +561,13 @@ export interface ThreadManagementServiceShape {
   }) => Effect.Effect<boolean>;
   /** Receipt replays start no work; skip enablement checks with the same command id so settings cannot reject accepted retries. */
   readonly hasReceipt: (commandId: CommandId) => Effect.Effect<boolean>;
+  /**
+   * Whether the command committed. A refused command records a rejected receipt or none, so a
+   * caller can tell it from a failure after commit; an unreadable receipt fails instead of guessing.
+   */
+  readonly commandAccepted: (
+    commandId: CommandId,
+  ) => Effect.Effect<boolean, CommandReceiptStore.CommandReceiptStoreV2Error>;
   readonly waitForThread: (
     input: ThreadManagementWaitInput,
   ) => Effect.Effect<ThreadManagementWaitResult, ThreadManagementError>;
@@ -765,6 +772,11 @@ const make = Effect.gen(function* () {
           resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId),
         ),
       );
+
+  const commandAccepted: ThreadManagementServiceShape["commandAccepted"] = (commandId) =>
+    receipts
+      .getByCommandId(commandId)
+      .pipe(Effect.map((receipt) => Option.isSome(receipt) && receipt.value.status === "accepted"));
 
   const hasReceipt: ThreadManagementServiceShape["hasReceipt"] = (commandId) =>
     receipts.getByCommandId(commandId).pipe(
@@ -2252,6 +2264,7 @@ const make = Effect.gen(function* () {
     assertProviderInstanceEnabled,
     isProviderInstanceEnabledForProject,
     hasReceipt,
+    commandAccepted,
     waitForThread,
     settleAfterRun,
     settleThread,

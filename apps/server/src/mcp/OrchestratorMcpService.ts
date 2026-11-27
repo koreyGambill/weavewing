@@ -1611,7 +1611,14 @@ const make = Effect.gen(function* () {
               error._tag === "DevelopmentEnvironmentCheckoutUnavailableError" ||
               dispatchWasNotAccepted(error)
                 ? discard
-                : Effect.void,
+                : // A refusal such as a parent that began stopping leaves no accepted receipt.
+                  threadManagement.commandAccepted(input.commandId).pipe(
+                    Effect.flatMap((accepted) => (accepted ? Effect.void : discard)),
+                    // An unreadable receipt leaves the outcome unknown, so the environment stays.
+                    Effect.catch((cause) =>
+                      Effect.logWarning("Could not read a delegation's receipt", cause),
+                    ),
+                  ),
             ),
           );
       return { workspace, bind };
@@ -3410,7 +3417,14 @@ const make = Effect.gen(function* () {
         input.context === undefined
           ? undefined
           : yield* resolveTaskContext(scope, parent, input.context, isolation?.base);
-      // Prepared after every check that can refuse the task, so a refusal leaves no environment.
+      const task = [
+        taskPrompt({
+          ...input,
+          task: yield* withParentPreamble(scope.thread.threadId, input.task),
+        }),
+        ...(context === undefined ? [] : [context.note]),
+      ].join("\n\n");
+      // Prepared after every read that can fail the task, so a refusal leaves no environment.
       const childEnvironment = isolation?.xwing
         ? yield* prepareChildEnvironment({
             projectId: parent.thread.projectId,
@@ -3442,13 +3456,7 @@ const make = Effect.gen(function* () {
         parentThreadId: scope.thread.threadId,
         parentRunId: parentRun.id,
         parentNodeId: parentRun.rootNodeId,
-        task: [
-          taskPrompt({
-            ...input,
-            task: yield* withParentPreamble(scope.thread.threadId, input.task),
-          }),
-          ...(context === undefined ? [] : [context.note]),
-        ].join("\n\n"),
+        task,
         ...(input.title === undefined ? {} : { title: input.title }),
         modelSelection: target.modelSelection,
         runtimeMode,

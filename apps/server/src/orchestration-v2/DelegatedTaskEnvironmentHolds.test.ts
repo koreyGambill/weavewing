@@ -199,3 +199,29 @@ it.effect("a task whose child shares the parent's checkout releases no holds", (
     assert.isUndefined(yield* releaseEffect(taskId));
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect.each(["xwing", "shared"] as const)(
+  "deleting a delegated child releases its holds only when it has its own environment (%s)",
+  (isolation) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const { childThreadId } = yield* delegate(`delete-${isolation}`, isolation);
+      const commandId = CommandId.make(`delete:${isolation}`);
+      yield* orchestrator.dispatch({ type: "thread.delete", commandId, threadId: childThreadId });
+      const releases = (yield* outbox.listByCommandId(commandId)).filter(
+        (effect) => effect.request.type === "development-environment.release-holds",
+      );
+      assert.deepEqual(
+        releases.map((effect) => ({ threadId: effect.threadId, request: effect.request })),
+        isolation === "xwing"
+          ? [
+              {
+                threadId: childThreadId,
+                request: { type: "development-environment.release-holds", xwingEnvironmentId },
+              },
+            ]
+          : [],
+      );
+    }).pipe(Effect.provide(layer)),
+);

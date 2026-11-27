@@ -1,7 +1,8 @@
-import type {
-  OrchestrationV2Command,
-  OrchestrationV2DomainEvent,
-  OrchestrationV2ThreadProjection,
+import {
+  type OrchestrationV2Command,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2ThreadProjection,
+  XwingEnvironmentId,
 } from "@t3tools/contracts";
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -227,6 +228,19 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
     threadId: command.threadId,
     request: { type: "preview.cleanup" },
   });
+  // A deleted child never settles its task, so its delegation hold is released here.
+  const environment = projection.thread.developmentEnvironment;
+  if (projection.thread.lineage.relationshipToParent === "subagent" && environment != null) {
+    effects.push({
+      id: `effect:${command.commandId}:development-environment.release-holds`,
+      commandId: command.commandId,
+      threadId: command.threadId,
+      request: {
+        type: "development-environment.release-holds",
+        xwingEnvironmentId: XwingEnvironmentId.make(environment.xwingEnvironmentId),
+      },
+    });
+  }
   const attachmentIds = Array.from(new Set(input.attachmentIds));
   if (attachmentIds.length > 0) {
     effects.push({
