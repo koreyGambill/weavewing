@@ -3,6 +3,7 @@ import {
   THREAD_QUESTIONS_ARTIFACT_ID,
   type MessageId,
   type OrchestrationMessageContext,
+  type ThreadQuestion,
 } from "@t3tools/contracts";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 
@@ -101,6 +102,21 @@ export function itemReferences(input: {
       (input.messageOrder.get(a.messageId) ?? 0) - (input.messageOrder.get(b.messageId) ?? 0),
   );
 }
+
+/**
+ * The messages a question names itself: the one that carried the user's answer, the one with
+ * their latest comment, and the one an agent recorded an answer in prose from.
+ */
+export const questionPointers = (
+  question: Pick<
+    ThreadQuestion,
+    "sentInMessageId" | "discussedInMessageId" | "settledFromMessageId"
+  >,
+): ReadonlyArray<MessageId | undefined> => [
+  question.sentInMessageId,
+  question.discussedInMessageId,
+  question.settledFromMessageId,
+];
 
 /**
  * Which reference the control shows next: the oldest first, then each following one, wrapping

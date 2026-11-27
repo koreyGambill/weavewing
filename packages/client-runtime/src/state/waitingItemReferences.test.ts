@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   itemReferences,
   nextReferencePosition,
+  questionPointers,
   waitingItemReferenceIndex,
 } from "./waitingItemReferences.ts";
 
@@ -103,6 +104,19 @@ describe("itemReferences", () => {
         }),
       ),
     ).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("finds a question answered in prose at the message the agent recorded it from", () => {
+    expect(
+      ids(
+        itemReferences({
+          index,
+          item: { kind: "question", questionId: "Q2" },
+          messageOrder,
+          pointers: questionPointers({ settledFromMessageId: MessageId.make("m3") }),
+        }),
+      ),
+    ).toEqual(["m3"]);
   });
 
   it("leaves out pointers to messages that are not loaded", () => {

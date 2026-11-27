@@ -121,6 +121,8 @@ export const ThreadQuestion = Schema.Struct({
    * changes the draft or the question's state, or the agent replaces it.
    */
   discussedInMessageId: Schema.optional(MessageId),
+  /** The user message an agent recorded this answer from; cleared when the question reopens. */
+  settledFromMessageId: Schema.optional(MessageId),
 });
 export type ThreadQuestion = typeof ThreadQuestion.Type;
 export const ThreadWorkspace = Schema.Struct({

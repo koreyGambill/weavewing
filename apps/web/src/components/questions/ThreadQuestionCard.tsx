@@ -8,6 +8,7 @@ import {
   threadQuestionStatus,
   withoutThreadQuestionImageMarkers,
 } from "@t3tools/client-runtime/state/thread-questions";
+import { questionPointers } from "@t3tools/client-runtime/state/waiting-item-references";
 import { threadQuestionTitle, type ScopedThreadRef, type ThreadQuestion } from "@t3tools/contracts";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -228,7 +229,7 @@ export function ThreadQuestionCard({
     <NextReferenceButton
       item={{ kind: "question", questionId: question.id }}
       refLabel={question.id}
-      pointers={[question.sentInMessageId, question.discussedInMessageId]}
+      pointers={questionPointers(question)}
     />
   );
   const questionLink = (id: string, label: string, help: string) => (

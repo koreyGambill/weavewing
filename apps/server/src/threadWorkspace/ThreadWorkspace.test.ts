@@ -1606,6 +1606,51 @@ it.effect("follows a sent answer's turn while more than 30 other items wait in t
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("names the user message an agent recorded an answer from, and only that one", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [
+        { prompt: "Which team owns the staging alerts channel?" },
+        { prompt: "Database?", options: [choice("pg", "Postgres")] },
+        { prompt: "Ship behind a flag?" },
+      ],
+    });
+    const record = (id: string, notes: string) =>
+      h.service.questionUpdate({ threadId, id, state: "answered", answer: { notes } }, "agent");
+    // Answered in prose: the agent records it in the turn the user's message started.
+    h.turnMessage.current = MessageId.make("m-prose");
+    expect((yield* record("Q1", "Platform owns it")).questions[0]).toMatchObject({
+      state: "answered",
+      answeredBy: "agent",
+      settledFromMessageId: "m-prose",
+    });
+    // Reopened, the answer goes and so does the message it came from.
+    const reopened = yield* h.service.questionUpdate(
+      { threadId, id: "Q1", state: "open" },
+      "agent",
+    );
+    expect(reopened.questions[0]).not.toHaveProperty("settledFromMessageId");
+    // A turn no user message started names none.
+    h.turnMessage.current = null;
+    expect((yield* record("Q3", "Yes")).questions[2]).not.toHaveProperty("settledFromMessageId");
+    // The user's own answer through the card already names the message that carried it.
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q2: { chosenOptionIds: ["pg"], notes: "" } },
+    });
+    const revision = drafted.questions[1]!.answer!.draftRevision!;
+    h.messages.push(userMessage("m1", [answerRecord("Q2", revision, "Postgres")]));
+    h.threadRuns.push(threadRun("r1", "m1", "running"));
+    h.acceptTurn("r1");
+    h.turnMessage.current = MessageId.make("m1");
+    const after = (yield* record("Q2", "Postgres")).questions[1];
+    expect(after).toMatchObject({ answeredBy: "user", sentInMessageId: "m1" });
+    expect(after).not.toHaveProperty("settledFromMessageId");
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("numbers the user's tasks once and lists them with questions as waiting items", () =>
   Effect.gen(function* () {
     const h = yield* harness();

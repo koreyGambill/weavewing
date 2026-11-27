@@ -1133,7 +1133,7 @@ const make = Effect.gen(function* () {
             next = { ...question, state: "open" };
             break;
           }
-          const { sentInMessageId: _sent, ...rest } = question;
+          const { sentInMessageId: _sent, settledFromMessageId: _settled, ...rest } = question;
           next = {
             ...rest,
             state: "open",
@@ -1176,12 +1176,17 @@ const make = Effect.gen(function* () {
             return yield* invalid(`Record the answer to ${question.id} as you understood it.`);
           if (!artifactAnswerFits(question, chosenOptionIds))
             return yield* invalid(`Answer choices must be options of ${question.id}.`);
+          // The question tool acts on the agent's own thread, so this is the agent's current turn.
+          const settledFromMessageId = yield* orchestrator
+            .getCurrentUserMessageId(input.threadId)
+            .pipe(Effect.mapError(storage));
           next = {
             ...question,
             state: "answered",
             closedAt: now,
             answeredBy: "agent",
             answer: { chosenOptionIds, notes, submittedAt: now },
+            ...(settledFromMessageId === null ? {} : { settledFromMessageId }),
           };
           break;
         }
