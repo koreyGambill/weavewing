@@ -86,9 +86,13 @@ export const taskRevealRef = (target: string) =>
 export const threadTaskElementId = (ref: string) => `thread-task-${ref}`;
 
 /**
- * Scrolls the thread's chat to a user task's card. A task with no card in the loaded chat, such
- * as one the user added in Todos, opens Todos instead.
+ * Scrolls the thread's chat to a user task's card. A task whose card no open chat can show now,
+ * such as one the user added in Checklist, opens Checklist instead, and leaves no request behind.
  */
-export function revealTaskInChat(threadKey: string, ref: string, openTodos: () => void) {
-  if (requestQuestionReveal(threadKey, `${TASK_REVEAL_PREFIX}${ref}`) === "missing") openTodos();
+export function revealTaskInChat(threadKey: string, ref: string, openChecklist: () => void) {
+  const target = `${TASK_REVEAL_PREFIX}${ref}`;
+  const result = requestQuestionReveal(threadKey, target);
+  if (result === "revealed") return;
+  if (pending.get(threadKey) === target) pending.delete(threadKey);
+  openChecklist();
 }
