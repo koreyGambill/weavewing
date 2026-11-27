@@ -9,7 +9,6 @@ import {
   createEnvironmentRpcQueryAtomFamily,
 } from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useEffect } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -20,19 +19,9 @@ import { useEnvironmentScope } from "./session";
 
 const reloadAtom = Atom.make(0).pipe(Atom.keepAlive, Atom.withLabel("evidence:reload"));
 
-/** Refetches every evidence query being read: after a QA change, on window return, or on request. */
+/** Refetches every evidence query being read: after a QA change, or on request. */
 export function reloadEvidence() {
   appAtomRegistry.set(reloadAtom, appAtomRegistry.get(reloadAtom) + 1);
-}
-
-/** Returning to the window refetches evidence; the tools strip, always mounted, owns the listener. */
-export function useReloadEvidenceOnReturn(enabled: boolean) {
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Window focus happens outside React.
-  useEffect(() => {
-    if (!enabled) return;
-    window.addEventListener("focus", reloadEvidence);
-    return () => window.removeEventListener("focus", reloadEvidence);
-  }, [enabled]);
 }
 
 const evidenceChangeSignal = Atom.family((environmentId: EnvironmentId) =>

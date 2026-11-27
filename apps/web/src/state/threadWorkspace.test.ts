@@ -18,22 +18,20 @@ vi.mock("@t3tools/client-runtime/state/runtime", () => ({
 
 import { sidebarWorkspaceGet, threadListUpdate } from "./threadWorkspace";
 
-it.effect(
-  "a list update refetches the left strip's workspace query, so the Todos badge follows",
-  () =>
-    Effect.gen(function* () {
-      const environmentId = EnvironmentId.make("env");
-      const input = { threadId: ThreadId.make("thread") };
-      const registry = AtomRegistry.make();
-      const unmount = registry.mount(sidebarWorkspaceGet({ environmentId, input }));
-      expect(fetches.count).toBe(1);
+it.effect("a list update refetches the workspace query, so the attention dot follows", () =>
+  Effect.gen(function* () {
+    const environmentId = EnvironmentId.make("env");
+    const input = { threadId: ThreadId.make("thread") };
+    const registry = AtomRegistry.make();
+    const unmount = registry.mount(sidebarWorkspaceGet({ environmentId, input }));
+    expect(fetches.count).toBe(1);
 
-      const { onSuccess } = threadListUpdate as unknown as {
-        onSuccess?: (...args: unknown[]) => Effect.Effect<void>;
-      };
-      yield* onSuccess?.({ environmentId, input }, registry) ?? Effect.void;
-      expect(fetches.count).toBe(2);
-      unmount();
-      registry.dispose();
-    }),
+    const { onSuccess } = threadListUpdate as unknown as {
+      onSuccess?: (...args: unknown[]) => Effect.Effect<void>;
+    };
+    yield* onSuccess?.({ environmentId, input }, registry) ?? Effect.void;
+    expect(fetches.count).toBe(2);
+    unmount();
+    registry.dispose();
+  }),
 );

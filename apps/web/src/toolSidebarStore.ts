@@ -5,7 +5,6 @@ import {
   INITIAL_SIDE_AREA,
   SIDE_AREA_WIDE_MEDIA_QUERY,
   adoptRetiredRail,
-  isCurrentSideArea,
   restoreSideArea,
   type RetiredRailSelection,
   transitionSideArea,
@@ -20,8 +19,18 @@ interface SideAreaStore extends SideAreaState {
 // What had focus when the side area opened; closing hands focus back to it.
 let returnFocus: HTMLElement | null = null;
 let focusOnOpen = false;
-// Whether the stored state predates the side area, so the left rail's selection may carry over.
-let restoredFromOlderVersion = true;
+// Whether the left rail's stored selection has yet to move here. Version 1 is written from the
+// load that hands it off, so only state stored at version 1 means it already moved; older, missing
+// or unreadable state is still waiting for it.
+let railHandoffPending = true;
+let storedBeforeHandoff = false;
+// Counts requests to open a view, so a click that opened one is not also a click outside it.
+let openRequests = 0;
+
+/** How many requests to open a view have been made; changes when an action opens or switches one. */
+export function sideAreaOpenRequests(): number {
+  return openRequests;
+}
 
 /** True once after an action opened the side area, so a reload that restores it open keeps focus. */
 export function takeSideAreaFocusRequest(): boolean {
@@ -37,6 +46,9 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       dispatch: (action) => {
         const wasOpen = get().open;
         const next = transitionSideArea(get(), action);
+        if (action.type === "show" || action.type === "toggleView" || next.open !== wasOpen) {
+          openRequests += 1;
+        }
         if (!wasOpen && next.open) {
           returnFocus =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -59,6 +71,7 @@ export const useToolSidebarStore = create<SideAreaStore>()(
     }),
     {
       name: "weavewing_tool_sidebar",
+      version: 1,
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
       partialize: ({ open, view, width, pinned, locked, threadView }) => ({
         open,
@@ -68,8 +81,13 @@ export const useToolSidebarStore = create<SideAreaStore>()(
         locked,
         threadView,
       }),
+      // Before version 1 no handoff had happened; the shape is read by `restoreSideArea`.
+      migrate: (persisted) => {
+        storedBeforeHandoff = true;
+        return persisted as SideAreaStore;
+      },
       merge: (persisted, current) => {
-        restoredFromOlderVersion = !isCurrentSideArea(persisted);
+        railHandoffPending = persisted === undefined || storedBeforeHandoff;
         return { ...current, ...restoreSideArea(persisted) };
       },
     },
@@ -81,8 +99,8 @@ export const useToolSidebarStore = create<SideAreaStore>()(
  * area's own stored state predates it. The rail's store calls this when it migrates.
  */
 export function adoptRetiredRailSelection(rail: RetiredRailSelection) {
-  if (!restoredFromOlderVersion) return;
-  restoredFromOlderVersion = false;
+  if (!railHandoffPending) return;
+  railHandoffPending = false;
   useToolSidebarStore.setState((state) => adoptRetiredRail(state, rail));
 }
 

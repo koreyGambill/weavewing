@@ -73,6 +73,8 @@ export interface SideAreaState {
   readonly maximized: boolean;
   /** The last thread view shown, which the thread views shortcut opens. */
   readonly threadView: ThreadViewId;
+  /** A thread being navigated to whose arrival must not dismiss the view opened for it. */
+  readonly arrival: string | null;
 }
 
 export const INITIAL_SIDE_AREA: SideAreaState = {
@@ -83,6 +85,7 @@ export const INITIAL_SIDE_AREA: SideAreaState = {
   locked: null,
   maximized: false,
   threadView: "details",
+  arrival: null,
 };
 
 export type SideAreaAction =
@@ -91,7 +94,16 @@ export type SideAreaAction =
    * Opens on `view`. With `thread`, the request is about that thread: `lock` holds the view on it,
    * and otherwise a lock on another thread is released so the view follows the selection.
    */
-  | { type: "show"; view: ViewId; thread?: ScopedThreadRef; lock?: boolean }
+  | {
+      type: "show";
+      view: ViewId;
+      thread?: ScopedThreadRef;
+      lock?: boolean;
+      /** Set while navigating to `thread`, so arriving there keeps the view open. */
+      arriving?: boolean;
+    }
+  /** The route moved to another thread: closes unless pinned or this is an awaited arrival. */
+  | { type: "routeChanged"; threadKey: string | null }
   /** Opens on the last thread view, or closes when a thread view is showing. */
   | { type: "toggleThreadViews" }
   /** Opens on `view` for `thread`, or closes when it already shows that. */
@@ -126,11 +138,6 @@ export function resolveSideAreaWidth(width: number, availableWidth: number) {
 const decodePersistedSideArea = Schema.decodeUnknownOption(PersistedSideArea);
 const decodeLegacyToolSidebar = Schema.decodeUnknownOption(LegacyToolSidebar);
 
-/** True when stored state has the side area's own shape rather than an older one. */
-export function isCurrentSideArea(value: unknown): boolean {
-  return decodePersistedSideArea(value)._tag === "Some";
-}
-
 /** Reads stored state, including the tools sidebar's older shape; anything else starts fresh. */
 export function restoreSideArea(value: unknown): SideAreaState {
   const current = decodePersistedSideArea(value);
@@ -146,6 +153,7 @@ export function restoreSideArea(value: unknown): SideAreaState {
       pinned,
       locked,
       maximized: false,
+      arrival: null,
       threadView:
         threadView !== null && isThreadViewId(threadView)
           ? threadView
@@ -209,6 +217,10 @@ export function adoptRetiredRail(state: SideAreaState, rail: RetiredRailSelectio
   return { ...state, open: true, view: shown, threadView };
 }
 
+function threadKey(ref: ScopedThreadRef | null) {
+  return ref ? `${ref.environmentId}:${ref.threadId}` : null;
+}
+
 function sameThread(a: ScopedThreadRef | null, b: ScopedThreadRef | null) {
   return a?.environmentId === b?.environmentId && a?.threadId === b?.threadId;
 }
@@ -231,7 +243,19 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
             : sameThread(state.locked, thread)
               ? state.locked
               : null;
-      return { ...withView(state, action.view), open: true, locked };
+      return {
+        ...withView(state, action.view),
+        open: true,
+        locked,
+        arrival: thread !== undefined && action.arriving ? threadKey(thread) : state.arrival,
+      };
+    }
+    case "routeChanged": {
+      if (state.arrival !== null && state.arrival === action.threadKey) {
+        return { ...state, arrival: null };
+      }
+      const left = { ...state, arrival: null };
+      return state.pinned ? left : { ...left, open: false, maximized: false };
     }
     case "toggleThreadViews":
       return state.open && isThreadViewId(state.view)
