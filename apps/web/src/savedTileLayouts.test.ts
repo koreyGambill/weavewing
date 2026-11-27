@@ -262,6 +262,39 @@ describe("saved tile layouts", () => {
     expect(savedTileLayoutTrees(viewFree)).toEqual({ root: viewFree });
   });
 
+  it("restores old and new view IDs from viewRoot and drops unknown and merged duplicate tabs", () => {
+    const [layout] = decodeServerSettings({
+      tileLayouts: [
+        {
+          id: "merged",
+          name: "Merged views",
+          root: { kind: "group", areas: ["chat"] },
+          viewRoot: {
+            kind: "group",
+            areas: [
+              "chat",
+              "view:inspect",
+              "view:activity",
+              "view:some-future-view",
+              "view:related",
+              "view:links",
+            ],
+          },
+        },
+      ],
+    }).tileLayouts;
+    const built = buildTileLayoutFromSaved(savedLayoutTree(layout!), [], sequentialIds());
+    expect(Object.values(built.pendingAreas ?? {})).toEqual([
+      "view:details",
+      "view:timeline",
+      "view:links",
+    ]);
+    expect(toSavedTileNode(built).root).toEqual({
+      kind: "group",
+      areas: ["chat", "view:details", "view:timeline", "view:links"],
+    });
+  });
+
   it("forgets a placeholder the user closed or replaced", () => {
     const built = buildTileLayoutFromSaved(chatNotesTerminal, [], sequentialIds());
     const [, notes] = getTileGroups(built);

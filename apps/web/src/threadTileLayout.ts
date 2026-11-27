@@ -1,4 +1,5 @@
 import type { TileLayoutArea, ViewTileLayoutArea } from "@t3tools/contracts";
+import { isViewArea, normalizeStoredViewTabId } from "./views/viewTiles.logic";
 
 /** An area a tile can wait for: one of the saved-layout areas, or a side panel view. */
 export type TileArea = TileLayoutArea | ViewTileLayoutArea;
@@ -840,8 +841,8 @@ export function parseTileLayout(value: unknown): ThreadTileLayout | undefined {
         ...("lastFloating" in raw && parseFloatingRect(raw.lastFloating)
           ? { lastFloating: parseFloatingRect(raw.lastFloating)! }
           : {}),
-        tabs: raw.tabs,
-        activeTabId: raw.activeTabId,
+        tabs: raw.tabs.map(normalizeStoredViewTabId),
+        activeTabId: normalizeStoredViewTabId(raw.activeTabId),
         ...("colorIndex" in raw &&
         typeof raw.colorIndex === "number" &&
         Number.isInteger(raw.colorIndex) &&
@@ -890,12 +891,13 @@ export function parseTileLayout(value: unknown): ThreadTileLayout | undefined {
         ...("pendingAreas" in value && value.pendingAreas && typeof value.pendingAreas === "object"
           ? {
               pendingAreas: Object.fromEntries(
-                Object.entries(value.pendingAreas).filter(
-                  ([tabId, area]) =>
-                    isNewTab(tabId) &&
-                    typeof area === "string" &&
-                    (area.startsWith("view:") ||
-                      Object.values(SURFACE_AREAS).includes(area as TileLayoutArea)),
+                Object.entries(value.pendingAreas).flatMap(([tabId, area]) =>
+                  isNewTab(tabId) &&
+                  typeof area === "string" &&
+                  (isViewArea(area) ||
+                    Object.values(SURFACE_AREAS).includes(area as TileLayoutArea))
+                    ? [[tabId, normalizeStoredViewTabId(area)]]
+                    : [],
                 ),
               ) as Record<string, TileArea>,
             }

@@ -3,7 +3,8 @@ import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  isRetiredViewArea,
+  normalizeStoredViewTabId,
+  restoreViewSurface,
   viewIdFromArea,
   viewSurface,
   viewTabTitle,
@@ -15,10 +16,10 @@ const other = scopeThreadRef("env" as EnvironmentId, ThreadId.make("other"));
 
 describe("view tiles", () => {
   it("locks a thread view to the thread it showed, and only names a thread other than the tile's", () => {
-    expect(viewSurface("todos", owner, owner)).toEqual({
+    expect(viewSurface("checklist", owner, owner)).toEqual({
       id: "view:todos",
       kind: "view",
-      viewId: "todos",
+      viewId: "checklist",
     });
     const locked = viewSurface("links", owner, other);
     expect(locked).toEqual({
@@ -28,7 +29,7 @@ describe("view tiles", () => {
       threadRef: other,
     });
     expect(viewTileThread(locked, owner)).toEqual(other);
-    expect(viewTileThread(viewSurface("todos", owner, null), owner)).toEqual(owner);
+    expect(viewTileThread(viewSurface("checklist", owner, null), owner)).toEqual(owner);
     // Global views span threads: no lock, no thread.
     const status = viewSurface("status", owner, other);
     expect(status).toEqual({ id: "view:status", kind: "view", viewId: "status" });
@@ -41,11 +42,18 @@ describe("view tiles", () => {
   });
 
   it("reads saved view areas and recognises views that no longer exist", () => {
-    expect(viewIdFromArea("view:todos")).toBe("todos");
+    expect(viewIdFromArea("view:todos")).toBe("checklist");
     expect(viewIdFromArea("notes")).toBeNull();
     expect(viewIdFromArea("view:retired")).toBeNull();
-    expect(isRetiredViewArea("view:retired")).toBe(true);
-    expect(isRetiredViewArea("view:todos")).toBe(false);
-    expect(isRetiredViewArea("notes")).toBe(false);
+    expect(viewIdFromArea("view:related")).toBe("links");
+    expect(viewIdFromArea("view:activity")).toBe("activity");
+    expect(normalizeStoredViewTabId("view:activity:env:other")).toBe("view:timeline:env:other");
+  });
+
+  it("keeps a migrated Checklist tab when the store reads it again", () => {
+    const saved = { id: "view:todos", kind: "view", viewId: "todos" };
+    const restored = restoreViewSurface(saved);
+    expect(restored).toEqual(viewSurface("checklist", owner, owner));
+    expect(restoreViewSurface(restored)).toEqual(restored);
   });
 });

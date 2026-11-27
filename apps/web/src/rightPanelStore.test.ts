@@ -95,20 +95,20 @@ describe("rightPanelStore", () => {
     const store = useRightPanelStore.getState();
     const groups = () =>
       getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA));
-    store.openView(refA, "todos", refA, "tile-2");
+    store.openView(refA, "checklist", refA, "tile-2");
     store.openView(refA, "links", refB, "tile-2");
     store.openView(refA, "status", refB, "tile-2");
     const [main, beside] = groups();
     expect(main?.tabs).toEqual([CONVERSATION_TAB_ID]);
     expect(beside?.tabs).toEqual(["view:todos", "view:links:env-1:thread-B", "view:status"]);
     expect(beside?.activeTabId).toBe("view:status");
-    store.openView(refA, "todos", null, "tile-2");
+    store.openView(refA, "checklist", null, "tile-2");
     expect(groups()[1]?.activeTabId).toBe("view:todos");
     expect(groups()).toHaveLength(2);
     const surfaces = () =>
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces;
     expect(surfaces()).toEqual([
-      { id: "view:todos", kind: "view", viewId: "todos" },
+      { id: "view:todos", kind: "view", viewId: "checklist" },
       { id: "view:links:env-1:thread-B", kind: "view", viewId: "links", threadRef: refB },
       { id: "view:status", kind: "view", viewId: "status" },
     ]);
@@ -138,6 +138,10 @@ describe("rightPanelStore", () => {
     expect(
       viewTab({ id: "view:links:env-1:thread-B", kind: "view", viewId: "links", threadRef: refB }),
     ).toEqual(["notes", "view:links:env-1:thread-B"]);
+    expect(viewTab({ id: "view:related", kind: "view", viewId: "related" })).toEqual([
+      "notes",
+      "view:links",
+    ]);
     for (const invalid of [
       { id: "view:retired", kind: "view", viewId: "retired" },
       { id: "view:todos", kind: "view" },

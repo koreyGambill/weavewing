@@ -33,8 +33,8 @@ import { resolveStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
-import type { ViewId } from "./components/ToolSidebar.logic";
-import { restoreViewSurface, viewSurface } from "./views/viewTiles.logic";
+import { storedViewId, type ViewId } from "./components/ToolSidebar.logic";
+import { normalizeStoredViewTabId, restoreViewSurface, viewSurface } from "./views/viewTiles.logic";
 
 const RIGHT_PANEL_KINDS = [
   "diff",
@@ -711,6 +711,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
             .map(([threadKey, threadState]) => {
               const validThreadState =
                 threadState && typeof threadState === "object" ? threadState : null;
+              const viewIds = new Set<string>();
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     const kind = (surface as { kind?: string }).kind;
@@ -724,7 +725,9 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       return [];
                     if (surface.kind === "view") {
                       const view = restoreViewSurface(surface);
-                      return view ? [view] : [];
+                      if (!view || viewIds.has(view.id)) return [];
+                      viewIds.add(view.id);
+                      return [view];
                     }
                     if (surface.kind === "notes")
                       return validAreaId(surface.id, "notes") ? [surface] : [];
@@ -831,7 +834,9 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                         ? oldActive.activeTerminalId
                         : oldActive.resourceId
                     }`
-                  : validThreadState?.activeSurfaceId;
+                  : typeof validThreadState?.activeSurfaceId === "string"
+                    ? normalizeStoredViewTabId(validThreadState.activeSurfaceId)
+                    : undefined;
               const persistedActiveSurfaceId = surfaces.some(
                 (surface) => surface.id === rawActiveSurfaceId,
               )
@@ -1640,7 +1645,11 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                       ...threadState,
                       surfaces: threadState.surfaces
                         .filter((surface) => surface.kind !== "related-thread")
-                        .map(withoutReveal),
+                        .map((surface) =>
+                          surface.kind === "view"
+                            ? { ...surface, viewId: storedViewId(surface.viewId) }
+                            : withoutReveal(surface),
+                        ),
                     },
                   ],
                 ],

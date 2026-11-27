@@ -82,7 +82,10 @@ function ThreadViewContent({
       );
     case "links":
       return (
-        <ViewSectionGroup order={["links:links", "links:threads"]}>
+        <ViewSectionGroup
+          followsPanelReveal={host === "panel"}
+          order={["links:links", "links:threads"]}
+        >
           <ViewSection id="links:links" title="Pull requests, tickets, links and files">
             {(actions) => (
               <Padded>
@@ -101,7 +104,10 @@ function ThreadViewContent({
       );
     case "activity":
       return (
-        <ViewSectionGroup order={["activity:runs", "activity:landings"]}>
+        <ViewSectionGroup
+          followsPanelReveal={host === "panel"}
+          order={["activity:runs", "activity:landings"]}
+        >
           <ViewSection id="activity:runs" title="Runs">
             {(actions) => (
               <Padded>
@@ -120,9 +126,14 @@ function ThreadViewContent({
       );
     case "details":
       return (
-        <ViewSectionGroup order={["details:thread", "details:environments", "details:inspect"]}>
+        <ViewSectionGroup
+          followsPanelReveal={host === "panel"}
+          order={["details:thread", "details:environments", "details:inspect"]}
+        >
           <ViewSection id="details:thread" title="Thread">
-            {() => <ThreadDetailsSlot threadRef={threadRef} detailsRef={slots.setDetails} host={host} />}
+            {() => (
+              <ThreadDetailsSlot threadRef={threadRef} detailsRef={slots.setDetails} host={host} />
+            )}
           </ViewSection>
           <ViewSection id="details:environments" title="Environments">
             {() => (

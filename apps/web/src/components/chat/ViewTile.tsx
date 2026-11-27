@@ -155,7 +155,7 @@ function ViewTileBody({ surface, owner }: { surface: ViewSurface; owner: ScopedT
       )}
       <DeferEnvironmentQueries value={deferred}>
         {definition.render({
-          target: { threadRef: thread, draft: null },
+          target: { threadRef: thread ?? owner, draft: null },
           layout,
           host: "tile",
           width,

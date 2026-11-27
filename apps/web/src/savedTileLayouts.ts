@@ -19,8 +19,8 @@ import {
   type TileArea,
   type TileNode,
 } from "./threadTileLayout";
-import { VIEW_TITLES } from "./components/ToolSidebar.logic";
-import { isRetiredViewArea, isViewArea, viewIdFromArea } from "./views/viewTiles.logic";
+import { storedViewId, VIEW_TITLES } from "./components/ToolSidebar.logic";
+import { isViewArea, viewIdFromArea } from "./views/viewTiles.logic";
 
 export const TILE_LAYOUT_AREA_LABELS = {
   device: "Device",
@@ -123,6 +123,7 @@ export function buildTileLayoutFromSaved(
 ): ThreadTileLayout {
   const unused = [CONVERSATION_TAB_ID, ...openTabIds.filter((id) => id !== CONVERSATION_TAB_ID)];
   const pendingAreas: Record<string, TileArea> = {};
+  const placedViews = new Set<string>();
   const build = (node: SavedTileViewNode): TileNode => {
     if (node.kind === "split")
       return {
@@ -133,8 +134,14 @@ export function buildTileLayoutFromSaved(
         first: build(node.first),
         second: build(node.second),
       };
-    const tabs = node.areas.flatMap((area) => {
-      if (isRetiredViewArea(area)) return [];
+    const tabs = node.areas.flatMap((savedArea) => {
+      let area = savedArea;
+      if (isViewArea(savedArea)) {
+        const view = viewIdFromArea(savedArea);
+        if (view === null || placedViews.has(view)) return [];
+        placedViews.add(view);
+        area = `view:${storedViewId(view)}`;
+      }
       const index = unused.findIndex((tabId) => tabArea(tabId) === area);
       if (index >= 0) return unused.splice(index, 1);
       if (area === "chat") return [];

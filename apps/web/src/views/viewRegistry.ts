@@ -1,18 +1,6 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import type { DraftId } from "../composerDraftStore";
-import {
-  ActivityIcon,
-  BellIcon,
-  CalendarClockIcon,
-  CalendarIcon,
-  ChartGanttIcon,
-  ClipboardCheckIcon,
-  FilesIcon,
-  IdCardIcon,
-  LinkIcon,
-  ListChecksIcon,
-  type LucideIcon,
-} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { createElement, type ComponentType, type ReactNode } from "react";
 
 import { CalendarTool } from "../components/CalendarTool";
@@ -29,6 +17,7 @@ import { StatusAlertCount, StatusView } from "./StatusView";
 import { AutomationsView } from "../components/automations/AutomationsView";
 import { EvidenceView } from "../components/evidence/EvidenceView";
 import { GlobalViewBody } from "./GlobalViewBody";
+import { VIEW_ICONS } from "./viewIcons";
 import { ThreadViewBody } from "./ThreadViewBody";
 import { ArtifactsCount, ChecklistCount, LinksCount } from "./threadViewCounts";
 import { viewSupportsHost } from "./viewPage.logic";
@@ -103,7 +92,6 @@ export interface ViewDefinition {
 
 function threadView<Id extends ThreadViewId>(
   id: Id,
-  icon: LucideIcon,
   about: string,
   PickerCount?: ViewDefinition["PickerCount"],
 ): ViewDefinition & { readonly id: Id } {
@@ -111,7 +99,7 @@ function threadView<Id extends ThreadViewId>(
   return {
     id,
     title,
-    icon,
+    icon: VIEW_ICONS[id],
     about,
     ...(PickerCount ? { PickerCount } : {}),
     scope: "thread",
@@ -130,36 +118,31 @@ function threadView<Id extends ThreadViewId>(
 const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { readonly id: Id } } = {
   checklist: threadView(
     "checklist",
-    ListChecksIcon,
     "The agent's checklist for this thread and your follow-up flags. Agents update it with list_update; you can add and check items here.",
     ChecklistCount,
   ),
   artifacts: threadView(
     "artifacts",
-    FilesIcon,
     "Documents and pages agents publish for this thread, with any questions they ask you. Agents write them with artifact_write; you answer here.",
     ArtifactsCount,
   ),
   links: threadView(
     "links",
-    LinkIcon,
     "What this thread points to: its ticket and pull requests, web links and files from the conversation, then the threads it delegated to, forked, messaged or heard from.",
     LinksCount,
   ),
   activity: threadView(
     "activity",
-    ChartGanttIcon,
     "What happened here: when this thread and its delegates ran, on one clock, and the landings agents recorded for it, newest first.",
   ),
   details: threadView(
     "details",
-    IdCardIcon,
     "What the thread is and runs on: workspace, branch, scripts and automations, the Xwing environments it uses, and what the agent loaded and spent.",
   ),
   inbox: {
     id: "inbox",
     title: VIEW_TITLES.inbox,
-    icon: BellIcon,
+    icon: VIEW_ICONS.inbox,
     about:
       "Notifications from automations, status sources and agents across every thread. Snooze, dismiss or open each one here.",
     scope: "global",
@@ -170,7 +153,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   evidence: {
     id: "evidence",
     title: VIEW_TITLES.evidence,
-    icon: ClipboardCheckIcon,
+    icon: VIEW_ICONS.evidence,
     about:
       "Proof for each land in every thread: what was asked, its commits, checks, review verdict and captures. Agents record it with evidence_record; you set each change's QA state here.",
     scope: "global",
@@ -185,7 +168,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   automations: {
     id: "automations",
     title: VIEW_TITLES.automations,
-    icon: CalendarClockIcon,
+    icon: VIEW_ICONS.automations,
     about:
       "Agents that run on a schedule, a webhook or an event. Switch them on or off for a thread, a project or the whole server, and open a run's thread from its history.",
     scope: "global",
@@ -200,7 +183,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   calendar: {
     id: "calendar",
     title: VIEW_TITLES.calendar,
-    icon: CalendarIcon,
+    icon: VIEW_ICONS.calendar,
     about: "Your agenda for a day. Calendar sync is not available yet.",
     scope: "global",
     minWidthPx: 280,
@@ -210,7 +193,7 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
   status: {
     id: "status",
     title: VIEW_TITLES.status,
-    icon: ActivityIcon,
+    icon: VIEW_ICONS.status,
     about:
       "The health of external tools from your status sources. Configure them under Settings → Status sources.",
     scope: "global",

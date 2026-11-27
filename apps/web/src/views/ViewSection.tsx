@@ -1,5 +1,13 @@
 import { ChevronRightIcon } from "lucide-react";
-import { createContext, use, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { holdScrollTarget } from "../lib/holdScrollTarget";
 import { observeIntersection } from "../lib/observeIntersection";
 import { cn } from "../lib/utils";
@@ -9,6 +17,7 @@ import { useToolSidebarStore } from "../toolSidebarStore";
 
 interface SectionGroup {
   readonly order: ReadonlyArray<ViewSectionId>;
+  readonly followsPanelReveal: boolean;
   readonly mounted: ReadonlySet<ViewSectionId>;
   readonly markMounted: (id: ViewSectionId) => void;
 }
@@ -18,9 +27,11 @@ const SectionGroupContext = createContext<SectionGroup | null>(null);
 /** The sections of one merged view, which mount in order from the top. */
 export function ViewSectionGroup({
   order,
+  followsPanelReveal = true,
   children,
 }: {
   order: ReadonlyArray<ViewSectionId>;
+  followsPanelReveal?: boolean;
   children: ReactNode;
 }) {
   const [mounted, setMounted] = useState<ReadonlySet<ViewSectionId>>(() => new Set());
@@ -29,7 +40,9 @@ export function ViewSectionGroup({
       setMounted((current) => (current.has(id) ? current : new Set([...current, id]))),
   );
   return (
-    <SectionGroupContext value={{ order, mounted, markMounted }}>{children}</SectionGroupContext>
+    <SectionGroupContext value={{ order, mounted, markMounted, followsPanelReveal }}>
+      {children}
+    </SectionGroupContext>
   );
 }
 
@@ -49,7 +62,9 @@ export function ViewSection({
 }) {
   const group = use(SectionGroupContext);
   const collapsedSections = useThreadContextSidebarStore((state) => state.collapsedSections);
-  const requestedSection = useToolSidebarStore((state) => state.revealSection);
+  const requestedSection = useToolSidebarStore((state) =>
+    group?.followsPanelReveal === false ? null : state.revealSection,
+  );
   const reveal = requestedSection === id;
   const collapsed = !reveal && collapsedSections.includes(id);
   const order = group?.order ?? [];
@@ -92,7 +107,7 @@ export function ViewSection({
     if (preferences.collapsedSections.includes(id)) preferences.toggleSection(id);
     useToolSidebarStore.getState().consumeRevealSection(id);
   }, [requestedSection, aboveDone, id]);
-  const headingId = `view-section-${id}`;
+  const headingId = useId();
   return (
     <section
       ref={section}

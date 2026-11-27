@@ -6,10 +6,13 @@ import { useToolSidebarStore } from "~/toolSidebarStore";
 import { act, render } from "../../test/render";
 import { ViewSection, ViewSectionGroup } from "./ViewSection";
 
-function Panel() {
+function Panel({ followsPanelReveal = true }: { followsPanelReveal?: boolean }) {
   return (
     <div data-testid="scroller" style={{ height: 160, overflow: "auto" }}>
-      <ViewSectionGroup order={["activity:runs", "activity:landings"]}>
+      <ViewSectionGroup
+        order={["activity:runs", "activity:landings"]}
+        followsPanelReveal={followsPanelReveal}
+      >
         <ViewSection id="activity:runs" title="Runs">
           {() => <div style={{ height: 600 }}>Runs body</div>}
         </ViewSection>
@@ -55,4 +58,14 @@ it("reveals a section after a cold panel lays out the body above it", async () =
   await expect.element(screen.getByRole("button", { name: "Landings" })).toBeInViewport();
   await expect.element(screen.getByText("Landings body")).toBeInViewport();
   expect(screen.getByTestId("scroller").element().scrollTop).toBeGreaterThan(0);
+});
+
+it("keeps a tile section collapsed when the side panel requests that section", async () => {
+  setup();
+  useThreadContextSidebarStore.getState().show("activity", { section: "activity:runs" });
+  useThreadContextSidebarStore.getState().toggleSection("activity:runs");
+  await using screen = await render(<Panel followsPanelReveal={false} />);
+  await expect.element(screen.getByText("Landings body")).toBeVisible();
+  expect(screen.getByText("Runs body").query()).toBeNull();
+  expect(useToolSidebarStore.getState().revealSection).toBe("activity:runs");
 });

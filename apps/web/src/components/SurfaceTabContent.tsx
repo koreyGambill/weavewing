@@ -51,7 +51,8 @@ import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequest/pullRequestIcons";
 import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
-import { viewDefinition } from "~/views/viewRegistry";
+import { VIEW_TITLES } from "~/components/ToolSidebar.logic";
+import { VIEW_ICONS } from "~/views/viewIcons";
 import { viewTabTitle } from "~/views/viewTiles.logic";
 
 export interface TileSurfaceActions {
@@ -149,7 +150,7 @@ export function surfaceTitle(
       return "Questions";
     case "view":
       return viewTabTitle(
-        viewDefinition(surface.viewId).title,
+        VIEW_TITLES[surface.viewId],
         surface.threadRef
           ? (threadTitles?.get(scopedThreadKey(surface.threadRef)) ?? "another thread")
           : null,
@@ -234,7 +235,7 @@ export function SurfaceIcon({
     case "questions":
       return <MessageCircleQuestionIcon className="size-3 shrink-0" />;
     case "view": {
-      const Icon = viewDefinition(surface.viewId).icon;
+      const Icon = VIEW_ICONS[surface.viewId];
       return <Icon className="size-3 shrink-0" />;
     }
     case "device":

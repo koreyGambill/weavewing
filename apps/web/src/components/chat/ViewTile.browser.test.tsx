@@ -225,18 +225,18 @@ it("sends nothing for hidden view tabs and cancels a view's requests when its ta
   using artifacts = holdRequests(WS_METHODS.threadArtifactList);
   const { stack, screen } = await mountApp(THREADS, () => {
     const store = useRightPanelStore.getState();
-    store.openView(refOf(thread), "todos", null, "tile-2");
+    store.openView(refOf(thread), "checklist", null, "tile-2");
     store.openView(refOf(thread), "artifacts", null, "tile-2");
-    store.openView(refOf(thread), "related", null, "tile-2");
+    store.openView(refOf(thread), "activity", null, "tile-2");
   });
   await using _app = stack;
-  const relatedTab = screen.getByRole("tab", { name: "Related", exact: true });
+  const relatedTab = screen.getByRole("tab", { name: "Activity", exact: true });
   await expect.element(relatedTab).toHaveAttribute("aria-selected", "true");
-  await expect.element(screen.getByRole("region", { name: "Related" })).toBeVisible();
+  await expect.element(screen.getByRole("region", { name: "Activity" })).toBeVisible();
   expect(todos.started).toEqual([]);
   expect(artifacts.started).toEqual([]);
 
-  await userEvent.click(screen.getByRole("tab", { name: "Todos", exact: true }));
+  await userEvent.click(screen.getByRole("tab", { name: "Checklist", exact: true }));
   await vi.waitFor(() => expect(todos.started).toEqual([thread.id]));
   expect(todos.open.size).toBe(1);
   await userEvent.click(relatedTab);
@@ -248,7 +248,7 @@ it("shows a view in a narrow tile compact, with Open full size maximizing the ti
   const thread = here;
   const { stack, screen } = await mountApp(THREADS, () => {
     const store = useRightPanelStore.getState();
-    store.openView(refOf(thread), "related", null, "tile-2");
+    store.openView(refOf(thread), "activity", null, "tile-2");
   });
   await using _app = stack;
   const split = selectThreadTileLayout(
@@ -277,7 +277,7 @@ it("drops the side panel's view on a tile edge to split it, and cancels a drop e
   const thread = here;
   const { stack, screen } = await mountApp(THREADS);
   await using _app = stack;
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "related" }));
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
   const grip = panel.element().querySelector<HTMLElement>("[data-view-drag-grip]")!;
@@ -298,18 +298,18 @@ it("drops the side panel's view on a tile edge to split it, and cancels a drop e
   });
   await vi.waitFor(() =>
     expect(groupsOf(thread).map((group) => group.tabs)).toEqual([
-      ["view:related"],
+      ["view:timeline"],
       [CONVERSATION_TAB_ID],
     ]),
   );
   await expect.element(panel).not.toBeInTheDocument();
-  await vi.waitFor(() => expect(focusedTile()).toBe("view:related"));
+  await vi.waitFor(() => expect(focusedTile()).toBe("view:timeline"));
 });
 
 it("offers no split of a tile too narrow to divide when a view is dragged onto its edge", async () => {
   const thread = here;
   const { stack, screen } = await mountApp(THREADS, () => {
-    useRightPanelStore.getState().openView(refOf(thread), "todos", null, "tile-2");
+    useRightPanelStore.getState().openView(refOf(thread), "checklist", null, "tile-2");
   });
   await using _app = stack;
   const split = selectThreadTileLayout(
@@ -321,7 +321,7 @@ it("offers no split of a tile too narrow to divide when a view is dragged onto i
       .getState()
       .applyTileAction(refOf(thread), { type: "resize", splitId: split.id, ratio: 0.25 }),
   );
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "related" }));
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
   const grip = panel.element().querySelector<HTMLElement>("[data-view-drag-grip]")!;

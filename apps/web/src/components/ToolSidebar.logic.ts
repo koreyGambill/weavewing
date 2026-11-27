@@ -29,7 +29,7 @@ export const VIEW_TITLES: { readonly [Id in ViewId]: string } = {
   status: "Status",
 };
 
-export function isViewId(value: string): value is ViewId {
+function isViewId(value: string): value is ViewId {
   return VIEW_IDS.some((id) => id === value);
 }
 

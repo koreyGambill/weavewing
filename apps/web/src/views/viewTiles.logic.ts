@@ -2,7 +2,12 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { ScopedThreadRef } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { isGlobalViewId, migrateViewId, type ViewId } from "../components/ToolSidebar.logic";
+import {
+  isGlobalViewId,
+  migrateViewId,
+  storedViewId,
+  type ViewId,
+} from "../components/ToolSidebar.logic";
 import type { RightPanelSurface } from "../rightPanelStore";
 
 export type ViewSurface = Extract<RightPanelSurface, { kind: "view" }>;
@@ -16,13 +21,14 @@ export function viewSurface(
   owner: ScopedThreadRef,
   thread: ScopedThreadRef | null,
 ): ViewSurface {
+  const id: ViewSurface["id"] = `view:${storedViewId(viewId)}`;
   const other =
     !isGlobalViewId(viewId) && thread !== null && scopedThreadKey(thread) !== scopedThreadKey(owner)
       ? thread
       : null;
   return other
-    ? { id: `view:${viewId}:${scopedThreadKey(other)}`, kind: "view", viewId, threadRef: other }
-    : { id: `view:${viewId}`, kind: "view", viewId };
+    ? { id: `${id}:${scopedThreadKey(other)}`, kind: "view", viewId, threadRef: other }
+    : { id, kind: "view", viewId };
 }
 
 /** The thread a view tab shows: the one it was locked to, else its tile's; none for global views. */
@@ -51,15 +57,15 @@ function normalizeStoredViewId(id: string): ViewId | null {
 export function restoreViewSurface(value: unknown): ViewSurface | null {
   const decoded = decodeStoredViewSurface(value);
   if (decoded._tag === "None") return null;
-  const { id, viewId: storedViewId, threadRef } = decoded.value;
-  const storedId = threadRef
-    ? `view:${storedViewId}:${scopedThreadKey(threadRef)}`
-    : `view:${storedViewId}`;
-  const viewId = normalizeStoredViewId(storedViewId);
-  if (id !== storedId || viewId === null || (threadRef && isGlobalViewId(viewId))) return null;
+  const { id, viewId: stored, threadRef } = decoded.value;
+  const viewId = normalizeStoredViewId(stored);
+  if (viewId === null || (threadRef && isGlobalViewId(viewId))) return null;
+  const target = threadRef ? `:${scopedThreadKey(threadRef)}` : "";
+  const tabId: ViewSurface["id"] = `view:${storedViewId(viewId)}${target}`;
+  if (id !== `view:${stored}${target}` && id !== tabId) return null;
   return threadRef
-    ? { id: `view:${viewId}:${scopedThreadKey(threadRef)}`, kind: "view", viewId, threadRef }
-    : { id: `view:${viewId}`, kind: "view", viewId };
+    ? { id: tabId, kind: "view", viewId, threadRef }
+    : { id: tabId, kind: "view", viewId };
 }
 
 export function isViewArea(area: string): area is `view:${string}` {
@@ -72,9 +78,12 @@ export function viewIdFromArea(area: string): ViewId | null {
   return normalizeStoredViewId(area.slice("view:".length));
 }
 
-/** True for a `view:` area whose view no longer exists; restoring drops its tab. */
-export function isRetiredViewArea(area: string): boolean {
-  return isViewArea(area) && viewIdFromArea(area) === null;
+/** Uses the same persisted id for a view tab, its placeholder and its saved area. */
+export function normalizeStoredViewTabId(tabId: string): string {
+  if (!isViewArea(tabId)) return tabId;
+  const [id = "", ...target] = tabId.slice("view:".length).split(":");
+  const view = normalizeStoredViewId(id);
+  return view === null ? tabId : ["view", storedViewId(view), ...target].join(":");
 }
 
 /** "Activity" for the tile's own thread, "Activity · Other thread" for a view locked elsewhere. */
