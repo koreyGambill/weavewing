@@ -134,7 +134,11 @@ export const releasePipeline = definePipeline({
       const co = checkout(ctx);
       const result = await assertInput(ctx, co);
       FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, buildOnly, run: ctx.run.id }, null, 2));
-      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-mac-signing.test.ts", ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts"]);
+      await logged(ctx, co, "release-tests", [
+        "node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-mac-signing.test.ts",
+        ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts",
+        Path.resolve(import.meta.dirname, "../lib/release-windows.test.ts"),
+      ]);
       return result;
     }).inline().cores(0.25);
 
@@ -154,7 +158,8 @@ export const releasePipeline = definePipeline({
       if (git(co.root, "rev-parse", "HEAD") !== commit || git(co.root, "status", "--porcelain"))
         throw new Error("Release source changed after preflight");
       const built = await ctx.runPipeline<{ commit: string; tree: string }>("release-build", "build", {
-        branch: commit,
+        // An explicit child revision selects its pipeline code as well as its checkout.
+        branch: git(import.meta.dirname, "rev-parse", "HEAD"),
         args: { commit, tree, version, channel, platforms: platforms.join(","), evidence: co.evidence },
       });
       if (built.commit !== commit || built.tree !== tree) throw new Error("Release build provenance differs from preflight");
@@ -279,12 +284,21 @@ export const releaseBuildPipeline = definePipeline({
 
     const bundle = packageRelease.step("bundle", async (ctx) => {
       const co = buildCheckout(ctx);
-      const commit = git(co.root, "rev-parse", "HEAD");
-      const tree = git(co.root, "rev-parse", "HEAD^{tree}");
-      if (commit !== ctx.args.commit || tree !== ctx.args.tree) throw new Error("Release build checkout differs from preflight");
+      const requestedCommit = ctx.args.commit ?? "";
+      if (!/^[a-f0-9]{40}$/.test(requestedCommit)) throw new Error("Release source must be an exact commit ID");
+      // Sparkwing's committed checkout is shallow. Fetch only the preflight commit when it differs.
+      if (git(co.root, "rev-parse", "HEAD") !== requestedCommit)
+        await logged(ctx, co, "fetch-release-source", [
+          "git", "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "origin", requestedCommit,
+        ]);
+      const commit = git(co.root, "rev-parse", "--verify", "--end-of-options", `${requestedCommit}^{commit}`);
+      const tree = git(co.root, "rev-parse", `${commit}^{tree}`);
+      if (commit !== requestedCommit || tree !== ctx.args.tree) throw new Error("Release source differs from preflight");
       FS.mkdirSync(source(co));
       FS.mkdirSync(scratch(co));
       await logged(ctx, co, "archive-source", ["bash", "-c", 'set -euo pipefail; git -C "$1" archive "$2" | tar -x -C "$3"', "bash", co.root, commit, source(co)]);
+      const sourceManifest = JSON.parse(FS.readFileSync(Path.join(source(co), "package.json"), "utf8"));
+      if (sourceManifest.engines?.node !== co.nodeVersion) throw new Error("Release source and pipeline must pin the same Node version");
       await build(ctx, co, "install", ["vp", "i", "--frozen-lockfile"]);
       await build(ctx, co, "align-version", ["node", "scripts/update-release-package-versions.ts", version]);
       await build(ctx, co, "bundle", ["vp", "run", "build:desktop:bundle"]);
@@ -334,7 +348,7 @@ export const releaseBuildPipeline = definePipeline({
       await build(ctx, co, "win-exe", ["node", "apps/server/scripts/cli.ts", "build-exe", "--target", "win-x64"]);
       const staging = Path.join(scratch(co), "win-assets");
       await build(ctx, co, "win-cli", ["node", "scripts/build-cli-archive.ts", "--platform", "win", "--arch", "x64", "--version", version, "--resource-monitor-dir", Path.dirname(monitor), "--output-dir", staging]);
-      await build(ctx, co, "win-desktop-native", ["node", ".sparkwing/lib/release-windows.ts", "--assets", staging, "--version", version, "--wsl-runtime", archive]);
+      await build(ctx, co, "win-desktop-native", ["node", Path.resolve(import.meta.dirname, "../lib/release-windows.ts"), "--assets", staging, "--version", version, "--wsl-runtime", archive]);
       normalizeArtifacts(staging, "win", version, channel);
       keepDesktopAssets(co, staging, "win");
       return { platform: "win" };

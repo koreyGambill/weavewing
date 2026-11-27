@@ -4,6 +4,7 @@ import * as Path from "node:path";
 import { parseArgs } from "node:util";
 
 import { assertUpdaterConfig, releaseInputs } from "./release.ts";
+import { runWindowsSmoke } from "./windows-interop.ts";
 
 const { values } = parseArgs({ options: { assets: { type: "string" }, version: { type: "string" }, "wsl-runtime": { type: "string" } } });
 if (!values.assets || !values.version || !values["wsl-runtime"] || !process.env.TMPDIR) throw new Error("Expected --assets, --version, --wsl-runtime and TMPDIR");
@@ -27,6 +28,7 @@ for (const [file, extra] of [["verify-windows-desktop-artifact", ["--define:impo
 run("tar", ["-C", dist, "-cf", Path.join(verify, "payload.tar"), unpacked]);
 const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
 const script = `
+[Console]::Error.WriteLine('Weavewing Windows smoke started')
 $ErrorActionPreference = 'Stop'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('weavewing-release-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
@@ -63,4 +65,4 @@ try {
   }
 }
 `;
-run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")]);
+await runWindowsSmoke(script);
