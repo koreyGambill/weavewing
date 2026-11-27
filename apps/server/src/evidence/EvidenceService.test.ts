@@ -2316,3 +2316,59 @@ it.effect("a Notes page lists at most 50 notes, each shortened, and pages on to 
     }),
   ).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("a user's Discuss or answer for a change that went quiet raises its card first", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(
+        recordInput("drafted", [change("discussed"), change("confirmed"), change("dismissed")]),
+      );
+      // The user put Discuss in the composer; before it was sent, the agent recorded a note.
+      yield* evidence.record(
+        recordInput("drafted", [
+          change("discussed", { attention: "note" }),
+          change("confirmed", { attention: "note" }),
+          change("dismissed", { attention: "note" }),
+        ]),
+      );
+      const states = () =>
+        evidence
+          .get({ landingId: "drafted" })
+          .pipe(
+            Effect.map((landing) =>
+              landing.changes.map(({ id, qa }) => [
+                id,
+                qa.state,
+                qa.by,
+                qa.ref,
+                qa.raised,
+                qa.discussedMessageId ?? null,
+              ]),
+            ),
+          );
+      assert.deepStrictEqual(
+        (yield* states()).map(([, state]) => state),
+        ["quiet", "quiet", "quiet"],
+      );
+
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("m-draft"),
+        changes: [{ landingId: "drafted", changeId: "discussed" }],
+      });
+      yield* evidence.setQa({ landingId: "drafted", changeId: "confirmed", state: "confirmed" });
+      yield* evidence.setQa({ landingId: "drafted", changeId: "dismissed", state: "waived" });
+      assert.deepStrictEqual(yield* states(), [
+        ["discussed", "pending", "user", 1, ["needs_you"], "m-draft"],
+        ["confirmed", "confirmed", "user", 2, ["needs_you"], null],
+        ["dismissed", "waived", "user", 3, ["needs_you"], null],
+      ]);
+      assert.deepStrictEqual(
+        (yield* evidence.waitingQa(lead)).map((item) => [item.ref, item.state]),
+        [["QA1", "discussing"]],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);

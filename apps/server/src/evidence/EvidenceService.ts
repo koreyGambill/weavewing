@@ -943,10 +943,11 @@ const make = Effect.gen(function* () {
         // Only a change of state replaces the agent's record; its words stay attributed to it.
         if (input.by === "user" && current.by === "agent" && current.state === input.state)
           return yield* invalid("The agent recorded this; reopen it to change it.");
-        // Reopening a quiet change raises its card: it is marked needs_you and gets a QA number.
-        const promote = input.state === "pending" && current.state === "quiet";
+        // Any answer to a quiet change raises its card first, as Needs me does: it is marked
+        // needs_you and gets a QA number, so the answer is never left where nobody sees it.
+        const promote = current.state === "quiet";
         const ref =
-          input.state === "pending" && current.ref === null
+          (promote || input.state === "pending") && current.ref === null
             ? yield* allocateRef(current.qa_thread_id)
             : current.ref;
         // A note given replaces the old one; none keeps it on the same state and clears it on a
@@ -1022,15 +1023,33 @@ const make = Effect.gen(function* () {
   const markDiscussed = Effect.fn("EvidenceService.markDiscussed")(function* (
     input: MarkDiscussedInput,
   ) {
-    let marked = false;
-    for (const change of input.changes) {
-      const rows = yield* sql`UPDATE evidence_qa SET discussed_message_id = ${input.messageId}
-            WHERE landing_id = ${change.landingId} AND change_id = ${change.changeId} AND state = 'pending'
-              AND landing_id IN (SELECT landing_id FROM evidence_landings
-                WHERE coalesce(qa_thread_id, thread_id) = ${input.threadId})
-            RETURNING change_id`;
-      marked ||= rows.length > 0;
-    }
+    const now = DateTime.formatIso(yield* DateTime.now);
+    // A Discuss sent for a change that went quiet while it sat in the composer raises its card
+    // first, as Needs me does, so the discussion stays visible.
+    const marked = yield* sql.withTransaction(
+      Effect.gen(function* () {
+        let any = false;
+        for (const change of input.changes) {
+          const [current] = yield* sql<{
+            readonly state: string;
+            readonly ref: number | null;
+          }>`SELECT q.state, q.ref FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+              WHERE q.landing_id = ${change.landingId} AND q.change_id = ${change.changeId}
+                AND coalesce(l.qa_thread_id, l.thread_id) = ${input.threadId}`;
+          if (current === undefined || (current.state !== "pending" && current.state !== "quiet"))
+            continue;
+          const where = sql`landing_id = ${change.landingId} AND change_id = ${change.changeId}`;
+          if (current.state === "quiet")
+            yield* sql`UPDATE evidence_qa SET state = 'pending', by = 'user', updated_at = ${now},
+                raised_json = json_insert(coalesce(raised_json, '[]'), '$[#]', 'needs_you'),
+                ref = ${current.ref ?? (yield* allocateRef(input.threadId))}
+              WHERE ${where}`;
+          yield* sql`UPDATE evidence_qa SET discussed_message_id = ${input.messageId} WHERE ${where}`;
+          any = true;
+        }
+        return any;
+      }),
+    );
     if (marked) {
       yield* publish;
       yield* publishQaThreads([input.threadId]);
