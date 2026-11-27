@@ -497,6 +497,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "evidence-prompt",
+    title: "Ask agents to record landed work",
+    to: "/settings/threads",
+    scope: "environment",
+    searchTerms: ["evidence record landed merge exempt done prompt qa"],
+  },
+  {
     id: "snooze-limited-threads",
     title: "Snooze until limits reset",
     to: "/settings/threads",

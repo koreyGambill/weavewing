@@ -8,6 +8,7 @@ import {
   transitionSideArea,
   type SideAreaAction,
   type SideAreaState,
+  type ViewId,
 } from "./components/ToolSidebar.logic";
 
 interface SideAreaStore extends SideAreaState {
@@ -23,6 +24,54 @@ export function takeSideAreaFocusRequest(): boolean {
   const requested = focusOnOpen;
   focusOnOpen = false;
   return requested;
+}
+
+/** A resolved history entry: its path, key and position; unset before the first resolves. */
+export interface SideAreaRoute {
+  readonly pathname: string | undefined;
+  readonly key: string | undefined;
+  readonly index: number | undefined;
+}
+
+let handoff: {
+  readonly from: SideAreaRoute;
+  readonly toIndex: number;
+} | null = null;
+
+/**
+ * Opens `view` in the side area now and keeps it open while the page that asked navigates from
+ * history entry `from` to entry `toIndex`: that route change does not close the side area, and
+ * focus stays in it. Any other route change ignores the handoff.
+ */
+export function requestSideAreaHandoff(view: ViewId, from: SideAreaRoute, toIndex: number) {
+  handoff = { from, toIndex };
+  useToolSidebarStore.getState().dispatch({ type: "show", view });
+}
+
+/** Drops a pending handoff unless `route` is the entry it goes to. */
+export function cancelSideAreaHandoff(route?: SideAreaRoute) {
+  if (route === undefined || !isSideAreaHandoffArriving(route)) handoff = null;
+}
+
+/** True when `route` is the entry a pending handoff goes to, which must not close the side area. */
+export function isSideAreaHandoffArriving(route: SideAreaRoute): boolean {
+  return (
+    handoff !== null &&
+    handoff.toIndex === route.index &&
+    handoff.from.key !== route.key &&
+    handoff.from.pathname !== route.pathname
+  );
+}
+
+/**
+ * Ends the handoff arriving on `route` and returns true, or false when none arrives there.
+ * Closing the side area afterwards returns focus to `returnTo`, a control on this route.
+ */
+export function completeSideAreaHandoff(route: SideAreaRoute, returnTo: HTMLElement | null) {
+  if (!isSideAreaHandoffArriving(route)) return false;
+  handoff = null;
+  returnFocus = returnTo;
+  return true;
 }
 
 export const useToolSidebarStore = create<SideAreaStore>()(

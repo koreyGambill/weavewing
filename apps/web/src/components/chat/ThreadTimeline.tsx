@@ -10,13 +10,9 @@ import {
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
 import { useThreadEvidence } from "../../state/evidence";
-import { useThreadHasSubagents } from "../../state/entities";
+import { useThreadHasSubagents, useThreadWaitsOnQa } from "../../state/entities";
 import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
-import {
-  placedLandingIds,
-  timelineMayHoldQa,
-  withChildLandingCards,
-} from "../evidence/qaCard.logic";
+import { placedLandingIds, timelineMayHoldQa, withLandingCards } from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
@@ -67,10 +63,12 @@ export function ThreadTimeline({
   });
   const plainEntries =
     draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals, historyComplete);
-  // QA cards read the thread's landings only when the timeline has somewhere to put them.
+  // QA cards read the thread's landings only when the timeline has somewhere to put them, or the
+  // strip lists a QA change whose card must open.
   const hasSubagents = useThreadHasSubagents(threadDetailRef);
+  const waitsOnQa = useThreadWaitsOnQa(threadDetailRef);
   const evidence = useThreadEvidence(
-    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents)
+    entriesInput.waitingCards === true && timelineMayHoldQa(plainEntries, hasSubagents, waitsOnQa)
       ? threadDetailRef
       : null,
     placedLandingIds(plainEntries),
@@ -78,7 +76,7 @@ export function ThreadTimeline({
   const entries =
     evidence.data === null || threadDetailRef === null
       ? plainEntries
-      : withChildLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
+      : withLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({

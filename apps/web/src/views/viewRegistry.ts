@@ -19,14 +19,20 @@ import {
 import { createElement, type ComponentType, type ReactNode } from "react";
 
 import { CalendarTool } from "../components/CalendarTool";
+import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { VIEW_IDS, type ViewId, type ViewLayout } from "../components/ToolSidebar.logic";
 import { InboxGlobalView, InboxUnreadCount } from "./InboxGlobalView";
 import { StatusAlertCount, StatusView } from "./StatusView";
 import { ThreadViewBody } from "./ThreadViewBody";
+import { viewSupportsHost } from "./viewPage.logic";
 
 export type { ViewId, ViewLayout };
+/** Every registered view: those the side area can hold, then views that open only on a page. */
+export type RegisteredViewId = ViewId | "pull-requests";
 export type ViewScope = "thread" | "global";
 export type ViewHost = "panel" | "tile" | "page";
+/** Where a global view opens full size: the shared view page or a route of its own. */
+export type ViewPage = "/view/$viewId" | "/pull-requests";
 
 /** A draft that has no thread yet; Inspect previews its starting context. */
 export interface ViewDraft {
@@ -53,7 +59,7 @@ export interface ViewSlots {
  * Hosts mount a view only while it is visible.
  */
 export interface ViewDefinition {
-  readonly id: ViewId;
+  readonly id: RegisteredViewId;
   readonly title: string;
   readonly icon: LucideIcon;
   /** What the view shows and who writes it, for the host's about note. */
@@ -68,6 +74,14 @@ export interface ViewDefinition {
    * mounts it only while open.
    */
   readonly PickerCount?: ComponentType<{ readonly target: ViewTarget }>;
+  /** The route that shows a global view full size; hosts narrower than `minWidthPx` link to it. */
+  readonly page?: ViewPage;
+  /**
+   * Hosts that render this view's body; omitted means panel and tile, plus the shared page when
+   * `page` is "/view/$viewId". `"page"` is that shared host: a view whose dedicated route
+   * renders it lists `[]` (page-only), never `["page"]`.
+   */
+  readonly hosts?: ReadonlyArray<ViewHost>;
   readonly render: (props: {
     readonly target: ViewTarget;
     readonly layout: ViewLayout;
@@ -97,7 +111,7 @@ function threadView<Id extends ThreadViewId>(
   };
 }
 
-const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id } } = {
+const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { readonly id: Id } } = {
   todos: threadView(
     "todos",
     "Todos",
@@ -176,6 +190,7 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     about: "Your agenda for a day. Calendar sync is not available yet.",
     scope: "global",
     minWidthPx: 280,
+    page: "/view/$viewId",
     render: () => createElement(CalendarTool),
   },
   status: {
@@ -187,14 +202,34 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     scope: "global",
     minWidthPx: 280,
     PickerCount: StatusAlertCount,
+    page: "/view/$viewId",
     render: () => createElement(StatusView),
+  },
+  "pull-requests": {
+    id: "pull-requests",
+    title: "Pull requests",
+    icon: PullRequestGlyph.pullRequest,
+    about: "Pull requests across your projects, with their checks and reviews, and a detail tile.",
+    scope: "global",
+    minWidthPx: 720,
+    page: "/pull-requests",
+    // Its page reads its filters from its own route, so no host renders this body.
+    hosts: [],
+    render: () => null,
   },
 };
 
-export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = VIEW_IDS.map(
-  (id) => DEFINITIONS[id],
-);
+const PAGE_ONLY_VIEW_IDS = ["pull-requests"] as const satisfies ReadonlyArray<RegisteredViewId>;
 
-export function viewDefinition(id: ViewId): ViewDefinition {
+export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = [
+  ...VIEW_IDS,
+  ...PAGE_ONLY_VIEW_IDS,
+].map((id) => DEFINITIONS[id]);
+
+/** The side area's picker, in its order: the views the panel can host. */
+export const PANEL_VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition & { readonly id: ViewId }> =
+  VIEW_IDS.map((id) => DEFINITIONS[id]).filter((entry) => viewSupportsHost(entry, "panel"));
+
+export function viewDefinition(id: RegisteredViewId): ViewDefinition {
   return DEFINITIONS[id];
 }

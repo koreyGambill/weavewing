@@ -23,6 +23,7 @@ import {
 } from "../sourceControl/threadPullRequests.ts";
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
+  EVIDENCE_PROMPT_ORIGIN_EVENT,
   type ChatAttachment,
   CommandId,
   type GuestMessageId,
@@ -8280,6 +8281,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }
         : undefined,
     );
+    // A done prompt is claimed before it is sent, so an archive or delete may commit in between.
+    if (
+      command.origin.kind === "system" &&
+      command.origin.event === EVIDENCE_PROMPT_ORIGIN_EVENT &&
+      (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.threadId} is ${projection.thread.deletedAt !== null ? "deleted" : "archived"}.`,
+      });
+    }
     if (
       command.context?.sideChatRefresh !== undefined ||
       command.context?.sideChatRefreshBefore !== undefined ||

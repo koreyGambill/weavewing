@@ -99,6 +99,14 @@ you select others; the panel names the locked thread, and unlocking returns it t
 following. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
+Calendar, Status and Pull requests also open as full pages beside the thread list.
+In the side panel, the expand button next to **Pin** opens Calendar or Status as a
+page; for a thread view it maximizes the panel instead. The command palette offers
+**Open Calendar as a page** and **Open Status as a page**, and **Open pull requests**
+as before. On the Calendar and Status pages, **Open in side panel** moves the view back
+into the panel and returns you to where you were. Pull requests opens only on its own
+page.
+
 The left sidebar also holds the same thread views, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
 **Threads** at the top of the strip, to return to your threads. `Cmd+Alt+I` on macOS or `Ctrl+Alt+I`
 on Windows and Linux switches between your threads and the last tool, and opens
@@ -162,15 +170,33 @@ thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#wai
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
-Agents record a landing with `evidence_record` after they merge work.
+Agents record a landing with `evidence_record` after they merge work. A landing with
+nothing you or a reviewer could check records an exemption with a one-line reason
+instead; it covers its commits and shows in Evidence as **Exempt**. Agents never exempt
+work you asked to see or verify, and an exemption cannot replace a landing that already
+records changes.
 
-A change that has something only you can judge, such as captures, a waived review
-or one that asked for changes, a failed or skipped check, or a gap, shows a
-**QA card** in the thread where the agent recorded it. An approval alone raises no
-card, because no review verdict is checked yet; a card that is raised still shows it
-as an unverified review. A landing a delegated agent recorded shows in
-its lead's thread, where the delegated work reported back. A change with nothing
-to check leaves one quiet line instead. Each card has three buttons:
+When an agent's turn ends after a landing command moved the project's target branch,
+and no landing or exemption covers the commits it added, Weavewing sends that agent one
+message asking it to record evidence or an exemption. The landing commands are
+`git merge`, `git push` to the project's remote and target branch, and `xwing env land`;
+a merge made on the forge, such as with `gh pr merge`, is not seen. When it is unclear
+which thread's command moved the branch, no thread is asked. Each commit is asked about once, in one thread. Work landed during
+the turn that answers that message is not asked about again, so an answer can never
+start another round. Turn this off with **Ask agents to record landed work** in
+**Settings → Threads**.
+
+A change with a waived review or one that asked for changes, or a failed or skipped
+check, always shows a **QA card** in the thread where the agent recorded it. The
+agent marks each other change: **needs you** when you should look at it, such as a
+visual change with its screenshots, or check behavior the agent could not run, which
+also shows a card, or a **note** when its gaps are routine, such as no run on a device.
+A note's captures are not shown in chat; expand it in Evidence to see them.
+An approval alone raises no card, because no review verdict is checked yet; a card
+that is raised still shows it as an unverified review. A landing a delegated agent
+recorded shows in its lead's thread, where the delegated work reported back. A
+change with nothing to check leaves one quiet line instead, and a note's line ends
+in "noted". Each card has three buttons:
 
 - **Looks good** marks it confirmed.
 - **Dismiss** closes it without checking. Open the closed card to add why, if you want to.
@@ -183,7 +209,13 @@ agent**. A problem it records shows as **Agent fixing** until a later landing na
 fix. **Reopen** on any settled card makes it open again.
 
 The Evidence tool lists the same landings. Pick **Thread** for this thread's landings
-or **All** for every thread on this server, and filter to the ones that still need QA.
+or **All** for every thread on this server, and filter to the ones that still need QA
+or to **Notes**. Notes lists each noted change with the start of its gaps, newest landing
+first, 50 at a time, and a lead's thread includes the notes its delegated agents recorded.
+Expand a note or open its landing to read all of it, or choose **Needs me** to show a note
+as a QA card. A later record of that landing keeps the card, and keeps any card you
+discussed, reopened or answered as it was. The agent can turn a card back into a note only
+while you have not touched it and no review or check outcome holds it.
 Open a landing to see its changes and load their captures; click a capture to view it
 full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
 change it at any time. Changes waiting for your QA count in each thread's

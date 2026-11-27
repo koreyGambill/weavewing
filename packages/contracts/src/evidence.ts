@@ -13,6 +13,8 @@ import {
 const Text = (max: number) => TrimmedNonEmptyString.check(Schema.isMaxLength(max));
 
 export const EVIDENCE_LIST_PAGE_SIZE = 20;
+/** The most notes one Notes page lists; a page holds whole landings, so it may list fewer. */
+export const EVIDENCE_NOTES_PAGE_LIMIT = 50;
 export const EVIDENCE_RECORD_MAX_BYTES = 64 * 1024;
 
 export const EvidenceSlug = Text(120).check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/));
@@ -33,6 +35,7 @@ export type EvidenceQaState = typeof EvidenceQaState.Type;
 /**
  * Why a recorded change asks for the user's QA. A change with none is recorded quietly. `legacy`
  * marks a change that was waiting on the user before reasons were kept, once it is answered.
+ * `needs_you` is the agent's or the user's mark; `gaps` raised a card before agents marked changes.
  */
 export const EvidenceQaRaiseReason = Schema.Literals([
   "legacy",
@@ -42,6 +45,7 @@ export const EvidenceQaRaiseReason = Schema.Literals([
   "check_failed",
   "check_skipped",
   "gaps",
+  "needs_you",
 ]);
 export type EvidenceQaRaiseReason = typeof EvidenceQaRaiseReason.Type;
 
@@ -102,6 +106,12 @@ export const EvidenceChange = Schema.Struct({
     Schema.isMaxLength(12),
   ),
   gaps: Schema.Array(Text(300)).check(Schema.isMaxLength(10)),
+  attention: Schema.optional(
+    Schema.Literals(["needs_you", "note"]).annotate({
+      description:
+        "needs_you raises a QA card, which shows the captures in chat; note, the default, logs the change without one. A visual change the user should look at is needs_you. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
+    }),
+  ),
   evidenceDir: Schema.optional(Text(1024)),
   /** Earlier changes the agent recorded as `problem` that this change fixes. */
   fixes: Schema.optional(
@@ -112,13 +122,24 @@ export const EvidenceChange = Schema.Struct({
 });
 export type EvidenceChange = typeof EvidenceChange.Type;
 
-/** The agent-written part of a landing, stored as one JSON document. */
+/** The origin event of the message that asks an agent to record evidence for work it landed. */
+export const EVIDENCE_PROMPT_ORIGIN_EVENT = "evidence prompt";
+
+/** Landed work the agent says needs no evidence; it covers its target like a landing does. */
+export const EvidenceExempt = Schema.Struct({
+  reason: Reason.check(Schema.isPattern(/^[^\r\n\u0085\u2028\u2029]*$/u)).annotate({
+    description: "One line.",
+  }),
+});
+
+/** The agent-written part of a landing, stored as one JSON document. An exemption has no changes. */
 export const EvidenceRecord = Schema.Struct({
   id: EvidenceSlug,
   title: Text(200),
   target: Schema.Struct({ branch: Text(200), sha: Text(64) }),
   verifications: Schema.Array(EvidenceVerification).check(Schema.isMaxLength(20)),
-  changes: Schema.Array(EvidenceChange).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  changes: Schema.Array(EvidenceChange).check(Schema.isMaxLength(20)),
+  exempt: Schema.optional(EvidenceExempt),
 });
 export type EvidenceRecord = typeof EvidenceRecord.Type;
 
@@ -143,17 +164,27 @@ const EvidenceChangeInput = EvidenceChangeInputFields.check(
   ),
 );
 
-/**
- * Recording again with the same id replaces the record and keeps QA. A waived
- * review or skipped check needs its reason here; stored records may predate that.
- */
-export const EvidenceRecordInput = Schema.Struct({
+const EvidenceRecordInputFields = Schema.Struct({
   ...EvidenceRecord.fields,
   verifications: Schema.Array(EvidenceVerificationInput).check(Schema.isMaxLength(20)),
-  changes: Schema.Array(EvidenceChangeInput).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  changes: Schema.optional(Schema.Array(EvidenceChangeInput).check(Schema.isMaxLength(20))),
   threadId: Schema.optional(ThreadId),
   landedAt: Schema.optional(IsoDateTime),
 });
+
+/**
+ * Recording again with the same id replaces the record and keeps QA. A waived
+ * review or skipped check needs its reason here; stored records may predate that.
+ * An exemption names the target and has no changes.
+ */
+export const EvidenceRecordInput = EvidenceRecordInputFields.check(
+  Schema.makeFilter((input: typeof EvidenceRecordInputFields.Type) => {
+    const count = input.changes?.length ?? 0;
+    if (input.exempt !== undefined)
+      return count === 0 ? true : "An exemption has no changes; send exempt or changes, not both.";
+    return count > 0 ? true : "Record at least one change, or exempt.reason when none is needed.";
+  }),
+);
 export type EvidenceRecordInput = typeof EvidenceRecordInput.Type;
 
 export const EvidenceChangeQa = Schema.Struct({
@@ -206,6 +237,8 @@ export const EvidenceQaTally = Schema.Struct({
   confirmed: NonNegativeInt,
   problem: NonNegativeInt,
   waived: NonNegativeInt,
+  /** Of the quiet changes, those that are notes: they list gaps or captures. */
+  noted: Schema.optional(NonNegativeInt),
 });
 export type EvidenceQaTally = typeof EvidenceQaTally.Type;
 
@@ -225,6 +258,24 @@ export const EvidenceLandingSummary = Schema.Struct({
   ),
   changeCount: NonNegativeInt,
   qa: EvidenceQaTally,
+  exempt: Schema.optional(EvidenceExempt),
+  /**
+   * With `notes`: the changes recorded without a card that list gaps or captures, in record order, shortened
+   * for the list. `title` is the summary's first line, else the ask's; `gapPreviews` are the first
+   * gaps, each cut short, of `gapCount`. Reading the landing gives the full text.
+   */
+  notes: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: EvidenceSlug,
+        title: Schema.String,
+        gapPreviews: Schema.Array(Schema.String),
+        gapCount: NonNegativeInt,
+        /** Absent from servers that did not count captures; read it as zero. */
+        captureCount: Schema.optional(NonNegativeInt),
+      }),
+    ),
+  ),
 });
 export type EvidenceLandingSummary = typeof EvidenceLandingSummary.Type;
 
@@ -234,6 +285,11 @@ export const EvidenceListInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   /** Only landings with a pending or problem change. */
   needsQa: Schema.optional(Schema.Boolean),
+  /**
+   * Only landings with a note, each listing its notes, at most `EVIDENCE_NOTES_PAGE_LIMIT` notes a
+   * page. With `threadId`, also the landings its delegated children recorded for it.
+   */
+  notes: Schema.optional(Schema.Boolean),
   before: Schema.optional(EvidenceCursor),
 });
 export type EvidenceListInput = typeof EvidenceListInput.Type;
@@ -286,7 +342,10 @@ export const EvidenceThreadInput = Schema.Struct({
 });
 export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
 
-/** The landings a thread shows, recorded in it or for it: the newest, capped, plus any requested. */
+/**
+ * The landings a thread shows, recorded in it or for it: the newest, capped, plus any requested and
+ * any holding a QA change its waiting strip lists.
+ */
 export const EvidenceThreadResult = Schema.Struct({ landings: Schema.Array(EvidenceLanding) });
 export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
 

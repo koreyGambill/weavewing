@@ -1542,6 +1542,7 @@ function layerStartEffectWorker(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
         ServerSettings.layerTest(),
         Layer.mock(DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds)({}),
+        SqlitePersistence.layerMemory,
       ),
     ),
   );

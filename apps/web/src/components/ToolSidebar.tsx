@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useRouterState } from "@tanstack/react-router";
+import { useRouter, useRouterState, type ParsedLocation } from "@tanstack/react-router";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
@@ -27,9 +27,15 @@ import { DeferEnvironmentQueries } from "../state/query";
 import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveThreadRouteRef } from "../threadRoutes";
-import { takeSideAreaFocusRequest, useToolSidebarStore } from "../toolSidebarStore";
 import {
-  VIEW_DEFINITIONS,
+  completeSideAreaHandoff,
+  isSideAreaHandoffArriving,
+  takeSideAreaFocusRequest,
+  useToolSidebarStore,
+} from "../toolSidebarStore";
+import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
+import {
+  PANEL_VIEW_DEFINITIONS,
   viewDefinition,
   type ViewDefinition,
   type ViewSlots,
@@ -45,6 +51,7 @@ import {
   resolveSideAreaWidth,
   resolveViewLayout,
   type LockedThreadState,
+  type ViewId,
   SIDE_AREA_MAX_WIDTH,
   SIDE_AREA_MIN_WIDTH,
 } from "./ToolSidebar.logic";
@@ -72,6 +79,10 @@ const SIDE_AREA_COVER_VARIABLE = "--side-area-cover-right";
 const LAYER_SELECTOR =
   '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle], [data-dropdown-terminal], [data-dropdown-terminal-toggle]';
 
+function sideAreaRoute({ pathname, state }: ParsedLocation) {
+  return { pathname, key: state.__TSR_key, index: state.__TSR_index };
+}
+
 function threadKey(ref: ScopedThreadRef | null) {
   return ref ? `${ref.environmentId}:${ref.threadId}` : null;
 }
@@ -97,6 +108,11 @@ function openLayerVisible() {
   ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }));
 }
 
+/** Whether the side area shows maximized: a view with a page opens its page instead. */
+function shownMaximized(state: { readonly maximized: boolean; readonly view: ViewId }) {
+  return state.maximized && !viewDefinition(state.view).page;
+}
+
 /**
  * The side area: one view at a time on the right, covering the content instead of resizing it.
  * Its thread views follow the selected thread unless locked; Pin keeps it open.
@@ -104,7 +120,7 @@ function openLayerVisible() {
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const open = useToolSidebarStore((state) => state.open);
   const width = useToolSidebarStore((state) => state.width);
-  const maximized = useToolSidebarStore((state) => state.maximized);
+  const maximized = useToolSidebarStore(shownMaximized);
   const pinned = useToolSidebarStore((state) => state.pinned);
   const { state: statusState } = useStatusSignal();
   const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
@@ -124,13 +140,32 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const routeThreadKey = useRouterState({
     select: (state) => threadKey(resolveThreadRouteRef(state.matches.at(-1)?.params ?? {})),
   });
+  const router = useRouter();
+  // The resolved location changes once the matches the thread key comes from have rendered.
+  const routePathname = useRouterState({ select: (state) => state.resolvedLocation?.pathname });
+  const routeIndex = useRouterState({
+    select: (state) => state.resolvedLocation?.state.__TSR_index,
+  });
+  const routeKey = useRouterState({ select: (state) => state.resolvedLocation?.state.__TSR_key });
   const seenThreadKey = useRef(routeThreadKey);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area.
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
+    if (isSideAreaHandoffArriving(sideAreaRoute(router.state.location))) return;
     useToolSidebarStore.getState().dispatch({ type: "dismiss" });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only a thread switch dismisses; the router is read for the location it switched to.
   }, [routeThreadKey]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A page's handoff ends on the entry it went to; focus stays in the side area, which the destination's composer leaves alone.
+  useEffect(() => {
+    const route = { pathname: routePathname, key: routeKey, index: routeIndex };
+    if (!completeSideAreaHandoff(route, toggleRef.current)) return;
+    const panel = document.querySelector("[data-side-area]");
+    if (panel && !panel.contains(document.activeElement)) {
+      panel.querySelector<HTMLElement>("header button")?.focus({ preventScroll: true });
+    }
+  }, [routePathname, routeKey, routeIndex]);
 
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -164,7 +199,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           if (openLayerVisible()) return false;
           state.dispatch({
             type:
-              state.maximized && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
+              shownMaximized(state) && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
                 ? "restore"
                 : "close",
           });
@@ -219,6 +254,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           <TooltipTrigger
             render={
               <Button
+                ref={toggleRef}
                 data-side-area-toggle
                 aria-label={
                   statusAlert && !open
@@ -277,6 +313,7 @@ function SideArea({
   const threadRef = useSideAreaThreadRef();
   const lockedState = useLockedThreadState(locked);
   const unlock = () => dispatch({ type: "lock", thread: null });
+  const openViewPage = useOpenViewPage();
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<HTMLElement | null>(null);
   const insideClicks = useRef(new WeakSet<Event>());
@@ -431,7 +468,26 @@ function SideArea({
               {locked ? <LockIcon /> : <LockOpenIcon />}
             </HeaderToggle>
           ) : null}
-          {wide ? (
+          {definition.page ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Open ${definition.title} as a page`}
+                    onClick={() => {
+                      dispatch({ type: "close" });
+                      void openViewPage(definition);
+                    }}
+                  />
+                }
+              >
+                <Maximize2 />
+              </TooltipTrigger>
+              <TooltipPopup>Open {definition.title} as a page</TooltipPopup>
+            </Tooltip>
+          ) : wide ? (
             <HeaderToggle
               label={maximized ? "Restore side panel size" : "Maximize side panel"}
               hint={maximized ? "Restore side panel size" : "Maximize side panel"}
@@ -602,7 +658,15 @@ function SideAreaBody({
             : definition.id
         }
       >
-        {definition.render({ target, layout, host: "panel", width, slots })}
+        <HostedView
+          definition={definition}
+          target={target}
+          layout={layout}
+          host="panel"
+          width={width}
+          slots={slots}
+          onOpenFullSize={() => useToolSidebarStore.getState().dispatch({ type: "close" })}
+        />
       </Fragment>
     </DeferEnvironmentQueries>
   );
@@ -612,8 +676,14 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
   const [open, setOpen] = useState(false);
   const Icon = definition.icon;
   const groups = [
-    { label: "This thread", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread") },
-    { label: "Everywhere", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "global") },
+    {
+      label: "This thread",
+      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread"),
+    },
+    {
+      label: "Everywhere",
+      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "global"),
+    },
   ];
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -638,7 +708,7 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
         <MenuRadioGroup
           value={definition.id}
           onValueChange={(value) => {
-            const next = VIEW_DEFINITIONS.find((entry) => entry.id === value);
+            const next = PANEL_VIEW_DEFINITIONS.find((entry) => entry.id === value);
             if (next) useToolSidebarStore.getState().dispatch({ type: "show", view: next.id });
           }}
         >

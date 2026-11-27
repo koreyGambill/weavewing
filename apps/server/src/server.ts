@@ -171,6 +171,7 @@ import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
 import * as StatusSources from "./statusSources/StatusSources.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import * as EvidenceService from "./evidence/EvidenceService.ts";
+import * as EvidencePromptService from "./evidence/EvidencePromptService.ts";
 import * as WaitingItems from "./waitingItems/WaitingItems.ts";
 import * as MessageFollowUpService from "./followUps/MessageFollowUpService.ts";
 import * as StatusSourceProbe from "./statusSources/StatusSourceProbe.ts";
@@ -775,6 +776,15 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       yield* service.start();
     }),
   ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer), Layer.provide(ProjectionStoreV2.layer)),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const service = yield* EvidencePromptService.EvidencePromptService;
+      yield* service.start();
+    }),
+  ).pipe(
+    Layer.provide(EvidencePromptService.layer),
+    Layer.provide(Layer.mergeAll(ProjectionStoreV2.layer, EffectOutboxV2.layer)),
+  ),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ProviderInstallation.layer,

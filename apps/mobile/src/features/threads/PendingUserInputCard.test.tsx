@@ -12,7 +12,8 @@ const harness = vi.hoisted(() => ({
   openedUrls: [] as string[],
   markdown: {} as Pick<SelectableMarkdownTextProps, "resolveImageSource" | "onImagePress">,
 }));
-const atoms = vi.hoisted(async () => {
+// Finish the Effect import before Vitest starts resolving the queued mocks.
+const atoms = await vi.hoisted(async () => {
   const { Atom, AtomRegistry } = await import("effect/reactivity");
   return {
     registry: AtomRegistry.make(),
@@ -51,9 +52,9 @@ vi.mock("./QuestionAttachments", () => ({ QuestionAttachments: () => null }));
 vi.mock("../files/FileMarkdownPreview", () => ({
   useMarkdownPreviewStyles: () => ({ nativeTextStyle: {} }),
 }));
-vi.mock("../../state/atom-registry", async () => ({ appAtomRegistry: (await atoms).registry }));
-vi.mock("../../state/server", async () => ({
-  serverEnvironment: { configValueAtom: (await atoms).configValueAtom },
+vi.mock("../../state/atom-registry", () => ({ appAtomRegistry: atoms.registry }));
+vi.mock("../../state/server", () => ({
+  serverEnvironment: { configValueAtom: atoms.configValueAtom },
 }));
 vi.mock("../../native/SelectableMarkdownText", () => ({
   SelectableMarkdownText: (props: SelectableMarkdownTextProps) => {

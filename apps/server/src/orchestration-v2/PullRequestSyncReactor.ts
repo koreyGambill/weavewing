@@ -85,7 +85,7 @@ const SHELL_WRAPPER = /^\s*(?:\S*\/)?(?:ba|z|da|k)?sh\s+-l?c\s+(?=["'])([\s\S]*)
 const SHELL_WORD_PIECE = /"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|\\([\s\S])|(\S)/gu;
 // Heredoc bodies, quoted strings and comments are text a command carries, not commands it runs.
 const HEREDOC_BODY =
-  /<<-?[ \t]*(['"]?)(\w+)\1[^\n]*\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/gu;
+  /<<-?[ \t]*(['"]?)([^\s'"<>;&|()]+)\1[^\n]*\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/gu;
 const QUOTED_OR_COMMENT = /'[^']*'|"(?:\\[\s\S]|[^"\\])*"|(?<=^|[\s;&|(])#[^\n]*/gmu;
 const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/u;
 // Commands that print other change requests' URLs, so output beside them proves nothing.
@@ -94,7 +94,7 @@ const LISTS_CHANGE_REQUESTS =
 const URL_LINE = /^[ \t]*(https?:\/\/\S+)[ \t]*$/gmu;
 
 /** The script a shell input runs, unwrapped from Codex's `sh -lc`. */
-function shellScript(input: string): string {
+export function shellScript(input: string): string {
   const [, wrapped] = SHELL_WRAPPER.exec(input) ?? [];
   return wrapped === undefined
     ? input
@@ -105,9 +105,11 @@ function shellScript(input: string): string {
       ).join("");
 }
 
-/** A script split at command separators that sit outside quotes. */
-function shellSegments(script: string): ReadonlyArray<string> {
-  const segments: Array<string> = [];
+/** A script's commands with the separator that follows each, split outside quotes. */
+export function shellSteps(
+  script: string,
+): ReadonlyArray<{ readonly segment: string; readonly separator: string | null }> {
+  const steps: Array<{ readonly segment: string; readonly separator: string | null }> = [];
   let current = "";
   let quote: string | null = null;
   for (let index = 0; index < script.length; index++) {
@@ -125,16 +127,24 @@ function shellSegments(script: string): ReadonlyArray<string> {
     }
     const pair = script.slice(index, index + 2);
     if (pair === "&&" || pair === "||" || char === ";" || char === "|" || char === "\n") {
-      segments.push(current);
+      const separator = pair === "&&" || pair === "||" ? pair : char;
+      steps.push({ segment: current, separator });
       current = "";
       if (pair === "&&" || pair === "||") index++;
       continue;
     }
     current += char;
   }
-  segments.push(current);
-  return segments;
+  steps.push({ segment: current, separator: null });
+  return steps;
 }
+
+/** A script split at command separators that sit outside quotes. */
+const shellSegments = (script: string): ReadonlyArray<string> =>
+  shellSteps(script).map((step) => step.segment);
+
+/** A script without its heredoc bodies, which are text a command reads, not commands it runs. */
+export const withoutHeredocBodies = (script: string) => script.replace(HEREDOC_BODY, "<<");
 
 /** The commands a script runs, without the text it carries. */
 const shellCode = (script: string) =>

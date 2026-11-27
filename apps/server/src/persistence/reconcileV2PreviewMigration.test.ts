@@ -95,6 +95,8 @@ describe("V2 preview upgrade", () => {
         [113, "MessageBookmarks"],
         [114, "MessageBookmarkNotes"],
         [115, "EvidenceQaCards"],
+        [116, "EvidencePrompts"],
+        [117, "EvidenceQaRefs"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -233,6 +235,8 @@ describe("V2 preview upgrade", () => {
         [113, "MessageBookmarks"],
         [114, "MessageBookmarkNotes"],
         [115, "EvidenceQaCards"],
+        [116, "EvidencePrompts"],
+        [117, "EvidenceQaRefs"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

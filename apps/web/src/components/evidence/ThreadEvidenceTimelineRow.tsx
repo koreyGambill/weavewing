@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { qaCardTitle, qaNoted, qaPresence } from "@t3tools/client-runtime/qa-card";
 import type { EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpRightIcon, CheckIcon } from "lucide-react";
 import { use } from "react";
@@ -6,7 +7,6 @@ import { use } from "react";
 import { useThreadEvidence } from "../../state/evidence";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Button } from "../ui/button";
-import { qaCardTitle, qaPresence } from "./qaCard.logic";
 import { ThreadEvidenceContext } from "./ThreadEvidenceContext";
 import { ThreadQaCard } from "./ThreadQaCard";
 
@@ -77,7 +77,8 @@ function LeadQaPointer({
 
 /**
  * The QA cards for landings placed at one spot in the timeline: an `evidence_record` call, or the
- * completion of a delegated child that recorded one. Changes with nothing to check get one line.
+ * completion of a delegated child that recorded one. Changes with nothing to check, and notes,
+ * get one line.
  */
 export function ThreadEvidenceTimelineRow({
   threadRef,
@@ -118,12 +119,14 @@ export function ThreadEvidenceTimelineRow({
           return (
             <MutedLine key={landingId}>
               {landedOn(landing)} · {landing.title}
+              {landing.exempt ? ` · exempt: ${landing.exempt.reason}` : null}
             </MutedLine>
           );
         return shown.map((change) =>
           qaPresence(change.qa) === "quiet" ? (
             <MutedLine key={`${landingId}/${change.id}`}>
-              {landedOn(landing)} · {qaCardTitle(change)} · nothing to check
+              {landedOn(landing)} · {qaCardTitle(change)} ·{" "}
+              {qaNoted(change) ? "noted" : "nothing to check"}
             </MutedLine>
           ) : (
             <ThreadQaCard

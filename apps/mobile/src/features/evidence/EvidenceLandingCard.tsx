@@ -1,4 +1,13 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  qaCardStatus,
+  qaCardTitle,
+  qaKey,
+  qaNoted,
+  qaPresence,
+  qaRef,
+  type QaChange,
+} from "@t3tools/client-runtime/qa-card";
 import type {
   EnvironmentId,
   EvidenceLanding,
@@ -18,20 +27,15 @@ import { useThreadShell } from "../../state/entities";
 import { evidenceGet } from "../../state/evidence";
 import { useEnvironmentQuery } from "../../state/query";
 import type { InboxThreadTarget } from "../inbox/inbox.logic";
-import {
-  QA_STATUS_LABEL,
-  qaCardStatus,
-  qaCardTitle,
-  qaRef,
-  type QaChange,
-} from "../threads/waiting/qaCard.logic";
+import { QA_STATUS_LABEL } from "../threads/waiting/mobileQaCard.logic";
 import { useQaKeysInComposer } from "../threads/waiting/qaDiscuss";
 import { WaitingQaCard } from "../threads/waiting/WaitingQaCard";
 import { landingQaSummary, landingQaThreadId, landingTargetLine } from "./evidence.logic";
+import { EvidenceNotePreview } from "./EvidenceNotePreview";
 
 /**
  * One landing: its title, thread, when and where it landed, and its QA counts. Opening it reads
- * its changes; tapping a change opens its QA card.
+ * its changes; tapping a change opens its details.
  */
 export function EvidenceLandingCard(props: {
   readonly environmentId: EnvironmentId;
@@ -89,6 +93,23 @@ export function EvidenceLandingCard(props: {
           tintColorClassName="accent-foreground-muted"
         />
       </Pressable>
+      {!open && landing.notes?.length ? (
+        <View className="gap-1 border-t border-border-subtle px-2 py-2">
+          {landing.notes.map((note) => (
+            <EvidenceNotePreview
+              key={note.id}
+              environmentId={environmentId}
+              landingId={landing.id}
+              note={note}
+              onOpen={() => {
+                setOpen(true);
+                const key = `${environmentId}:${qaKey(landing.id, note.id)}`;
+                if (props.expandedChange !== key) props.onToggleChange(key);
+              }}
+            />
+          ))}
+        </View>
+      ) : null}
       {open ? (
         <LandingChanges
           environmentId={environmentId}
@@ -133,18 +154,27 @@ function LandingChanges(props: {
   const qaThreadId = landingQaThreadId(landing);
   return (
     <View className="gap-2 border-t border-border-subtle px-2 py-2">
-      {landing.changes.map((change) => (
-        <ChangeRow
-          key={change.id}
-          environmentId={environmentId}
-          landing={landing}
-          change={change}
-          qaThreadId={qaThreadId}
-          expanded={props.expandedChange === `${environmentId}:${landing.id}/${change.id}`}
-          onToggle={() => props.onToggleChange(`${environmentId}:${landing.id}/${change.id}`)}
-          onOpenThread={props.onOpenThread}
-        />
-      ))}
+      {landing.exempt ? (
+        <Text selectable className="px-2 font-sans text-sm text-foreground-muted">
+          No changes to check. This exemption covers the commits landed up to{" "}
+          {landing.target.sha.slice(0, 7)}.
+        </Text>
+      ) : null}
+      {landing.changes.map((change) => {
+        const key = `${environmentId}:${qaKey(landing.id, change.id)}`;
+        return (
+          <ChangeRow
+            key={change.id}
+            environmentId={environmentId}
+            landing={landing}
+            change={change}
+            qaThreadId={qaThreadId}
+            expanded={props.expandedChange === key}
+            onToggle={() => props.onToggleChange(key)}
+            onOpenThread={props.onOpenThread}
+          />
+        );
+      })}
       <View className="flex-row justify-end px-1">
         <Button
           label="Open thread"
@@ -170,8 +200,14 @@ function ChangeRow(props: {
   const { environmentId, landing, change } = props;
   // Discuss writes where web's card lives: the composer of the thread that shows this QA.
   const draftKey = scopedThreadKey(environmentId, props.qaThreadId);
-  const inComposer = useQaKeysInComposer(draftKey).has(`${landing.id}/${change.id}`);
+  const inComposer = useQaKeysInComposer(draftKey).has(qaKey(landing.id, change.id));
   const status = qaCardStatus(change.qa, inComposer);
+  const statusLabel =
+    status === "open" && qaPresence(change.qa) === "quiet"
+      ? qaNoted(change)
+        ? "Noted"
+        : "Nothing to check"
+      : QA_STATUS_LABEL[status];
   const title = qaCardTitle(change);
   const ref = change.qa.ref === undefined ? null : qaRef(change);
   const waitsOnUser = change.qa.state === "pending";
@@ -180,7 +216,7 @@ function ChangeRow(props: {
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: props.expanded }}
-        accessibilityLabel={`${ref === null ? "" : `${ref}: `}${title}, ${QA_STATUS_LABEL[status]}`}
+        accessibilityLabel={`${ref === null ? "" : `${ref}: `}${title}, ${statusLabel}`}
         onPress={props.onToggle}
         className="min-h-11 flex-row items-start gap-2 rounded-xl px-2 py-2.5 active:bg-subtle"
       >
@@ -210,7 +246,7 @@ function ChangeRow(props: {
                 : "text-foreground-muted",
             )}
           >
-            {QA_STATUS_LABEL[status]}
+            {statusLabel}
           </Text>
         </View>
         <SymbolView

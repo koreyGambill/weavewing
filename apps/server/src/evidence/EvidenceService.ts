@@ -1,15 +1,17 @@
 import {
   EVIDENCE_LIST_PAGE_SIZE,
+  EVIDENCE_NOTES_PAGE_LIMIT,
   EVIDENCE_RECORD_MAX_BYTES,
   EvidenceChangeKey,
   EvidenceChangeQa,
   EvidenceError,
+  EvidenceExempt,
   EvidenceLanding,
   EvidenceLandingSummary,
   EvidenceQaRaiseReason,
   EvidenceRecord,
   type EvidenceAgentQaInput,
-  type EvidenceChange,
+  EvidenceChange,
   type EvidenceBulkSetQaInput,
   type EvidenceBulkSetQaResult,
   type EvidenceReviewThread,
@@ -26,10 +28,12 @@ import {
   type EvidenceThreadInput,
   type EvidenceThreadResult,
   threadQuestionTitle,
+  waitingDisplayRows,
   type WaitingItemSummary,
   EVIDENCE_BULK_DISMISS_LIMIT,
   EVIDENCE_THREAD_LANDING_LIMIT,
   type MessageId,
+  NonNegativeInt,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -72,6 +76,22 @@ export interface MarkDiscussedInput {
   readonly changes: ReadonlyArray<{ readonly landingId: string; readonly changeId: string }>;
 }
 
+/** A landing command's run: when it ran, where, and the reflog subjects its own moves leave. */
+export interface LandingWindow {
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** An absolute directory the command named, or null for the thread's own checkout. */
+  readonly dir: string | null;
+  readonly moves: ReadonlyArray<{ readonly ref: "branch" | "remote"; readonly subject: RegExp }>;
+}
+
+export interface LandingTarget {
+  readonly projectId: ProjectId;
+  readonly cwd: string;
+  readonly branch: string;
+  readonly remote: string | null;
+}
+
 export const AGENT_QA_NEEDS_USER_MESSAGE = "Only the user's message in this turn can settle this.";
 
 export class EvidenceService extends Context.Service<
@@ -110,6 +130,31 @@ export class EvidenceService extends Context.Service<
     readonly waitingQaThreads: () => Effect.Effect<ReadonlyArray<ThreadId>, EvidenceError>;
     /** The thread showing each QA change that moved, as it moves. */
     readonly qaThreadChanges: Stream.Stream<ThreadId>;
+    /**
+     * The branch landings target in a project: the newest landing's, else the primary remote's
+     * default, else `main`. Null when the project is unknown or the branch name is unsafe.
+     */
+    readonly landingTarget: (
+      projectId: ProjectId,
+    ) => Effect.Effect<LandingTarget | null, EvidenceError>;
+    /**
+     * The moves of the target branch or its remote-tracking branch that fell in the windows, one
+     * per reflog entry, each bounded by that entry's own before and after. An entry counts for a
+     * window when it falls in the window's seconds, has a subject the window expects, and the
+     * window's directory is the project's repository.
+     */
+    readonly landedMoves: (input: {
+      readonly target: LandingTarget;
+      readonly windows: ReadonlyArray<LandingWindow>;
+    }) => Effect.Effect<ReadonlyArray<LandedMove>, EvidenceError>;
+    /**
+     * Every commit a project's landings and exemptions name, recorded at or after `since`. It runs
+     * inside a caller's transaction.
+     */
+    readonly recordedRefs: (input: {
+      readonly projectId: ProjectId;
+      readonly since?: string;
+    }) => Effect.Effect<ReadonlyArray<RecordedRef>, EvidenceError>;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
     readonly coverage: (
       input: EvidenceCoverageInput,
@@ -141,24 +186,58 @@ interface QaRow {
 const QA_COLUMNS =
   "landing_id, change_id, state, note, updated_at, by, ref, raised_json, message_id, discussed_message_id";
 
+/** Reasons that raised a card before agents marked changes; a stored card keeps them unmarked. */
+type KeptReason = "captures" | "gaps";
+
 /**
- * Why a change asks for the user's QA; a change with none is recorded quietly. Every review claim
- * is unverified, so that alone tells the user nothing and raises no card; the card still says so.
+ * Why a change asks for the user's QA; with none it is recorded quietly, as a note if it has gaps
+ * or captures. A waived or changes-requested review and a failed or skipped check force a card;
+ * otherwise only `needs_you` raises one, or `kept`, for a card stored before agents marked changes.
  *
- * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // [..., "gaps"]
+ * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // []
  */
 export function qaRaiseReasons(
-  change: Pick<EvidenceChange, "captures" | "gaps" | "review">,
+  change: Pick<EvidenceChange, "captures" | "gaps" | "review" | "attention">,
   verifications: EvidenceRecord["verifications"],
+  kept: ReadonlyArray<KeptReason> = [],
 ): ReadonlyArray<EvidenceQaRaiseReason> {
   const reasons: EvidenceQaRaiseReason[] = [];
-  if (change.captures.length > 0) reasons.push("captures");
   if (change.review.verdict === "waived") reasons.push("review_waived");
   if (change.review.verdict === "changes_requested") reasons.push("review_changes_requested");
   if (verifications.some((check) => check.result === "fail")) reasons.push("check_failed");
   if (verifications.some((check) => check.result === "skipped")) reasons.push("check_skipped");
-  if (change.gaps.length > 0) reasons.push("gaps");
+  if (change.attention === "needs_you") reasons.push("needs_you");
+  else {
+    if (kept.includes("captures") && change.captures.length > 0) reasons.push("captures");
+    if (kept.includes("gaps") && change.gaps.length > 0) reasons.push("gaps");
+  }
   return reasons;
+}
+
+/**
+ * The reasons a recorded change raises, given what its stored QA row raised. Left unmarked, a
+ * change keeps its earlier mark, and one whose captures or gaps raised a card keeps it, so a re-record never
+ * turns a card into a note by omission. An agent's `note` withdraws only a card no server-forced
+ * reason holds; the user's `needs_you` outlasts it, and the record keeps any card the user touched.
+ */
+function recordedRaiseReasons(
+  change: EvidenceChange,
+  verifications: EvidenceRecord["verifications"],
+  row: QaRow | undefined,
+): ReadonlyArray<EvidenceQaRaiseReason> {
+  const stored = row?.raised_json == null ? [] : storedRaised(row.raised_json);
+  const unmarked = change.attention === undefined;
+  const needsYou =
+    change.attention === "needs_you" ||
+    (stored.includes("needs_you") && (unmarked || row?.by === "user"));
+  const kept = unmarked
+    ? (["captures", "gaps"] as const).filter((reason) => stored.includes(reason))
+    : [];
+  return qaRaiseReasons(
+    needsYou ? { ...change, attention: "needs_you" } : change,
+    verifications,
+    kept,
+  );
 }
 
 const RecordJson = Schema.fromJsonString(EvidenceRecord);
@@ -175,8 +254,31 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
     target: Schema.fromJsonString(EvidenceLandingSummary.fields.target),
     verifications: Schema.fromJsonString(EvidenceLandingSummary.fields.verifications),
     qa: Schema.fromJsonString(EvidenceLandingSummary.fields.qa),
+    exempt: Schema.optional(Schema.fromJsonString(EvidenceExempt)),
+    notes: Schema.optional(
+      Schema.fromJsonString(
+        Schema.Array(
+          Schema.Struct({
+            id: EvidenceChange.fields.id,
+            summary: Schema.String,
+            ask: Schema.String,
+            gaps: EvidenceChange.fields.gaps,
+            captureCount: NonNegativeInt,
+          }),
+        ),
+      ),
+    ),
   }),
 );
+const firstLine = (text: string) => text.split("\n", 1)[0]!.trim();
+const NOTE_TITLE_PREVIEW = 120;
+const NOTE_GAP_PREVIEW = 80;
+const NOTE_GAP_PREVIEWS = 3;
+const shorten = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+/** A note's title, as its QA card would read: the summary's first line, else the ask's. */
+const noteTitle = (note: { readonly id: string; readonly summary: string; readonly ask: string }) =>
+  firstLine(note.summary) || firstLine(note.ask) || note.id;
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
 const RaisedJson = Schema.fromJsonString(Schema.Array(EvidenceQaRaiseReason));
 const encodeRaised = Schema.encodeEffect(RaisedJson);
@@ -187,6 +289,7 @@ const decodeStoredRaised = Schema.decodeUnknownOption(
 );
 const decodeRaised = (json: string) =>
   Option.map(decodeStoredRaised(json), (reasons) => reasons.filter(isRaiseReason));
+const storedRaised = (json: string) => Option.getOrElse(decodeRaised(json), () => []);
 const qaOf = (row: QaRow) => ({
   state: row.state,
   note: row.note,
@@ -219,13 +322,12 @@ interface CoverageRow {
 const COVERAGE_TTL_MS = 30_000;
 
 /**
- * First-parent merges (`log` lines: sha, parents, subject; newest first) whose sha, or a commit
- * they brought in, is not in `recorded`. `revs` is `rev-list --parents` over
- * `<oldest merge>^1..tip`; a merge brings in what its later parents reach that neither the
- * first-parent chain nor an older merge already claimed.
+ * First-parent commits (`log` lines: sha, parents, subject; newest first), each with the commits it
+ * brought in: what its later parents reach that neither the first-parent chain nor an older commit
+ * already claimed. `revs` is `rev-list --parents` over the same range.
  */
-function uncoveredMerges(tip: string, log: string, revs: string, recorded: ReadonlySet<string>) {
-  const merges = log.split("\n").flatMap((line) => {
+function firstParentBatches(tip: string, log: string, revs: string) {
+  const commits = log.split("\n").flatMap((line) => {
     const [sha, parents, subject = ""] = line.split("\x1f");
     return sha && parents ? [{ sha, parents: parents.split(" "), subject }] : [];
   });
@@ -237,19 +339,75 @@ function uncoveredMerges(tip: string, log: string, revs: string, recorded: Reado
   );
   const claimed = new Set<string>();
   for (let sha = tip; graph.has(sha); sha = graph.get(sha)![0] ?? "") claimed.add(sha);
-  const uncovered = [];
-  for (const { parents, ...merge } of merges.toReversed()) {
-    let covered = recorded.has(merge.sha);
+  const batches: Array<LandedCommit> = [];
+  for (const { parents, ...commit } of commits.toReversed()) {
+    const brought: string[] = [];
     const queue = parents.slice(1);
     for (let sha = queue.pop(); sha !== undefined; sha = queue.pop()) {
       if (claimed.has(sha) || !graph.has(sha)) continue;
       claimed.add(sha);
-      covered ||= recorded.has(sha);
+      brought.push(sha);
       queue.push(...graph.get(sha)!);
     }
-    if (!covered) uncovered.unshift(merge);
+    batches.unshift({ ...commit, brought });
   }
-  return uncovered;
+  return batches;
+}
+
+/** Commits from `firstParentBatches` over `--merges` whose sha, or a commit it brought in, is not in `recorded`. */
+function uncoveredMerges(tip: string, log: string, revs: string, recorded: ReadonlySet<string>) {
+  return firstParentBatches(tip, log, revs)
+    .filter(({ sha, brought }) => !recorded.has(sha) && !brought.some((sha) => recorded.has(sha)))
+    .map(({ sha, subject }) => ({ sha, subject }));
+}
+
+/** A first-parent commit a branch gained, with the commits a merge brought in. */
+export interface LandedCommit {
+  readonly sha: string;
+  readonly subject: string;
+  readonly brought: ReadonlyArray<string>;
+}
+
+/**
+ * One reflog entry's move of the target branch or its remote-tracking ref: its own before and
+ * after, the second and subject of the entry, the windows it fell in, and the commits it added,
+ * newest first.
+ */
+export interface LandedMove {
+  readonly from: string;
+  readonly to: string;
+  readonly at: number;
+  readonly subject: string;
+  readonly windows: ReadonlyArray<number>;
+  readonly commits: ReadonlyArray<LandedCommit>;
+}
+
+/** A commit a landing names: its target, or one of its changes' commits. Possibly abbreviated. */
+export interface RecordedRef {
+  readonly sha: string;
+  readonly target: boolean;
+  readonly exempt: boolean;
+}
+
+/**
+ * The landing that covers each commit of one ref move (newest first), or undefined: one that
+ * names the commit or a commit it brought in, or one whose target names a newer commit of the same
+ * move, since a landing's target is the tip it left. An ambiguous abbreviation covers every match.
+ *
+ * @example coveringLandings([b, a], [{ sha: b.sha.slice(0, 7), target: true, exempt: true }]) // both
+ */
+export function coveringLandings(
+  move: ReadonlyArray<Pick<LandedCommit, "sha" | "brought">>,
+  recorded: ReadonlyArray<RecordedRef>,
+): Array<RecordedRef | undefined> {
+  const named = (sha: string) =>
+    recorded.filter((ref) => sha.toLowerCase().startsWith(ref.sha.toLowerCase()));
+  let tip: RecordedRef | undefined;
+  return move.map(({ sha, brought }) => {
+    const own = [...named(sha), ...brought.flatMap(named)];
+    tip ??= own.find((ref) => ref.target && named(sha).includes(ref));
+    return own[0] ?? tip;
+  });
 }
 
 const make = Effect.gen(function* () {
@@ -345,7 +503,7 @@ const make = Effect.gen(function* () {
    * link only when it is a review-role child of the same lead; any other is dropped with a warning.
    */
   const storedReview = (
-    change: RecordInput["changes"][number],
+    change: NonNullable<RecordInput["changes"]>[number],
     childRoles: ReadonlyMap<string, ReadonlySet<string>>,
     warnings: string[],
   ): EvidenceChange["review"] => {
@@ -366,6 +524,12 @@ const make = Effect.gen(function* () {
     }
     return review.verdict === "waived" ? review : { ...review, check: "unverified" };
   };
+
+  // A note: a change recorded without a card that lists gaps or captures. `c` is the change in
+  // record_json.
+  const isNote = sql.literal(
+    "q.state = 'quiet' AND q.change_id = json_extract(c.value, '$.id') AND (json_array_length(c.value, '$.gaps') > 0 OR json_array_length(c.value, '$.captures') > 0)",
+  );
 
   // A change the user is discussing waits on the agent, so it leaves what waits on the user.
   const waitingOrFixing = sql.literal(
@@ -391,8 +555,19 @@ const make = Effect.gen(function* () {
       Effect.map(([row]) => ThreadId.make(row?.thread_id ?? threadId)),
     );
 
+  // The lead thread's next QA number, never one handed out before; call it inside the transaction
+  // that stores the number, so two writes at once cannot take the same one.
+  const allocateRef = (qaThreadId: string) =>
+    sql<{ readonly last_ref: number }>`INSERT INTO evidence_qa_refs (qa_thread_id, last_ref)
+        VALUES (${qaThreadId}, (SELECT coalesce(max(q.ref), 0) + 1 FROM evidence_qa q
+          JOIN evidence_landings l ON l.landing_id = q.landing_id
+          WHERE coalesce(l.qa_thread_id, l.thread_id) = ${qaThreadId}))
+        ON CONFLICT (qa_thread_id) DO UPDATE SET last_ref = max(last_ref + 1, excluded.last_ref)
+        RETURNING last_ref`.pipe(Effect.map(([row]) => row!.last_ref));
+
   const record = Effect.fn("EvidenceService.record")(function* (input: RecordInput) {
-    const ids = input.changes.map((change) => change.id);
+    const inputChanges = input.changes ?? [];
+    const ids = inputChanges.map((change) => change.id);
     const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
     if (duplicate !== undefined) return yield* invalid(`Duplicate change id: ${duplicate}`);
     let landedAt: string | undefined;
@@ -405,7 +580,7 @@ const make = Effect.gen(function* () {
     const warnings: string[] = [];
     const childRoles = yield* readChildRoles(input.threadId);
     const changes: EvidenceChange[] = [];
-    for (const change of input.changes) {
+    for (const change of inputChanges) {
       const captures = [];
       for (const capture of change.captures)
         captures.push({ ...capture, path: yield* checkCapture(capture.path, root, warnings) });
@@ -417,15 +592,14 @@ const make = Effect.gen(function* () {
       target: input.target,
       verifications: input.verifications,
       changes,
+      ...(input.exempt === undefined ? {} : { exempt: input.exempt }),
     }).pipe(Effect.mapError((cause) => invalid(cause.message)));
     const bytes = new TextEncoder().encode(recordJson).byteLength;
     if (bytes > EVIDENCE_RECORD_MAX_BYTES)
       return yield* invalid(
         `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
       );
-    const raised = new Map(
-      changes.map((change) => [change.id, qaRaiseReasons(change, input.verifications)]),
-    );
+    const raised = new Map<string, ReadonlyArray<EvidenceQaRaiseReason>>();
     const qaThreadId = yield* resolveQaThread(input.threadId);
     const now = DateTime.formatIso(yield* DateTime.now);
     const qa = yield* sql
@@ -433,43 +607,59 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const [owner] = yield* sql<{
             readonly thread_id: string;
-          }>`SELECT thread_id FROM evidence_landings WHERE landing_id = ${input.id}`;
+            readonly changes: number;
+          }>`SELECT thread_id, json_array_length(record_json, '$.changes') AS changes
+            FROM evidence_landings WHERE landing_id = ${input.id}`;
           if (owner !== undefined && owner.thread_id !== input.threadId)
             return yield* invalid(
               `Landing id ${input.id} is already used by thread ${owner.thread_id}; pick another id.`,
+            );
+          // Replacing recorded changes with an exemption would erase their proof and the user's QA.
+          if (owner !== undefined && owner.changes > 0 && input.exempt !== undefined)
+            return yield* invalid(
+              `Landing ${input.id} records changes, so an exemption cannot replace it; exempt under a new id.`,
             );
           yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, qa_thread_id, project_id, landed_at, record_json, updated_at)
               VALUES (${input.id}, ${input.threadId}, ${qaThreadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
               ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id, qa_thread_id = excluded.qa_thread_id,
               landed_at = coalesce(${landedAt ?? null}, landed_at), record_json = excluded.record_json, updated_at = excluded.updated_at`;
-          const nextRef = sql<{ readonly ref: number }>`SELECT coalesce(max(q.ref), 0) + 1 AS ref
-              FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
-              WHERE l.qa_thread_id = ${qaThreadId}`.pipe(Effect.map(([row]) => row?.ref ?? 1));
           const existing = new Map(
             (yield* readQa([input.id])).map((row) => [row.change_id, row] as const),
           );
-          for (const id of ids) {
-            const reasons = raised.get(id) ?? [];
-            const raisedJson = yield* encodeRaised(reasons);
+          for (const change of changes) {
+            const id = change.id;
             const row = existing.get(id);
-            const ref =
-              reasons.length > 0 && row?.ref == null ? yield* nextRef : (row?.ref ?? null);
+            const reasons = recordedRaiseReasons(change, input.verifications, row);
             if (row === undefined) {
+              const ref = reasons.length > 0 ? yield* allocateRef(qaThreadId) : null;
               yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at, by, raised_json, ref)
-                  VALUES (${input.id}, ${id}, ${reasons.length > 0 ? "pending" : "quiet"}, '', ${now}, 'server', ${raisedJson}, ${ref})`;
+                  VALUES (${input.id}, ${id}, ${reasons.length > 0 ? "pending" : "quiet"}, '', ${now}, 'server', ${yield* encodeRaised(reasons)}, ${ref})`;
+              raised.set(id, reasons);
               continue;
             }
-            // The user's or an agent's QA stands; only the server's own pending or quiet follows the reasons.
-            const recompute =
-              (row.state === "pending" || row.state === "quiet") &&
-              (row.by === "server" || row.raised_json === null);
-            const state = recompute ? (reasons.length > 0 ? "pending" : "quiet") : row.state;
+            // A settled change, or a card the user or an agent acted on, keeps its state, attribution,
+            // reasons and presence; only the server's own untouched pending or quiet follows the
+            // reasons, so an agent's note demotes a card only with no forced reason and no user action.
+            const stands =
+              (row.state !== "pending" && row.state !== "quiet") ||
+              (row.state === "pending" &&
+                (row.by !== "server" ||
+                  row.note !== "" ||
+                  row.message_id !== null ||
+                  row.discussed_message_id !== null));
+            const state = stands ? row.state : reasons.length > 0 ? "pending" : "quiet";
+            const raisedJson = stands ? row.raised_json : yield* encodeRaised(reasons);
+            const ref =
+              state === "pending" && row.ref === null ? yield* allocateRef(qaThreadId) : row.ref;
             yield* sql`UPDATE evidence_qa SET raised_json = ${raisedJson}, ref = ${ref}, state = ${state},
-                by = ${recompute ? "server" : row.by}
+                by = ${stands ? row.by : "server"}
               WHERE landing_id = ${input.id} AND change_id = ${id}`;
+            raised.set(id, raisedJson === null ? [] : storedRaised(raisedJson));
           }
           // Removed changes go after numbering, so their QA numbers are not handed out again here.
-          yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
+          yield* ids.length === 0
+            ? sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id}`
+            : sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
           for (const change of changes)
             for (const fix of change.fixes ?? []) {
               const [closed] = yield* sql<{ readonly change_id: string }>`UPDATE evidence_qa
@@ -526,11 +716,20 @@ const make = Effect.gen(function* () {
       readonly verifications: string;
       readonly change_count: number;
       readonly qa: string;
+      readonly exempt: string | null;
+      readonly notes: string | null;
     }>`WITH page AS (
           SELECT landing_id, thread_id, project_id, landed_at, record_json FROM evidence_landings l
-          WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
+          WHERE ${
+            input.threadId === undefined
+              ? sql`1 = 1`
+              : input.notes === true
+                ? sql`(l.thread_id = ${input.threadId} OR l.qa_thread_id = ${input.threadId})`
+                : sql`l.thread_id = ${input.threadId}`
+          }
             AND ${before === undefined ? sql`1 = 1` : sql`(l.landed_at < ${before.landedAt} OR (l.landed_at = ${before.landedAt} AND l.landing_id < ${before.id}))`}
             AND ${input.needsQa === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q WHERE q.landing_id = l.landing_id AND ${waitingOrFixing})` : sql`1 = 1`}
+            AND ${input.notes === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q, json_each(l.record_json, '$.changes') c WHERE q.landing_id = l.landing_id AND ${isNote})` : sql`1 = 1`}
           ORDER BY l.landed_at DESC, l.landing_id DESC
           LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1})
         SELECT p.landing_id AS id, json_extract(p.record_json, '$.title') AS title, p.thread_id, p.project_id, p.landed_at,
@@ -541,14 +740,27 @@ const make = Effect.gen(function* () {
                 'reason', json_extract(v.value, '$.reason')) END)
             FROM json_each(p.record_json, '$.verifications') v) AS verifications,
           json_array_length(p.record_json, '$.changes') AS change_count,
+          json_extract(p.record_json, '$.exempt') AS exempt,
           (SELECT json_object('pending', count(*) FILTER (WHERE state = 'pending'),
               'quiet', count(*) FILTER (WHERE state = 'quiet'),
               'confirmed', count(*) FILTER (WHERE state = 'confirmed'),
-              'problem', count(*) FILTER (WHERE state = 'problem'), 'waived', count(*) FILTER (WHERE state = 'waived'))
-            FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa
+              'problem', count(*) FILTER (WHERE state = 'problem'), 'waived', count(*) FILTER (WHERE state = 'waived'),
+              'noted', (SELECT count(*) FROM evidence_qa q, json_each(p.record_json, '$.changes') c
+                WHERE q.landing_id = p.landing_id AND ${isNote}))
+            FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa,
+          ${
+            input.notes === true
+              ? sql`(SELECT json_group_array(json_object('id', q.change_id,
+                    'summary', json_extract(c.value, '$.summary'), 'ask', json_extract(c.value, '$.ask'),
+                    'gaps', json_extract(c.value, '$.gaps'),
+                    'captureCount', json_array_length(c.value, '$.captures')))
+                  FROM json_each(p.record_json, '$.changes') c JOIN evidence_qa q ON q.landing_id = p.landing_id
+                  WHERE ${isNote})`
+              : sql`NULL`
+          } AS notes
         FROM page p
         ORDER BY p.landed_at DESC, p.landing_id DESC`;
-    const items = yield* Effect.forEach(rows.slice(0, EVIDENCE_LIST_PAGE_SIZE), (row) =>
+    const decoded = yield* Effect.forEach(rows.slice(0, EVIDENCE_LIST_PAGE_SIZE), (row) =>
       decodeSummaryRow({
         id: row.id,
         title: row.title,
@@ -559,13 +771,37 @@ const make = Effect.gen(function* () {
         verifications: row.verifications,
         changeCount: row.change_count,
         qa: row.qa,
+        ...(row.exempt === null ? {} : { exempt: row.exempt }),
+        ...(row.notes === null ? {} : { notes: row.notes }),
       }),
     );
-    const last = items.at(-1);
+    const items = decoded.map(({ notes, ...item }) =>
+      notes === undefined
+        ? item
+        : {
+            ...item,
+            notes: notes.map(({ id, gaps, captureCount, ...text }) => ({
+              id,
+              title: shorten(noteTitle({ id, ...text }), NOTE_TITLE_PREVIEW),
+              gapPreviews: gaps
+                .slice(0, NOTE_GAP_PREVIEWS)
+                .map((gap) => shorten(gap, NOTE_GAP_PREVIEW)),
+              gapCount: gaps.length,
+              captureCount,
+            })),
+          },
+    );
+    // A Notes page ends at the landing that would take it past the note limit.
+    let listed = 0;
+    const kept = items.filter((_item, index) => {
+      listed += decoded[index]!.notes?.length ?? 0;
+      return index === 0 || listed <= EVIDENCE_NOTES_PAGE_LIMIT;
+    });
+    const last = kept.at(-1);
     return {
-      items,
+      items: kept,
       next:
-        rows.length > EVIDENCE_LIST_PAGE_SIZE && last !== undefined
+        (rows.length > EVIDENCE_LIST_PAGE_SIZE || kept.length < items.length) && last !== undefined
           ? { landedAt: last.landedAt, id: last.id }
           : null,
     };
@@ -659,6 +895,15 @@ const make = Effect.gen(function* () {
 
   const thread = Effect.fn("EvidenceService.thread")(function* (input: EvidenceThreadInput) {
     const requested = [...new Set(input.landingIds ?? [])];
+    // Every card the strip can list opens: the landings of the waiting QA changes it shows, read
+    // from the committed QA rows, so this read already holds a change raised a moment ago.
+    const waiting = [
+      ...new Set(
+        waitingDisplayRows(yield* readWaitingQa(input.threadId)).map(
+          (item) => item.key.split("/", 1)[0]!,
+        ),
+      ),
+    ];
     const rows = yield* sql<LandingRow>`WITH mine AS (
           SELECT landing_id, landed_at FROM evidence_landings WHERE thread_id = ${input.threadId}
           UNION SELECT landing_id, landed_at FROM evidence_landings WHERE qa_thread_id = ${input.threadId}),
@@ -666,6 +911,8 @@ const make = Effect.gen(function* () {
           ORDER BY landed_at DESC, landing_id DESC LIMIT ${EVIDENCE_THREAD_LANDING_LIMIT})
         SELECT * FROM evidence_landings WHERE landing_id IN (
           SELECT landing_id FROM newest
+          UNION SELECT landing_id FROM mine
+            WHERE ${waiting.length === 0 ? sql`0 = 1` : sql`landing_id IN ${sql.in(waiting)}`}
           UNION SELECT landing_id FROM mine
             WHERE ${requested.length === 0 ? sql`0 = 1` : sql`landing_id IN ${sql.in(requested)}`})
         ORDER BY landed_at DESC, landing_id DESC`;
@@ -698,22 +945,42 @@ const make = Effect.gen(function* () {
       code: "not_found",
       message: `No change ${input.changeId} in evidence landing ${input.landingId}.`,
     });
-    const [current] = yield* sql<{ readonly state: string; readonly by: string }>`SELECT state, by
-        FROM evidence_qa WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}`;
-    if (current === undefined) return yield* notFound;
-    // Only a change of state replaces the agent's record; its words stay attributed to it.
-    if (input.by === "user" && current.by === "agent" && current.state === input.state)
-      return yield* invalid("The agent recorded this; reopen it to change it.");
-    // A note given replaces the old one; none keeps it on the same state and clears it on a change.
-    // A change still waiting from before reasons were kept stays marked once it is answered.
-    const [row] = yield* sql<QaRow>`UPDATE evidence_qa SET
-          note = coalesce(${input.note ?? null}, CASE WHEN state = ${input.state} THEN note ELSE '' END),
-          raised_json = CASE WHEN raised_json IS NULL AND state = 'pending'
-            THEN '["legacy"]' ELSE raised_json END,
-          state = ${input.state}, by = ${input.by}, message_id = ${input.messageId},
-          discussed_message_id = NULL, updated_at = ${now}
-        WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}
-        RETURNING ${sql.literal(QA_COLUMNS)}`;
+    const row = yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const [current] = yield* sql<{
+          readonly state: string;
+          readonly by: string;
+          readonly ref: number | null;
+          readonly qa_thread_id: string;
+        }>`SELECT q.state, q.by, q.ref, coalesce(l.qa_thread_id, l.thread_id) AS qa_thread_id
+            FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+            WHERE q.landing_id = ${input.landingId} AND q.change_id = ${input.changeId}`;
+        if (current === undefined) return yield* notFound;
+        // Only a change of state replaces the agent's record; its words stay attributed to it.
+        if (input.by === "user" && current.by === "agent" && current.state === input.state)
+          return yield* invalid("The agent recorded this; reopen it to change it.");
+        // Any answer to a quiet change raises its card first, as Needs me does: it is marked
+        // needs_you and keeps its QA number, or takes the next one if it never had one, so the
+        // answer is never left where nobody sees it.
+        const promote = current.state === "quiet";
+        const ref =
+          (promote || input.state === "pending") && current.ref === null
+            ? yield* allocateRef(current.qa_thread_id)
+            : current.ref;
+        // A note given replaces the old one; none keeps it on the same state and clears it on a
+        // change. A change still waiting from before reasons were kept stays marked once answered.
+        const [updated] = yield* sql<QaRow>`UPDATE evidence_qa SET
+              note = coalesce(${input.note ?? null}, CASE WHEN state = ${input.state} THEN note ELSE '' END),
+              raised_json = CASE WHEN raised_json IS NULL AND state = 'pending' THEN '["legacy"]'
+                WHEN ${promote ? 1 : 0} = 1 THEN json_insert(coalesce(raised_json, '[]'), '$[#]', 'needs_you')
+                ELSE raised_json END,
+              ref = ${ref}, state = ${input.state}, by = ${input.by}, message_id = ${input.messageId},
+              discussed_message_id = NULL, updated_at = ${now}
+            WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}
+            RETURNING ${sql.literal(QA_COLUMNS)}`;
+        return updated;
+      }),
+    );
     if (row === undefined) return yield* notFound;
     const result = yield* decodeQa(qaOf(row));
     yield* publish;
@@ -773,54 +1040,83 @@ const make = Effect.gen(function* () {
   const markDiscussed = Effect.fn("EvidenceService.markDiscussed")(function* (
     input: MarkDiscussedInput,
   ) {
-    let marked = false;
-    for (const change of input.changes) {
-      const rows = yield* sql`UPDATE evidence_qa SET discussed_message_id = ${input.messageId}
-            WHERE landing_id = ${change.landingId} AND change_id = ${change.changeId} AND state = 'pending'
-              AND landing_id IN (SELECT landing_id FROM evidence_landings
-                WHERE coalesce(qa_thread_id, thread_id) = ${input.threadId})
-            RETURNING change_id`;
-      marked ||= rows.length > 0;
-    }
+    const now = DateTime.formatIso(yield* DateTime.now);
+    // A Discuss sent for a change that went quiet while it sat in the composer raises its card
+    // first, as Needs me does, so the discussion stays visible.
+    const marked = yield* sql.withTransaction(
+      Effect.gen(function* () {
+        let any = false;
+        for (const change of input.changes) {
+          const [current] = yield* sql<{
+            readonly state: string;
+            readonly ref: number | null;
+          }>`SELECT q.state, q.ref FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+              WHERE q.landing_id = ${change.landingId} AND q.change_id = ${change.changeId}
+                AND coalesce(l.qa_thread_id, l.thread_id) = ${input.threadId}`;
+          if (current === undefined || (current.state !== "pending" && current.state !== "quiet"))
+            continue;
+          const where = sql`landing_id = ${change.landingId} AND change_id = ${change.changeId}`;
+          if (current.state === "quiet")
+            yield* sql`UPDATE evidence_qa SET state = 'pending', by = 'user', updated_at = ${now},
+                raised_json = json_insert(coalesce(raised_json, '[]'), '$[#]', 'needs_you'),
+                ref = ${current.ref ?? (yield* allocateRef(input.threadId))}
+              WHERE ${where}`;
+          yield* sql`UPDATE evidence_qa SET discussed_message_id = ${input.messageId} WHERE ${where}`;
+          any = true;
+        }
+        return any;
+      }),
+    );
     if (marked) {
       yield* publish;
       yield* publishQaThreads([input.threadId]);
     }
   }, Effect.mapError(passStorage));
 
-  const waitingQa = Effect.fn("EvidenceService.waitingQa")(function* (threadId: ThreadId) {
+  // The thread's QA changes still waiting on someone, in strip order, untitled.
+  const readWaitingQa = Effect.fnUntraced(function* (threadId: ThreadId) {
     const rows = yield* sql<{
       readonly landing_id: string;
       readonly change_id: string;
       readonly state: EvidenceQaState;
       readonly ref: number | null;
       readonly discussed_message_id: string | null;
-      readonly record_json: string;
-    }>`SELECT q.landing_id, q.change_id, q.state, q.ref, q.discussed_message_id, l.record_json
+    }>`SELECT q.landing_id, q.change_id, q.state, q.ref, q.discussed_message_id
         FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
         WHERE coalesce(l.qa_thread_id, l.thread_id) = ${threadId}
           AND q.state IN ('pending', 'problem')
         ORDER BY q.ref, l.landed_at, q.landing_id, q.change_id`;
+    return rows.map((row): WaitingItemSummary => ({
+      kind: "qa",
+      ref: `QA${row.ref ?? ""}`,
+      key: `${row.landing_id}/${row.change_id}`,
+      title: "",
+      state:
+        row.state === "problem"
+          ? "problem"
+          : row.discussed_message_id === null
+            ? "open"
+            : "discussing",
+    }));
+  });
+
+  const waitingQa = Effect.fn("EvidenceService.waitingQa")(function* (threadId: ThreadId) {
+    const keyed = yield* readWaitingQa(threadId);
+    const landingIds = [...new Set(keyed.map((item) => item.key.split("/", 1)[0]!))];
+    const stored =
+      landingIds.length === 0
+        ? []
+        : yield* sql<{
+            readonly landing_id: string;
+            readonly record_json: string;
+          }>`SELECT landing_id, record_json FROM evidence_landings WHERE landing_id IN ${sql.in(landingIds)}`;
     const records = new Map<string, EvidenceRecord>();
-    const items: WaitingItemSummary[] = [];
-    for (const row of rows) {
-      const record = records.get(row.landing_id) ?? (yield* decodeRecord(row.record_json));
-      records.set(row.landing_id, record);
-      const change = record.changes.find((entry) => entry.id === row.change_id);
-      items.push({
-        kind: "qa",
-        ref: `QA${row.ref ?? ""}`,
-        key: `${row.landing_id}/${row.change_id}`,
-        title: threadQuestionTitle(change?.summary || change?.ask || row.change_id),
-        state:
-          row.state === "problem"
-            ? "problem"
-            : row.discussed_message_id === null
-              ? "open"
-              : "discussing",
-      });
-    }
-    return items;
+    for (const row of stored) records.set(row.landing_id, yield* decodeRecord(row.record_json));
+    return keyed.map((item) => {
+      const [landingId = "", changeId = ""] = item.key.split("/");
+      const change = records.get(landingId)?.changes.find((entry) => entry.id === changeId);
+      return { ...item, title: threadQuestionTitle(change?.summary || change?.ask || changeId) };
+    });
   }, Effect.mapError(passStorage));
 
   const waitingQaThreads = Effect.fn("EvidenceService.waitingQaThreads")(function* () {
@@ -978,6 +1274,162 @@ const make = Effect.gen(function* () {
     return result;
   });
 
+  const landingTarget = Effect.fn("EvidenceService.landingTarget")(function* (
+    projectId: ProjectId,
+  ) {
+    const [row] = yield* sql<{
+      readonly workspace_root: string;
+      readonly branch: string | null;
+    }>`SELECT p.workspace_root, (SELECT json_extract(l.record_json, '$.target.branch')
+          FROM evidence_landings l WHERE l.project_id = p.project_id
+          ORDER BY l.landed_at DESC, l.landing_id DESC LIMIT 1) AS branch
+        FROM projection_projects p WHERE p.project_id = ${projectId} AND p.deleted_at IS NULL`;
+    if (row === undefined) return null;
+    const cwd = row.workspace_root;
+    const remote = yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.orElseSucceed(() => null));
+    const recorded =
+      row.branch !== null && remote !== null && row.branch.startsWith(`${remote}/`)
+        ? row.branch.slice(remote.length + 1)
+        : row.branch;
+    const branch =
+      recorded ??
+      (remote === null
+        ? null
+        : yield* git
+            .resolveDefaultBranchName(cwd, remote)
+            .pipe(Effect.orElseSucceed(() => null))) ??
+      "main";
+    return branch.startsWith("-") || !/^[\w./-]+$/u.test(branch)
+      ? null
+      : { projectId, cwd, branch, remote };
+  }, Effect.mapError(storage));
+
+  // Reflog lines are `sha<US>ref@{unix seconds}<US>subject`, newest first.
+  const parseReflog = (log: string) =>
+    log.split("\n").flatMap((line) => {
+      const [sha, selector = "", subject = ""] = line.split("\x1f");
+      const at = /@\{(\d+)\}$/u.exec(selector)?.[1];
+      return sha && at ? [{ sha, at: Number(at), subject }] : [];
+    });
+
+  const landedMoves = Effect.fn("EvidenceService.landedMoves")(function* (input: {
+    readonly target: LandingTarget;
+    readonly windows: ReadonlyArray<LandingWindow>;
+  }) {
+    const { cwd, branch, remote } = input.target;
+    const refNames = {
+      branch: `refs/heads/${branch}`,
+      remote: remote === null ? null : `refs/remotes/${remote}/${branch}`,
+    };
+    const commonDir = (dir: string) =>
+      runGit(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).pipe(
+        Effect.map((out) => out?.trim() || null),
+      );
+    const home = yield* commonDir(cwd);
+    if (home === null) return [];
+    const logs = new Map<string, ReturnType<typeof parseReflog> | null>();
+    // One move per reflog entry, keyed by its own before and after, with the windows it fell in.
+    const found = new Map<
+      string,
+      {
+        readonly from: string;
+        readonly to: string;
+        readonly at: number;
+        readonly subject: string;
+        windows: number[];
+      }
+    >();
+    for (const [windowIndex, window] of input.windows.entries()) {
+      if (window.dir !== null && (yield* commonDir(window.dir)) !== home) continue;
+      // Reflog times are whole seconds: the seconds the command's start and end fall in.
+      const fromS = Math.floor(window.fromMs / 1000);
+      const toS = Math.floor(window.toMs / 1000);
+      for (const move of window.moves) {
+        const ref = refNames[move.ref];
+        if (ref === null) continue;
+        if (!logs.has(ref)) {
+          const log = yield* runGit(cwd, [
+            "reflog",
+            "show",
+            "-n",
+            "500",
+            "--date=unix",
+            "--format=%H%x1f%gd%x1f%gs",
+            ref,
+            "--",
+          ]);
+          logs.set(ref, log === null ? null : parseReflog(log));
+        }
+        const entries = logs.get(ref);
+        if (!entries) continue;
+        for (const [index, entry] of entries.entries()) {
+          if (entry.at < fromS || entry.at > toS || !move.subject.test(entry.subject)) continue;
+          // A ref created inside the window has no earlier value.
+          const before = entries[index + 1];
+          if (before === undefined || before.sha === entry.sha) continue;
+          const key = `${ref}:${before.sha}..${entry.sha}`;
+          const known = found.get(key);
+          if (known === undefined)
+            found.set(key, {
+              from: before.sha,
+              to: entry.sha,
+              at: entry.at,
+              subject: entry.subject,
+              windows: [windowIndex],
+            });
+          else if (!known.windows.includes(windowIndex)) known.windows.push(windowIndex);
+        }
+      }
+    }
+    const moves: Array<LandedMove> = [];
+    for (const { from, to, at, subject, windows } of found.values()) {
+      const log = yield* runGit(cwd, [
+        "log",
+        "--first-parent",
+        "--format=%H%x1f%P%x1f%s",
+        to,
+        `^${from}`,
+        "--",
+      ]);
+      const revs = yield* runGit(cwd, ["rev-list", "--parents", to, `^${from}`, "--"]);
+      if (log === null || revs === null || !log.trim()) continue;
+      moves.push({
+        from,
+        to,
+        at,
+        subject,
+        windows,
+        commits: firstParentBatches(to, log.trim(), revs),
+      });
+    }
+    return moves;
+  }, Effect.mapError(storage));
+
+  const recordedRefs = Effect.fn("EvidenceService.recordedRefs")(function* (input: {
+    readonly projectId: ProjectId;
+    readonly since?: string;
+  }) {
+    const rows = yield* sql<{
+      readonly sha: string | null;
+      readonly commits: string;
+      readonly exempt: number;
+    }>`SELECT json_extract(l.record_json, '$.target.sha') AS sha,
+          (SELECT json_group_array(c.value) FROM json_each(l.record_json, '$.changes') ch, json_each(ch.value, '$.commits') c) AS commits,
+          json_extract(l.record_json, '$.exempt') IS NOT NULL AS exempt
+        FROM evidence_landings l WHERE l.project_id = ${input.projectId}
+          AND ${input.since === undefined ? sql`1 = 1` : sql`l.updated_at >= ${input.since}`}`;
+    return rows.flatMap((row): RecordedRef[] =>
+      [
+        { sha: row.sha ?? "", target: true, exempt: row.exempt === 1 },
+        ...(JSON.parse(row.commits) as string[]).map((sha) => ({
+          sha,
+          target: false,
+          exempt: row.exempt === 1,
+        })),
+      ].filter(({ sha }) => /^[0-9a-f]{4,64}$/iu.test(sha)),
+    );
+  }, Effect.mapError(storage));
+
   const coverage = Effect.fn("EvidenceService.coverage")(function* (input: EvidenceCoverageInput) {
     const generation = coverageGeneration;
     const rows =
@@ -1006,6 +1458,9 @@ const make = Effect.gen(function* () {
     waitingQa,
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),
+    landingTarget,
+    landedMoves,
+    recordedRefs,
     coverage,
     subscribe: () =>
       Stream.unwrap(

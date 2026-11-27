@@ -1,5 +1,17 @@
-import type { EvidenceLanding, EvidenceProjectCoverage, EvidenceQaState } from "@t3tools/contracts";
-import { CheckIcon, CircleDashedIcon, CircleIcon, MinusIcon, WrenchIcon } from "lucide-react";
+import type {
+  EvidenceLanding,
+  EvidenceLandingSummary,
+  EvidenceProjectCoverage,
+  EvidenceQaState,
+} from "@t3tools/contracts";
+import {
+  CheckIcon,
+  CircleDashedIcon,
+  CircleIcon,
+  MinusIcon,
+  StickyNoteIcon,
+  WrenchIcon,
+} from "lucide-react";
 
 /** Every QA state; the user sets only the ones marked `user`, and the agent records a problem. */
 export const QA_STATES = [
@@ -39,6 +51,30 @@ export const QA_STATES = [
     user: false,
   },
 ] as const;
+
+/**
+ * A landing's QA counts as its header shows them: notes apart from the quiet changes with nothing
+ * to check, each under the label an opened change shows.
+ */
+export function qaTally(qa: EvidenceLandingSummary["qa"]) {
+  const noted = qa.noted ?? 0;
+  return [
+    ...QA_STATES.map(({ state, label, icon, tone }) => ({
+      key: state,
+      label,
+      icon,
+      tone,
+      count: state === "quiet" ? qa.quiet - noted : qa[state],
+    })),
+    {
+      key: "noted",
+      label: "Noted",
+      icon: StickyNoteIcon,
+      tone: "text-muted-foreground",
+      count: noted,
+    },
+  ].filter(({ count }) => count > 0);
+}
 
 const CLAIMS = { approved: "approved", changes_requested: "changes requested" } as const;
 

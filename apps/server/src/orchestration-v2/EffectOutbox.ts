@@ -6,6 +6,7 @@ import {
   ModelSelection,
   NodeId,
   NonNegativeInt,
+  ProjectId,
   ProviderSessionId,
   RunAttemptId,
   ProviderApprovalDecision,
@@ -147,6 +148,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("development-environment.release-holds"),
     xwingEnvironmentId: XwingEnvironmentId,
   }),
+  /** Sends the done prompt whose claim committed with this effect; the message id makes it once. */
+  Schema.Struct({
+    type: Schema.Literal("evidence-prompt.deliver"),
+    projectId: ProjectId,
+    messageId: MessageId,
+    text: Schema.String,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -164,6 +172,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "delegated-tasks.stop",
   "message-summary.generate",
   "development-environment.release-holds",
+  "evidence-prompt.deliver",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

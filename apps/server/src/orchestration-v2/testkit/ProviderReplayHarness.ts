@@ -579,6 +579,7 @@ export function layerWithRegistry<Error>(
         layerServerSettings,
         layerThreadManagementProvided,
         layerStores,
+        layerDatabase,
       ),
     ),
   );

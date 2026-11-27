@@ -6,7 +6,13 @@
  * README.md for how to run it and add cases.
  */
 import { monitoringAdvisory } from "../../apps/server/src/monitoring/MonitoringDelivery.ts";
-import { ModelSelection, MonitoringFinding, MonitoringRule } from "@t3tools/contracts";
+import { evidencePromptText } from "../../apps/server/src/evidence/EvidencePromptService.ts";
+import {
+  EVIDENCE_PROMPT_ORIGIN_EVENT,
+  ModelSelection,
+  MonitoringFinding,
+  MonitoringRule,
+} from "@t3tools/contracts";
 import { idleCheckinPrompt } from "../../apps/server/src/scheduledTasks/IdleCheckin.ts";
 import { automationRunPreface } from "../../apps/server/src/scheduledTasks/AutomationPrompt.ts";
 import { ScheduledTaskId } from "@t3tools/contracts";
@@ -424,6 +430,10 @@ export const McpToolUseCase = Schema.Struct({
   /** Empty to resume a top-level thread without side-chat context after its last tool result. */
   prompt: Schema.String,
   idleCheckinTaskId: Schema.optional(Schema.String),
+  /** T3's done prompt for these commits on `branch`, with its system origin, replaces `prompt`. */
+  evidencePrompt: Schema.optional(
+    Schema.Struct({ branch: Schema.String, shas: Schema.Array(Schema.String) }),
+  ),
   /** The thread is an automation run: T3 puts its run preface ahead of `prompt`. */
   automationRun: Schema.optional(
     Schema.Struct({
@@ -3078,6 +3088,18 @@ const main = Effect.gen(function* () {
             prompt: monitoringAdvisory(
               item.monitoringAdvisory.profile,
               item.monitoringAdvisory.finding,
+            ),
+          },
+    )
+    .map((item) =>
+      item.evidencePrompt === undefined
+        ? item
+        : {
+            ...item,
+            prompt: renderTurnOriginText(
+              { kind: "system", event: EVIDENCE_PROMPT_ORIGIN_EVENT },
+              evidencePromptText(item.evidencePrompt.branch, item.evidencePrompt.shas),
+              null,
             ),
           },
     )

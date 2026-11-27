@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  qaCardStatus,
+  qaCardTitle,
+  qaPresence,
+  type QaChange,
+} from "@t3tools/client-runtime/qa-card";
+import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -22,18 +28,14 @@ import { evidenceSetQa } from "../../../state/evidence";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import {
   QA_STATUS_LABEL,
-  qaCardStatus,
   qaCapturePreview,
-  qaCardTitle,
   qaCheckLabel,
   qaDiscussRecord,
   qaFullText,
   qaLandedLine,
   qaNoteLabel,
   qaReviewLabel,
-  qaWaiting,
-  type QaChange,
-} from "./qaCard.logic";
+} from "./mobileQaCard.logic";
 import { addQaDiscuss, removeQaDiscuss } from "./qaDiscuss";
 
 /** One capture: its caption, opening the file in the app's image, video or document viewer. */
@@ -137,8 +139,9 @@ export function WaitingQaCard(props: {
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
   const qa = answered !== null && answered.updatedAt > change.qa.updatedAt ? answered : change.qa;
+  const quiet = qaPresence(qa) === "quiet";
   const status = qaCardStatus(qa, props.inComposer);
-  const waiting = qaWaiting(qa);
+  const waiting = qa.state === "pending" || quiet;
   const usable = canAct && !busy;
   const record = qaDiscussRecord(landing, change);
   const note = qa.note.trim();
@@ -186,22 +189,29 @@ export function WaitingQaCard(props: {
   };
 
   return (
-    <View className="gap-3 rounded-2xl border border-border-subtle bg-card px-3.5 py-3">
-      <View className="flex-row items-start gap-2">
-        <Text selectable className="min-w-0 flex-1 font-t3-bold text-sm text-foreground">
-          {qaCardTitle(change)}
-        </Text>
-        <Text
-          className={cn(
-            "shrink-0 font-t3-medium text-xs",
-            status === "agent-fixing" || status === "discussing"
-              ? "text-warning-foreground"
-              : "text-foreground-muted",
-          )}
-        >
-          {QA_STATUS_LABEL[status]}
-        </Text>
-      </View>
+    <View
+      className={cn(
+        "gap-3 px-3.5 py-3",
+        !quiet && "rounded-2xl border border-border-subtle bg-card",
+      )}
+    >
+      {quiet ? null : (
+        <View className="flex-row items-start gap-2">
+          <Text selectable className="min-w-0 flex-1 font-t3-bold text-sm text-foreground">
+            {qaCardTitle(change)}
+          </Text>
+          <Text
+            className={cn(
+              "shrink-0 font-t3-medium text-xs",
+              status === "agent-fixing" || status === "discussing"
+                ? "text-warning-foreground"
+                : "text-foreground-muted",
+            )}
+          >
+            {QA_STATUS_LABEL[status]}
+          </Text>
+        </View>
+      )}
       <Text selectable className="font-sans text-xs text-foreground-secondary">
         {qaLandedLine(landing, change)}
       </Text>
@@ -309,6 +319,15 @@ export function WaitingQaCard(props: {
         </View>
       ) : status === "agent-fixing" ? null : waiting ? (
         <View className="flex-row flex-wrap justify-end gap-2">
+          {quiet ? (
+            <Button
+              label="Needs me"
+              accessibilityLabel={`Needs me: ${record.ref}`}
+              accessibilityHint="Shows it as a QA card in its thread."
+              disabled={!usable}
+              onPress={() => void answer("pending")}
+            />
+          ) : null}
           <Button
             label="Dismiss"
             accessibilityLabel={`Dismiss ${record.ref}`}

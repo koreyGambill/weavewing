@@ -13,10 +13,12 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { qaNoted } from "@t3tools/client-runtime/qa-card";
 import {
   ArrowUpRightIcon,
   CheckIcon,
   ChevronDownIcon,
+  ImageIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
   ClipboardCheckIcon,
@@ -45,7 +47,6 @@ import {
   evidenceGet,
   evidenceList,
   evidenceSetQa,
-  reloadEvidence,
   useEvidenceEnvironment,
 } from "../../state/evidence";
 import { useEnvironmentQuery } from "../../state/query";
@@ -80,6 +81,7 @@ import {
   coverageDraft,
   leavesNeedsQa,
   QA_STATES,
+  qaTally,
   reviewDisplay,
 } from "./evidence.logic";
 
@@ -104,13 +106,19 @@ function useLandingThread(environmentId: EnvironmentId | null, threadId: ThreadI
     shell?.title ?? Option.getOrNull(Option.map(detail.data, ({ thread }) => thread.title));
   return { missing: state === "missing", title };
 }
-const setEvidenceView = (next: { scope?: "thread" | "all"; needsQa?: boolean }) =>
+const setEvidenceView = (next: { scope?: "thread" | "all"; show?: "all" | "needs-qa" | "notes" }) =>
   useThreadContextSidebarStore.getState().setEvidenceView(next);
+
+const SHOW_TOOLTIPS = {
+  all: "Showing all landings",
+  "needs-qa": "Showing landings that need QA",
+  notes: "Showing notes: changes recorded without a QA card",
+} as const;
 
 export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null }) {
   const environmentId = useEvidenceEnvironment(threadRef);
   const storedScope = useThreadContextSidebarStore((state) => state.evidenceScope);
-  const needsQa = useThreadContextSidebarStore((state) => state.evidenceNeedsQa);
+  const show = useThreadContextSidebarStore((state) => state.evidenceShow);
   const scope = threadRef === null ? "all" : (storedScope ?? "thread");
   const threadProjectId = useThreadShell(threadRef)?.projectId;
   const root = useRef<HTMLDivElement>(null);
@@ -139,7 +147,8 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   }
   const filter: EvidenceListInput = {
     ...(scope === "thread" && threadRef ? { threadId: threadRef.threadId } : {}),
-    ...(needsQa ? { needsQa: true } : {}),
+    ...(show === "needs-qa" ? { needsQa: true } : {}),
+    ...(show === "notes" ? { notes: true } : {}),
   };
   return (
     <div ref={root} className="@container/evidence flex min-w-0 flex-col gap-2 text-xs">
@@ -161,21 +170,27 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
         <Menu>
           <ToolFilterMenuTrigger
             label="Evidence filter"
-            tooltip={needsQa ? "Showing landings that need QA" : "Showing all landings"}
-            active={needsQa}
+            tooltip={SHOW_TOOLTIPS[show]}
+            active={show !== "all"}
           />
           <MenuPopup align="end">
             <MenuGroup>
               <MenuGroupLabel>Show</MenuGroupLabel>
               <MenuRadioGroup
-                value={needsQa ? "needs-qa" : "all"}
-                onValueChange={(next) => setEvidenceView({ needsQa: next === "needs-qa" })}
+                value={show}
+                onValueChange={(next) => {
+                  if (next === "all" || next === "needs-qa" || next === "notes")
+                    setEvidenceView({ show: next });
+                }}
               >
                 <MenuRadioItem value="all">
                   <CheckedLabel>All landings</CheckedLabel>
                 </MenuRadioItem>
                 <MenuRadioItem value="needs-qa">
                   <CheckedLabel>Needs QA</CheckedLabel>
+                </MenuRadioItem>
+                <MenuRadioItem value="notes">
+                  <CheckedLabel>Notes</CheckedLabel>
                 </MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
@@ -337,11 +352,13 @@ function LandingPage({
     return (
       <Empty size="compact">
         <EmptyMedia variant="icon">
-          {input.needsQa ? <CheckIcon /> : <ClipboardCheckIcon />}
+          {input.needsQa || input.notes ? <CheckIcon /> : <ClipboardCheckIcon />}
         </EmptyMedia>
         <EmptyDescription>
           {input.needsQa ? (
             "Nothing waiting for your QA."
+          ) : input.notes ? (
+            `No notes ${input.threadId ? "for this thread" : "yet"}.`
           ) : (
             <>
               No landings recorded {input.threadId ? "for this thread " : ""}yet. The lead records
@@ -349,8 +366,8 @@ function LandingPage({
             </>
           )}
         </EmptyDescription>
-        {input.needsQa ? (
-          <Button variant="link" size="micro" onClick={() => setEvidenceView({ needsQa: false })}>
+        {input.needsQa || input.notes ? (
+          <Button variant="link" size="micro" onClick={() => setEvidenceView({ show: "all" })}>
             Show all landings
           </Button>
         ) : null}
@@ -378,7 +395,7 @@ function LandingPage({
         />
       ) : (
         <Button variant="ghost" size="micro" onClick={() => setMore(true)}>
-          Load older landings
+          {input.notes ? "Show older" : "Load older landings"}
         </Button>
       )}
     </>
@@ -429,18 +446,20 @@ function LandingCard({
             ))}
           </span>
           <span className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-            {QA_STATES.filter(({ state }) => landing.qa[state] > 0).map(
-              ({ state, label, icon: Icon, tone }) => (
-                <span key={state} className="inline-flex items-center gap-0.5">
-                  <Icon aria-hidden className={cn("size-3", tone)} />
-                  <span className="sr-only">{label}</span>
-                  {landing.qa[state]}
-                </span>
-              ),
+            {qaTally(landing.qa).map(({ key, label, icon: Icon, tone, count }) => (
+              <span key={key} className="inline-flex items-center gap-0.5">
+                <Icon aria-hidden className={cn("size-3", tone)} />
+                <span className="sr-only">{label}</span>
+                {count}
+              </span>
+            ))}
+            {landing.exempt ? (
+              <span className="min-w-0 break-words">Exempt: {landing.exempt.reason}</span>
+            ) : (
+              <span>
+                {landing.changeCount} change{landing.changeCount === 1 ? "" : "s"}
+              </span>
             )}
-            <span>
-              {landing.changeCount} change{landing.changeCount === 1 ? "" : "s"}
-            </span>
           </span>
           {showThread ? (
             <span className="block truncate text-muted-foreground">
@@ -449,10 +468,171 @@ function LandingCard({
           ) : null}
         </span>
       </button>
+      {landing.notes && !open ? (
+        <LandingNotes environmentId={environmentId} landingId={landing.id} notes={landing.notes} />
+      ) : null}
       {open ? (
         <LandingChanges environmentId={environmentId} landingId={landing.id} needsQa={needsQa} />
       ) : null}
     </section>
+  );
+}
+
+/** A landing's notes: each change's title and gaps, and Needs me to raise it as a QA card. */
+function LandingNotes({
+  environmentId,
+  landingId,
+  notes,
+}: {
+  environmentId: EnvironmentId;
+  landingId: string;
+  notes: NonNullable<EvidenceLandingSummary["notes"]>;
+}) {
+  const setQa = useSetQa();
+  const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // The server's evidence revision refreshes the list once the note is raised.
+  const raise = async (changeId: string, trigger: HTMLElement) => {
+    if (!(await setQa({ environmentId, input: { landingId, changeId, state: "pending" } }))) return;
+    toastManager.add({ type: "success", title: "Raised as a QA card in its thread." });
+    // The raised note leaves the list; focus stays on its landing while other notes remain.
+    if (notes.length === 1) focusAfterCardLeaves(trigger);
+    else trigger.closest("section")?.querySelector<HTMLElement>("[data-evidence-card]")?.focus();
+  };
+  return (
+    <ul className="min-w-0 space-y-2 border-t border-border p-2">
+      {notes.map((note) => {
+        const captures = note.captureCount ?? 0;
+        const shortened =
+          captures > 0 ||
+          note.gapCount > note.gapPreviews.length ||
+          [note.title, ...note.gapPreviews].some((text) => text.endsWith("…"));
+        const open = expanded.has(note.id);
+        return (
+          <li key={note.id} className="min-w-0 space-y-1">
+            <div className="flex min-w-0 items-start gap-1">
+              <span className="min-w-0 flex-1 break-words font-medium">{note.title}</span>
+              {shortened ? (
+                <Button
+                  variant="ghost"
+                  size="icon-tiny"
+                  aria-label={open ? `Show less of ${note.title}` : `Show all of ${note.title}`}
+                  aria-expanded={open}
+                  onClick={() => {
+                    const next = new Set(expanded);
+                    if (open) next.delete(note.id);
+                    else next.add(note.id);
+                    setExpanded(next);
+                  }}
+                >
+                  <ChevronsUpDownIcon />
+                </Button>
+              ) : null}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="micro"
+                      className="shrink-0"
+                      disabled={!canSet}
+                      aria-label={`Needs me: ${note.title}`}
+                      onClick={(event) => void raise(note.id, event.currentTarget)}
+                    />
+                  }
+                >
+                  Needs me
+                </TooltipTrigger>
+                <TooltipPopup side="top">Show it as a QA card in its thread</TooltipPopup>
+              </Tooltip>
+            </div>
+            {open ? (
+              <NoteDetail
+                environmentId={environmentId}
+                landingId={landingId}
+                changeId={note.id}
+                title={note.title}
+              />
+            ) : (
+              <>
+                {note.gapPreviews.map((gap, index) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+                  <GapLine key={`${index}:${gap}`} gap={gap} />
+                ))}
+                {note.gapCount > note.gapPreviews.length ? (
+                  <p className="pl-4.5 text-muted-foreground">
+                    and {note.gapCount - note.gapPreviews.length} more
+                  </p>
+                ) : null}
+                {captures > 0 ? (
+                  <p className="flex items-center gap-1.5 text-muted-foreground">
+                    <ImageIcon aria-hidden className="size-3 shrink-0" />
+                    {captures} capture{captures === 1 ? "" : "s"}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function GapLine({ gap }: { gap: string }) {
+  return (
+    <p className="flex items-start gap-1.5 text-muted-foreground">
+      <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+      <span className="min-w-0 break-words">{gap}</span>
+    </p>
+  );
+}
+
+/** A note's full summary and gaps, read with its landing when the note is expanded. */
+function NoteDetail({
+  environmentId,
+  landingId,
+  changeId,
+  title,
+}: {
+  environmentId: EnvironmentId;
+  landingId: string;
+  changeId: string;
+  title: string;
+}) {
+  const landing = useEnvironmentQuery(evidenceGet({ environmentId, input: { landingId } }));
+  const data = landing.data;
+  const change = data?.changes.find((candidate) => candidate.id === changeId);
+  if (data === null || change === undefined)
+    return (
+      <p className="text-muted-foreground">
+        {landing.error ? `Couldn't load this note: ${landing.error}` : "Loading the note…"}
+      </p>
+    );
+  return (
+    <>
+      {change.summary.trim() && change.summary.trim() !== title ? (
+        <p className="whitespace-pre-wrap break-words text-muted-foreground">{change.summary}</p>
+      ) : null}
+      {change.gaps.map((gap, index) => (
+        // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+        <GapLine key={`${index}:${gap}`} gap={gap} />
+      ))}
+      {change.captures.length ? (
+        <div className="grid grid-cols-2 gap-1.5 @min-[17rem]/evidence:grid-cols-3">
+          {change.captures.map((capture, index) => (
+            <CaptureTile
+              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
+              key={`${index}:${capture.path}`}
+              environmentId={environmentId}
+              threadId={data.threadId}
+              path={capture.path}
+              caption={capture.caption}
+            />
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -480,7 +660,7 @@ function LandingChanges({
       </div>
     );
   }
-  const { threadId, changes, verifications } = landing.data;
+  const { threadId, changes, verifications, exempt, target } = landing.data;
   // Badges truncate a long reason, so the opened landing spells each one out.
   const skipped = verifications.filter((check) => check.result === "skipped" && check.reason);
   return [
@@ -493,6 +673,12 @@ function LandingChanges({
           </li>
         ))}
       </ul>
+    ) : null,
+    exempt ? (
+      <p key="exempt" className="border-t border-border p-2 text-muted-foreground">
+        No changes to check. This exemption covers the commits landed up to{" "}
+        <span className="font-mono">{target.sha.slice(0, 7)}</span>.
+      </p>
     ) : null,
     ...changes.map((change) => (
       <ChangeRow
@@ -721,13 +907,13 @@ function QaMenu({
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
   const trigger = useRef<HTMLButtonElement>(null);
-  const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
+  const state = QA_STATES.find((entry) => entry.state === change.qa.state)!;
+  const current = qaNoted(change) ? { ...state, label: "Noted" } : state;
   const choose = async (next: EvidenceSetQaInput["state"]) => {
     if (next === change.qa.state) return;
     if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))
       return;
     if (leaves(next)) focusAfterCardLeaves(trigger.current);
-    reloadEvidence();
   };
   return (
     <Menu>
@@ -801,7 +987,6 @@ function WaivedNote({
     )
       return;
     close();
-    reloadEvidence();
   };
   // The agent's record stays its own; Reopen is how the user changes it.
   if (change.qa.by === "agent")

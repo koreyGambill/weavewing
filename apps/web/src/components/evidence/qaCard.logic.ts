@@ -1,73 +1,11 @@
+import { qaPresence } from "@t3tools/client-runtime/qa-card";
 import {
   EVIDENCE_THREAD_REQUEST_LIMIT,
-  type EvidenceChangeQa,
   type EvidenceLanding,
   type ThreadId,
 } from "@t3tools/contracts";
 
 import type { TimelineEntry } from "../../session-logic";
-
-export type QaChange = EvidenceLanding["changes"][number];
-
-/** What a QA card says about its change, in the shared card vocabulary. */
-export type QaCardStatus =
-  | "open"
-  | "in-composer"
-  | "discussing"
-  | "confirmed-by-you"
-  | "recorded"
-  | "agent-fixing"
-  | "dismissed";
-
-/** How a recorded change shows in the thread: a card, one quiet line, or nothing. */
-export function qaPresence(qa: EvidenceChangeQa): "card" | "quiet" | "none" {
-  if (qa.state === "quiet") return "quiet";
-  // A landing from before reasons were kept shows a card only while it still waits on the user.
-  if (qa.raised === undefined && qa.state !== "pending") return "none";
-  return "card";
-}
-
-export function qaCardStatus(qa: EvidenceChangeQa, inComposer: boolean): QaCardStatus {
-  switch (qa.state) {
-    case "pending":
-    case "quiet":
-      if (inComposer) return "in-composer";
-      return qa.discussedMessageId === undefined ? "open" : "discussing";
-    case "problem":
-      return "agent-fixing";
-    case "confirmed":
-      return qa.by === "agent" ? "recorded" : "confirmed-by-you";
-    case "waived":
-      return qa.by === "agent" ? "recorded" : "dismissed";
-  }
-}
-
-/** The bold outcome on a settled card's line; none while it waits or when the badge says it all. */
-export function qaCardOutcome(qa: EvidenceChangeQa): string | null {
-  switch (qa.state) {
-    case "confirmed":
-      return "Looks good";
-    case "problem":
-      return "Problem";
-    case "waived":
-      return qa.by === "agent" ? "Dismissed" : null;
-    default:
-      return null;
-  }
-}
-
-const firstLine = (text: string) => text.split("\n", 1)[0]!.trim();
-
-/** The card's title: the change's summary, else the user's ask. */
-export function qaCardTitle(change: Pick<QaChange, "summary" | "ask" | "id">): string {
-  return firstLine(change.summary) || firstLine(change.ask) || change.id;
-}
-
-export const qaRef = (change: QaChange) =>
-  change.qa.ref === undefined ? "QA" : `QA${change.qa.ref}`;
-
-/** The composer record key of a change, `<landingId>/<changeId>`. */
-export const qaKey = (landingId: string, changeId: string) => `${landingId}/${changeId}`;
 
 type EvidenceEntry = Extract<TimelineEntry, { readonly kind: "thread-evidence" }>;
 
@@ -88,11 +26,11 @@ function completionChild(entry: TimelineEntry): string | undefined {
 }
 
 /**
- * `entries` with the cards of landings a delegated child recorded for this thread placed at the
- * completion item for that child, or after the first run of this thread that starts once the
- * landing exists. A landing with neither yet waits at the end.
+ * `entries` with a delegated child's landings placed at the child's completion item, else after
+ * the next run once the landing exists, else at the end. A waiting landing of this thread whose
+ * `evidence_record` call is not loaded sits at the loaded start, so the strip can still open it.
  */
-export function withChildLandingCards(
+export function withLandingCards(
   threadId: ThreadId,
   entries: ReadonlyArray<TimelineEntry>,
   landings: ReadonlyArray<
@@ -107,7 +45,19 @@ export function withChildLandingCards(
         landing.changes.some((change) => qaPresence(change.qa) !== "none"),
     )
     .toSorted((a, b) => a.landedAt.localeCompare(b.landedAt) || a.id.localeCompare(b.id));
-  if (childLandings.length === 0) return entries;
+  const anchored = new Set(
+    entries.flatMap((entry) => (entry.kind === "thread-evidence" ? entry.landingIds : [])),
+  );
+  const unanchored = landings
+    .filter(
+      (landing) =>
+        landing.threadId === threadId &&
+        !anchored.has(landing.id) &&
+        landing.changes.some(({ qa }) => qa.state === "pending" || qa.state === "problem"),
+    )
+    .toSorted((a, b) => a.landedAt.localeCompare(b.landedAt) || a.id.localeCompare(b.id))
+    .map((landing) => landing.id);
+  if (childLandings.length === 0 && unanchored.length === 0) return entries;
   const placed = new Map<number, string[]>();
   const atEnd: string[] = [];
   const place = (index: number, landingId: string) =>
@@ -130,6 +80,14 @@ export function withChildLandingCards(
     else place(runEnd, landing.id);
   }
   const result: TimelineEntry[] = [];
+  if (unanchored.length > 0)
+    result.push({
+      id: "evidence:start",
+      kind: "thread-evidence",
+      createdAt: entries[0]?.createdAt ?? "",
+      runId: null,
+      landingIds: unanchored,
+    } satisfies EvidenceEntry);
   const cards = (anchor: TimelineEntry | undefined, landingIds: ReadonlyArray<string>) => {
     const entry: EvidenceEntry = {
       id: `evidence:${anchor?.id ?? "end"}`,
@@ -151,14 +109,17 @@ export function withChildLandingCards(
 
 /**
  * Whether the open thread reads its landings: it has a card spot of its own, a completion from a
- * child, or delegated children that may have recorded a landing for it.
+ * child, delegated children that may have recorded a landing for it, or a QA change its strip
+ * lists, whose card must open.
  */
 export function timelineMayHoldQa(
   entries: ReadonlyArray<TimelineEntry>,
   hasSubagents: boolean,
+  waitsOnQa: boolean,
 ): boolean {
   return (
     hasSubagents ||
+    waitsOnQa ||
     entries.some(
       (entry) => entry.kind === "thread-evidence" || completionChild(entry) !== undefined,
     )
