@@ -111,3 +111,27 @@ export const removedOpenTasks = (
   keptIds: ReadonlySet<string>,
 ): ReadonlyArray<ListItem> =>
   before.filter((item) => item.owner === "you" && item.state === "open" && !keptIds.has(item.id));
+
+const TASK_REF = /^T\d+$/;
+
+/**
+ * The list item a change's `id` names: a task ref such as T2 names that task, any other id the
+ * item with that id. Returns the id to write, `undefined` for a new item, or the refusal: a ref
+ * that names no task, or names one task while another item carries it as a literal id, and a new
+ * item whose id would read as a task ref.
+ */
+export function resolveListItemId(
+  items: ReadonlyArray<ListItem>,
+  id: string | undefined,
+): { readonly id: string | undefined } | string {
+  if (id === undefined) return { id };
+  if (!TASK_REF.test(id)) return { id };
+  const task = items.find((item) => item.ref === id);
+  const literal = items.find((item) => item.id === id);
+  if (task !== undefined && literal !== undefined && task !== literal)
+    return `${id} names a task and another item's id; use the task's id ${task.id}.`;
+  const named = task ?? literal;
+  return named === undefined
+    ? `${id} is not a task in this list; omit id to create an item, and never give one an id like a task ref.`
+    : { id: named.id };
+}

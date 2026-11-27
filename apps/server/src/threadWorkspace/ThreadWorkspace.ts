@@ -50,6 +50,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import {
   changeUserTask,
   removedOpenTasks,
+  resolveListItemId,
   TASK_LEAVES_ONLY_CLOSED,
   type ListActor,
 } from "./userTasks.ts";
@@ -579,11 +580,9 @@ const make = Effect.gen(function* () {
     const items = [...current.items];
     for (const requested of changes) {
       // A user task's ref, such as T2, names it as well as its id.
-      const byRef =
-        requested.id === undefined || previous.some((item) => item.id === requested.id)
-          ? undefined
-          : previous.find((item) => item.ref === requested.id);
-      const change = byRef === undefined ? requested : { ...requested, id: byRef.id };
+      const resolved = resolveListItemId(previous, requested.id);
+      if (typeof resolved === "string") return yield* invalid(resolved);
+      const change = resolved.id === requested.id ? requested : { ...requested, id: resolved.id };
       const index = change.id === undefined ? -1 : items.findIndex((item) => item.id === change.id);
       const old = items[index];
       const before = old ?? previous.find((item) => item.id === change.id);
@@ -754,21 +753,12 @@ const make = Effect.gen(function* () {
     rewrite: Effect.fn("ThreadWorkspace.rewrite")(function* (input, actor) {
       const current = yield* read(input.threadId);
       const retained = current.items.filter((item) => item.state !== "open");
-      if (
-        input.items.some(
-          (change) => change.id !== undefined && retained.some((item) => item.id === change.id),
-        )
-      )
-        return yield* invalid("Rewrite cannot change finished or handed-off history.");
-      const keptIds = new Set(
-        input.items.flatMap((change) =>
-          change.id === undefined
-            ? []
-            : [current.items.find((item) => item.ref === change.id)?.id ?? change.id],
-        ),
-      );
-      if (actor.by === "agent" && removedOpenTasks(current.items, keptIds).length > 0)
-        return yield* invalid(TASK_LEAVES_ONLY_CLOSED);
+      for (const change of input.items) {
+        const resolved = resolveListItemId(current.items, change.id);
+        if (typeof resolved === "string") return yield* invalid(resolved);
+        if (resolved.id !== undefined && retained.some((item) => item.id === resolved.id))
+          return yield* invalid("Rewrite cannot change finished or handed-off history.");
+      }
       // A task kept by id keeps its number.
       const replacements = (yield* apply(
         { ...current, items: [] },
@@ -780,6 +770,12 @@ const make = Effect.gen(function* () {
         const ref = current.items.find((entry) => entry.id === item.id)?.ref;
         return ref === undefined || item.ref !== undefined ? item : { ...item, ref };
       });
+      // Checked against the rows the rewrite actually writes, so no spelling of an id can hide one.
+      if (
+        actor.by === "agent" &&
+        removedOpenTasks(current.items, new Set(replacements.map((item) => item.id))).length > 0
+      )
+        return yield* invalid(TASK_LEAVES_ONLY_CLOSED);
       const survivingIds = new Set([...retained, ...replacements].map((item) => item.id));
       const history = retained.map((item) => {
         let parentId = item.parentId;
