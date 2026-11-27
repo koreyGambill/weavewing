@@ -60,9 +60,13 @@ export function ThreadTimeline({
   const trackedAnswerThread = entriesInput.waitingCards === true ? threadDetailRef : null;
   useMountedTrackedAnswerTimeline(trackedAnswerThread);
   const trackedAsks = useThreadTrackedAsks(trackedAnswerThread);
+  const trackedAnswerRefs =
+    trackedAsks === undefined
+      ? undefined
+      : new Set(trackedAsks.flatMap((ask) => ask.answers.map((answer) => `${ask.id}/${answer.n}`)));
   const serverEntries = useIncrementalTimelineEntries(activeThreadKey, {
     ...entriesInput,
-    trackedAnswerCards: trackedAsks !== undefined,
+    ...(trackedAnswerRefs === undefined ? {} : { trackedAnswerRefs }),
     visibleTurnItems:
       inlineArchiveRunIds === undefined
         ? visibleTurnItems

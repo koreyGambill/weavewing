@@ -1376,7 +1376,7 @@ describe("HTML renders in the timeline", () => {
   const turn = (
     render: OrchestrationV2TurnItem,
     waitingCards?: boolean,
-    trackedAnswerCards?: boolean,
+    trackedAnswerRefs?: ReadonlySet<string>,
   ) => {
     const items: OrchestrationV2TurnItem[] = [
       {
@@ -1404,7 +1404,7 @@ describe("HTML renders in the timeline", () => {
       visibleTurnItems: items.map(visible),
       optimisticMessages: [],
       ...(waitingCards === undefined ? {} : { waitingCards }),
-      ...(trackedAnswerCards === undefined ? {} : { trackedAnswerCards }),
+      ...(trackedAnswerRefs === undefined ? {} : { trackedAnswerRefs }),
     });
   };
   const rowsFor = (entries: TimelineEntry[], expanded: boolean) =>
@@ -1497,13 +1497,17 @@ describe("HTML renders in the timeline", () => {
       input: { id: "A3", answer: "The handler resets the counter." },
       output: { trackedAnswer: { id: "A3", n: 2 } },
     };
-    expect(turn(answer, true, false).find((entry) => entry.id === "render")?.kind).toBe("work");
-    expect(turn(answer, true, true).find((entry) => entry.id === "render")).toMatchObject({
+    const ready = new Set(["A3/2"]);
+    expect(turn(answer, true).find((entry) => entry.id === "render")?.kind).toBe("work");
+    expect(turn(answer, true, new Set(["A3/1"])).find((entry) => entry.id === "render")?.kind).toBe(
+      "work",
+    );
+    expect(turn(answer, true, ready).find((entry) => entry.id === "render")).toMatchObject({
       kind: "thread-answer",
       answerRef: { id: "A3", n: 2 },
     });
     expect(
-      turn({ ...answer, status: "failed", output: { isError: true } }, true, true).find(
+      turn({ ...answer, status: "failed", output: { isError: true } }, true, ready).find(
         (entry) => entry.id === "render",
       )?.kind,
     ).toBe("work");

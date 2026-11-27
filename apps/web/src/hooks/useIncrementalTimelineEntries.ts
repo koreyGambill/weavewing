@@ -15,7 +15,7 @@ function sameInput(left: TimelineEntriesInput, right: TimelineEntriesInput): boo
     left.nodes === right.nodes &&
     left.plans === right.plans &&
     left.waitingCards === right.waitingCards &&
-    left.trackedAnswerCards === right.trackedAnswerCards
+    left.trackedAnswerRefs === right.trackedAnswerRefs
   );
 }
 
