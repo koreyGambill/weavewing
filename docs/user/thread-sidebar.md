@@ -99,8 +99,9 @@ selected thread. It closes when you press Escape, click outside it or switch
 threads. **Pin** keeps it open while you move between threads, and its views
 follow the thread you select. **Lock to thread** keeps showing one thread while
 you select others; the panel names the locked thread, and unlocking returns it to
-following. Opening Todos or Automations from another thread's menu locks the panel
-to that thread. Drag the panel's left edge to resize it; double-click the edge to
+following. **Todos** or **Automations** in a conversation's title menu shows that
+conversation; when the panel follows another thread, such as a focused side chat, it
+locks to the conversation and names it. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
 Calendar, Status and Pull requests also open as full pages beside the thread list.

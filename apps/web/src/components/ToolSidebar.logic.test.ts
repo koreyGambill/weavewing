@@ -109,6 +109,24 @@ describe("side area", () => {
     expect(run(lockedB, { type: "show", view: "inbox" }).locked).toEqual(threadB);
   });
 
+  it("keeps a view opened for a thread being navigated to, once, and closes on other switches", () => {
+    const opened = run(INITIAL_SIDE_AREA, {
+      type: "show",
+      view: "artifacts",
+      thread: threadB,
+      arriving: true,
+    });
+    const arrived = run(opened, { type: "routeChanged", threadKey: "env:b" });
+    expect(arrived).toMatchObject({ open: true, view: "artifacts", arrival: null });
+    expect(run(arrived, { type: "routeChanged", threadKey: "env:a" }).open).toBe(false);
+    expect(run(opened, { type: "routeChanged", threadKey: "env:a" })).toMatchObject({
+      open: false,
+      arrival: null,
+    });
+    const pinned = run(INITIAL_SIDE_AREA, { type: "show", view: "links" }, { type: "pin" });
+    expect(run(pinned, { type: "routeChanged", threadKey: "env:a" }).open).toBe(true);
+  });
+
   it("toggles thread views on the last one shown, skipping global views", () => {
     const toggle = { type: "toggleThreadViews" } as const;
     expect(run(INITIAL_SIDE_AREA, toggle)).toMatchObject({ open: true, view: "details" });
@@ -140,6 +158,7 @@ describe("side area", () => {
       width: 640,
       maximized: false,
       threadView: "links",
+      arrival: null,
     });
     expect(restoreSideArea({ ...stored, view: "status", threadView: "inspect" })).toMatchObject({
       view: "status",

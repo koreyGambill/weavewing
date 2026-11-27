@@ -19,6 +19,8 @@ export interface ShowTarget {
   readonly thread?: ScopedThreadRef;
   /** Locks the side panel to `thread`, for a thread other than the selected one. */
   readonly lock?: boolean;
+  /** The opener is navigating to `thread`; arriving there keeps the view open. */
+  readonly arriving?: boolean;
   readonly artifactId?: string;
   /** The thread the artifact belongs to, when the request is not about one thread. */
   readonly artifactThread?: ScopedThreadRef;
@@ -124,7 +126,13 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
         useToolSidebarStore.getState().dispatch({
           type: "show",
           view,
-          ...(target.thread ? { thread: target.thread, lock: target.lock === true } : {}),
+          ...(target.thread
+            ? {
+                thread: target.thread,
+                lock: target.lock === true,
+                arriving: target.arriving === true,
+              }
+            : {}),
         });
       },
       selectArtifact: (thread, id) => set({ artifactSelection: id ? { thread, id } : null }),

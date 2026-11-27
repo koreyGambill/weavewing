@@ -17,6 +17,7 @@ import { flushSync } from "react-dom";
 import { isElectron } from "../env";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useResizeDrag } from "../hooks/useResizeDrag";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { shortcutLabelForCommand } from "../keybindings";
 import { observeResize } from "../lib/observeResize";
 import { cn } from "../lib/utils";
@@ -30,6 +31,7 @@ import { resolveThreadRouteRef } from "../threadRoutes";
 import {
   completeSideAreaHandoff,
   isSideAreaHandoffArriving,
+  sideAreaOpenRequests,
   takeSideAreaFocusRequest,
   useToolSidebarStore,
 } from "../toolSidebarStore";
@@ -54,6 +56,8 @@ import {
   type ViewId,
   SIDE_AREA_MAX_WIDTH,
   SIDE_AREA_MIN_WIDTH,
+  transitionSideArea,
+  type SideAreaAction,
 } from "./ToolSidebar.logic";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription } from "./ui/empty";
@@ -67,7 +71,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "./ui/menu";
-import { useMobileSidebarSheetMounted } from "./ui/sidebar";
+import { useMobileSidebarSheetMounted, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
 
@@ -149,12 +153,12 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const routeKey = useRouterState({ select: (state) => state.resolvedLocation?.state.__TSR_key });
   const seenThreadKey = useRef(routeThreadKey);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area unless the view was opened for that arrival.
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
     if (isSideAreaHandoffArriving(sideAreaRoute(router.state.location))) return;
-    useToolSidebarStore.getState().dispatch({ type: "dismiss" });
+    useToolSidebarStore.getState().dispatch({ type: "routeChanged", threadKey: routeThreadKey });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only a thread switch dismisses; the router is read for the location it switched to.
   }, [routeThreadKey]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A page's handoff ends on the entry it went to; focus stays in the side area, which the destination's composer leaves alone.
@@ -166,12 +170,20 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       panel.querySelector<HTMLElement>("header button")?.focus({ preventScroll: true });
     }
   }, [routePathname, routeKey, routeIndex]);
+  const sidebar = useSidebar();
+  // A shortcut that opens the side area on a phone shows it, so the thread drawer gives way.
+  const openFromShortcut = useStableCallback((action: SideAreaAction) => {
+    const wasOpen = useToolSidebarStore.getState().open;
+    const opening = !wasOpen && transitionSideArea(useToolSidebarStore.getState(), action).open;
+    if (opening && sidebar.isMobile && sidebar.openMobile) sidebar.setOpenMobile(false);
+    useToolSidebarStore.getState().dispatch(action);
+  });
 
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
-    const toggle = () => useToolSidebarStore.getState().dispatch({ type: "toggle" });
+    const toggle = () => openFromShortcut({ type: "toggle" });
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
       {
@@ -183,7 +195,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         "threadContext.toggle": (event) => {
           event.preventDefault();
           event.stopPropagation();
-          useToolSidebarStore.getState().dispatch({ type: "toggleThreadViews" });
+          openFromShortcut({ type: "toggleThreadViews" });
         },
       },
       { capture: true },
@@ -342,9 +354,11 @@ function SideArea({
       startedOutside = false;
       if (!outside || event.detail === 0 || !isOutside(event)) return;
       window.clearTimeout(pending);
-      // Clicks in popups opened from inside the side area reach its React tree first.
+      const requests = sideAreaOpenRequests();
+      // Clicks in popups opened from inside the side area reach its React tree first, and a click
+      // whose own handler opened a view asked for the side area, so neither dismisses it.
       pending = window.setTimeout(() => {
-        if (!insideClicks.current.has(event)) {
+        if (!insideClicks.current.has(event) && sideAreaOpenRequests() === requests) {
           useToolSidebarStore.getState().dispatch({ type: "dismiss" });
         }
       }, 0);
@@ -723,13 +737,24 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
               <MenuGroup>
                 <MenuGroupLabel>{group.label}</MenuGroupLabel>
                 {group.views.map((entry) => (
-                  <MenuRadioItem key={entry.id} value={entry.id} closeOnClick>
-                    <span className="flex items-center gap-2">
-                      <entry.icon className="text-muted-foreground" />
-                      {entry.title}
-                      {open && entry.PickerCount ? <entry.PickerCount target={target} /> : null}
-                    </span>
-                  </MenuRadioItem>
+                  <Tooltip key={entry.id}>
+                    <TooltipTrigger
+                      render={
+                        <MenuRadioItem
+                          value={entry.id}
+                          closeOnClick
+                          aria-description={entry.about}
+                        />
+                      }
+                    >
+                      <span className="flex items-center gap-2">
+                        <entry.icon className="text-muted-foreground" />
+                        {entry.title}
+                        {open && entry.PickerCount ? <entry.PickerCount target={target} /> : null}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">{entry.about}</TooltipPopup>
+                  </Tooltip>
                 ))}
               </MenuGroup>
             </Fragment>

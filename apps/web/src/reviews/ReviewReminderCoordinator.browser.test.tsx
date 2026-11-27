@@ -139,10 +139,12 @@ it.each(["other-thread", "list"])(
       thread: ref,
       id: review.id,
     });
+    // From another thread the view waits for the navigation's arrival instead of closing on it.
     expect(useToolSidebarStore.getState()).toMatchObject({
       open: true,
       view: "artifacts",
       locked: null,
+      arrival: view === "list" ? null : `${environmentId}:${review.threadId}`,
     });
   },
 );

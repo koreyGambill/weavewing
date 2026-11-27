@@ -27,7 +27,7 @@ export const sidebarWorkspaceGet = createEnvironmentRpcQueryAtomFamily(connectio
 export const threadListUpdate = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "list:update",
   tag: WS_METHODS.threadListUpdate,
-  // The left strip's Todos badge counts open items from the workspace query.
+  // The hidden sidebar's attention dot counts open items from the workspace query.
   onSuccess: ({ environmentId, input }, registry) =>
     Effect.sync(() =>
       registry.refresh(sidebarWorkspaceGet({ environmentId, input: { threadId: input.threadId } })),

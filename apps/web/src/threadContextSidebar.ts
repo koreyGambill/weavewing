@@ -4,7 +4,11 @@ import type {
   ScopedThreadRef,
   ThreadWorkspace,
 } from "@t3tools/contracts";
-import type { RightPanelSurface } from "./rightPanelStore";
+import {
+  selectThreadTileLayout,
+  useRightPanelStore,
+  type RightPanelSurface,
+} from "./rightPanelStore";
 import type { ThreadTileLayout } from "./threadTileLayout";
 import { visibleTileGroups } from "./threadTileGeometry";
 
@@ -23,6 +27,20 @@ export function selectContextThread(
   return surface?.kind === "side-chat"
     ? { environmentId: owner.environmentId, threadId: surface.threadId }
     : owner;
+}
+
+/**
+ * The selected thread at call time, for handlers: what `useSelectedThreadRef` renders, given the
+ * route's thread.
+ */
+export function readSelectedThreadRef(owner: ScopedThreadRef | null): ScopedThreadRef | null {
+  if (!owner) return null;
+  const { byThreadKey } = useRightPanelStore.getState();
+  return selectContextThread(
+    owner,
+    selectThreadTileLayout(byThreadKey, owner),
+    byThreadKey[`${owner.environmentId}:${owner.threadId}`]?.surfaces ?? [],
+  );
 }
 
 export interface ThreadToolSignals {
