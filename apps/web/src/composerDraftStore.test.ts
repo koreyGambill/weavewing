@@ -102,6 +102,7 @@ import {
   threadQuestionNoteImageDraftId,
   useComposerDraftStore,
   clearSentTrackedAnswer,
+  composerDraftHasUserContent,
   DraftId,
 } from "./composerDraftStore";
 import { waitForDraftHeroTransition } from "./components/chat/draftHeroTransition";
@@ -144,6 +145,7 @@ it("serializes the whole tracked draft into a send context and keeps it during o
   expect(store.getComposerDraft(threadRef)?.trackedAnswer).toBeUndefined();
   store.clearComposerContent(threadRef);
 });
+
 import { bringThreadToDraft } from "./lib/sideChatPane";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import {
@@ -153,6 +155,23 @@ import {
 import { formatTerminalContextReference, type TerminalContextDraft } from "./lib/terminalContext";
 import { createDeferredStorage } from "./lib/storage";
 import { applyPreviewServerSnapshot, resetPreviewStateForTests } from "./previewStateStore";
+
+it("keeps a tracking toggle without treating it as draft content", () => {
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("tracking-only-draft"));
+  const store = useComposerDraftStore.getState();
+  const tracking = { track: true, discuss: [] };
+  store.setTrackedAnswer(threadRef, tracking);
+  try {
+    const draft = store.getComposerDraft(threadRef);
+    expect(draft?.trackedAnswer).toBe(tracking);
+    expect(composerDraftHasUserContent(draft)).toBe(false);
+
+    store.setTrackedAnswer(threadRef, { track: true, discuss: [{ id: "A1", question: "How?" }] });
+    expect(composerDraftHasUserContent(store.getComposerDraft(threadRef))).toBe(true);
+  } finally {
+    store.clearComposerContent(threadRef);
+  }
+});
 
 function makeImage(input: {
   id: string;

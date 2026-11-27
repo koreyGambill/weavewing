@@ -539,7 +539,7 @@ export function composerDraftHasUserContent(
     draft.threadContexts.length > 0 ||
     draft.environmentContexts.length > 0 ||
     draft.waitingItems.length > 0 ||
-    draft.trackedAnswer !== undefined ||
+    (draft.trackedAnswer?.discuss.length ?? 0) > 0 ||
     draft.artifactAnswers.length > 0 ||
     draft.replyTo !== null
   );
