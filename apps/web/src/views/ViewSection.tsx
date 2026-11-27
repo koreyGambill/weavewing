@@ -1,5 +1,6 @@
 import { ChevronRightIcon } from "lucide-react";
 import { createContext, use, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { holdScrollTarget } from "../lib/holdScrollTarget";
 import { observeIntersection } from "../lib/observeIntersection";
 import { cn } from "../lib/utils";
 import type { ViewSectionId } from "../components/ToolSidebar.logic";
@@ -60,6 +61,7 @@ export function ViewSection({
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [seen, setSeen] = useState(false);
   const section = useRef<HTMLElement>(null);
+  const stopHolding = useRef<(() => void) | null>(null);
   const forceMount = group !== null && aboveDone && (reveal || index < revealIndex);
   const bodyMounted = !collapsed && (seen || forceMount || group?.mounted.has(id));
   const [placeholderRef] = useState(() => (node: HTMLDivElement | null) => {
@@ -74,14 +76,22 @@ export function ViewSection({
     if (bodyMounted && group && !group.mounted.has(id)) group.markMounted(id);
   }, [bodyMounted, group, id]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The scroll hold stays active until input or this view unmounts.
+  useLayoutEffect(() => () => stopHolding.current?.(), []);
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The destination can only be measured after the preceding section bodies have committed.
   useLayoutEffect(() => {
-    if (!reveal || !aboveDone || !section.current) return;
-    section.current.scrollIntoView({ block: "start" });
+    if (requestedSection === null) return;
+    stopHolding.current?.();
+    stopHolding.current = null;
+    const target = section.current;
+    const scroller = target?.parentElement;
+    if (requestedSection !== id || !aboveDone || !target || !scroller) return;
+    stopHolding.current = holdScrollTarget(target, scroller, () => 0);
     const preferences = useThreadContextSidebarStore.getState();
     if (preferences.collapsedSections.includes(id)) preferences.toggleSection(id);
     useToolSidebarStore.getState().consumeRevealSection(id);
-  }, [reveal, aboveDone, id]);
+  }, [requestedSection, aboveDone, id]);
   const headingId = `view-section-${id}`;
   return (
     <section

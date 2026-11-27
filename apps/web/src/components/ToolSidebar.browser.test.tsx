@@ -807,3 +807,63 @@ it("hides the current view from the picker, opens it explicitly, and restores it
   await userEvent.keyboard("{Enter}");
   await expect.element(page.getByRole("menuitemradio", { name: /^Inbox/ })).toBeVisible();
 });
+
+it.each([
+  [390, false],
+  [1280, false],
+  [390, true],
+] as const)(
+  "keeps restored Related in view through late links at %i with user scroll: %s",
+  async (width, userScroll) => {
+    const marks = Array.from({ length: 30 }, (_, i) => ({
+      url: `https://example.com/page-${i}`,
+      service: "web",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      description: `Synthetic link ${i}`,
+    }));
+    const gate = Promise.withResolvers<typeof marks>();
+    using _marks = answerRpc(WS_METHODS.threadMarksGet, () => Effect.promise(() => gate.promise));
+    const { stack, screen } = await mountApp(
+      [threadWithHistory("late-links", 1)],
+      width,
+      undefined,
+      async () => {
+        localStorage.setItem(
+          "weavewing_tool_sidebar",
+          JSON.stringify({
+            version: 0,
+            state: { open: true, view: "related", width: 360, pinned: false, locked: null },
+          }),
+        );
+        await useToolSidebarStore.persist.rehydrate();
+      },
+    );
+    await using _app = stack;
+    const panel = screen.getByRole("complementary", { name: "Side panel" });
+    const heading = panel.getByRole("button", { name: "Delegated, forked and messaged threads" });
+    await expect.element(heading).toBeInViewport({ ratio: 1 });
+    const scroller = panel.getByRole("region", { name: "Links", exact: true }).element();
+    const above = panel.getByRole("region", { name: "Pull requests, tickets, links and files" });
+
+    if (userScroll) {
+      await act(() => {
+        scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -100 }));
+        scroller.scrollTop = 0;
+      });
+    }
+    await act(() => gate.resolve(marks));
+    await expect.element(panel.getByText("Synthetic link 29")).toBeInTheDocument();
+    if (userScroll) {
+      await new Promise<void>((resolve) => {
+        const observer = new ResizeObserver(() => {
+          observer.disconnect();
+          resolve();
+        });
+        observer.observe(above.element());
+      });
+      expect(scroller.scrollTop).toBe(0);
+      return;
+    }
+    await expect.element(heading).toBeInViewport({ ratio: 1 });
+  },
+);
