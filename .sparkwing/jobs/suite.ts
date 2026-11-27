@@ -79,6 +79,8 @@ definePipeline({
       }
       const before = testedTree(co.root);
       const results = await everySuite(ctx, co);
+      // Written only once every suite reached a result, so a stopped run reports nothing about main.
+      NodeFS.writeFileSync(NodePath.join(co.evidence, "results.json"), JSON.stringify({ commit, tree, results }));
       const after = testedTree(co.root);
       if (!recordReceipt(receiptsDir(), co.root, results, before, after))
         ctx.log.warn(

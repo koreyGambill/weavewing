@@ -23,14 +23,14 @@ export function appendReport(file: string, text: string): void {
 
 /**
  * Appends a dated section naming the failing test files in a failed child's logs, and returns
- * whether it did. Only a child that reached its checkout wrote tested.json, naming the commit it
- * tested, which may be newer than the one fetched; a child that could not plan or start tested
- * nothing, so it adds no finding about main.
+ * whether it did. Only a child whose suites all reached a result wrote results.json, naming the
+ * commit it tested, which may be newer than the one fetched. A child that could not plan, or was
+ * stopped or interrupted part way, adds no finding about main.
  */
 export function reportFailure(file: string, branch: string, runId: string, logs: string): boolean {
-  const tested = NodePath.join(logs, "tested.json");
-  if (!NodeFS.existsSync(tested)) return false;
-  const commit = String(JSON.parse(NodeFS.readFileSync(tested, "utf8")).commit ?? "");
+  const finished = NodePath.join(logs, "results.json");
+  if (!NodeFS.existsSync(finished)) return false;
+  const commit = String(JSON.parse(NodeFS.readFileSync(finished, "utf8")).commit ?? "");
   const rows = failingTestFiles(logs).map(({ log, file: path }) => `| ${markdownCell(log)} | ${markdownCell(path)} |`);
   const body =
     rows.length > 0

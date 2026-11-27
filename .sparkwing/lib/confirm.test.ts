@@ -28,20 +28,24 @@ test("table cells escape pipes, backticks and line breaks", () => {
   assert.equal(markdownCell("a|b`c\\d\ne"), "a\\|b\\`c\\\\d e");
 });
 
-test("a failed child adds a finding about main only when it reached testing", () => {
+test("a failed child adds a finding about main only when every suite reached a result", () => {
   const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "confirm-failure-"));
   try {
     const file = Path.join(dir, "known.md");
     const logs = Path.join(dir, "suites");
     FS.mkdirSync(logs);
+    const ids = { commit: "c".repeat(40), tree: "d".repeat(40) };
     assert.equal(reportFailure(file, "origin/main", "run-1", logs), false, "a child that could not plan");
+    FS.writeFileSync(Path.join(logs, "tested.json"), JSON.stringify(ids));
+    FS.writeFileSync(Path.join(logs, "test-web.log"), " FAIL  src/a.test.ts > case\n");
+    assert.equal(reportFailure(file, "origin/main", "run-2", logs), false, "a child stopped mid-run");
     assert.equal(FS.existsSync(file), false);
-    FS.writeFileSync(Path.join(logs, "tested.json"), JSON.stringify({ commit: "c".repeat(40), tree: "d".repeat(40) }));
-    FS.writeFileSync(Path.join(logs, "test-server.log"), " FAIL  src/a.test.ts > case\n");
-    assert.equal(reportFailure(file, "origin/main", "run-2", logs), true);
+    const results = { web: "failed", server: "passed", packages: "passed" };
+    FS.writeFileSync(Path.join(logs, "results.json"), JSON.stringify({ ...ids, results }));
+    assert.equal(reportFailure(file, "origin/main", "run-3", logs), true);
     const text = FS.readFileSync(file, "utf8");
     assert.match(text, /daily confirmation of origin\/main cccccccccc/);
-    assert.match(text, /\| test-server \| src\/a\.test\.ts \|/);
+    assert.match(text, /\| test-web \| src\/a\.test\.ts \|/);
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
   }
