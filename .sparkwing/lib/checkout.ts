@@ -146,9 +146,12 @@ export interface CheckChangedInputs {
 // needs `--no-memo`.
 const IGNORED_SKIP = /(^|\/)(node_modules|dist|dist-[^/]+|target|\.t3|\.alchemy|\.turbo|\.cache)(\/|$)|\.tsbuildinfo$/;
 // Variables that the checks, their configs or the tests read to decide behaviour, and the locale
-// and time zone that date and text tests format with. The cache locations change no result.
+// and time zone that date and text tests format with. Node's compile cache location changes no
+// result, since Node checks each entry against the source it compiles.
 const CHECK_ENV = /^(CI|CHECK_CHANGED_\w+|NODE_\w+|VITE_\w+|VITEST_\w+|T3CODE_\w+|T3_\w+|EFFECT_\w+|PLAYWRIGHT_\w+|VERCEL_\w+|GITHUB_REPOSITORY|APP_VERSION|PORT|HOST|TZ|LANG|LC_\w+)$/;
-const CACHE_LOCATIONS = new Set(["NODE_COMPILE_CACHE", "VITE_CACHE_PATH"]);
+const CACHE_LOCATIONS = new Set(["NODE_COMPILE_CACHE"]);
+// A vendored tool link into the reference checkout's own node_modules, which no check reads.
+const UNREAD_LINKS = new Set([".repos/alchemy-effect/.vscode/tsrs-tsdk/tsgo"]);
 
 /**
  * The content check:changed reads, never where it sits, so checkouts of one tree share a pass:
@@ -231,8 +234,7 @@ export function checkChangedInputs(
     .split("\0")
     .filter((entry) => entry.startsWith("120000 "))
     .map((entry) => entry.slice(entry.indexOf("\t") + 1))
-    // .repos holds vendored references that no check reads.
-    .filter((file) => !file.startsWith(".repos/"))
+    .filter((file) => !UNREAD_LINKS.has(file))
     .every((file) => {
       const link = NodePath.join(realRoot, file);
       if (!NodeFS.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) return true;
@@ -307,34 +309,6 @@ function ciChanges(root: string) {
 export function decideChanges(root: string, files: readonly string[] | null, full: boolean): Changes {
   const changes = ciChanges(root);
   return changes.decide(files, changes.readWorkspace(), full);
-}
-
-/** Packages with a test script that CI's package test job covers; server and web have their own jobs. */
-export function packageTestNames(root: string): string[] {
-  const own = new Set(["t3", "@t3tools/web", "@t3tools/monorepo"]);
-  return ciChanges(root)
-    .readWorkspace()
-    .filter((pkg) => pkg.hasTest && !own.has(pkg.name))
-    .map((pkg) => pkg.name);
-}
-
-/**
- * Workspace packages that define a typecheck script or name typecheck in their vite.config tasks.
- * A config that names it without defining the task fails `vp run` loudly, never silently.
- */
-export function typecheckPackageNames(root: string): string[] {
-  const named = /\btypecheck\b/;
-  return ciChanges(root)
-    .readWorkspace()
-    .filter((pkg) => {
-      const dir = NodePath.join(root, pkg.dir);
-      const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(dir, "package.json"), "utf8"));
-      if (typeof manifest.scripts?.typecheck === "string") return true;
-      return NodeFS.readdirSync(dir)
-        .filter((file) => /^vite\.config\.[cm]?[jt]s$/.test(file))
-        .some((file) => named.test(NodeFS.readFileSync(NodePath.join(dir, file), "utf8")));
-    })
-    .map((pkg) => pkg.name);
 }
 
 export const CODE = /\.(?:[cm]?[jt]sx?|astro)$/;

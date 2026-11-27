@@ -1,11 +1,36 @@
+import * as NodeChildProcess from "node:child_process";
+
 import type { Context } from "@sparkwing/sdk";
 
-import { type Checkout, logged, packageTestNames } from "./checkout.ts";
+import { type Checkout, logged } from "./checkout.ts";
+
+/** The workspace's own tasks, from the `package#task: command` list `vp run` prints without a terminal. */
+export function parseTaskList(list: string, task: string): string[] {
+  return [...list.matchAll(/^ {2}([^\s#:]+)#([^\s:]+): /gm)]
+    .filter(([, name, found]) => found === task && name !== "@t3tools/monorepo")
+    .map(([, name]) => name!);
+}
+
+/** Packages that define `task` as Vite+ itself resolves them: manifest scripts and vite.config tasks. */
+export function packagesWithTask(co: Checkout, task: string): string[] {
+  const list = NodeChildProcess.execFileSync("vp", ["run"], {
+    cwd: co.root,
+    env: { ...process.env, ...co.env },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return parseTaskList(list, task);
+}
+
+/** The package test suite: every package with a test task except the server and web, which run alone. */
+export function packageTestNames(co: Checkout): string[] {
+  return packagesWithTask(co, "test").filter((name) => name !== "t3" && name !== "@t3tools/web");
+}
 
 /**
  * Runs `vp run --filter <name> <script...>` for each package, four at a time, then fails naming
  * every package that failed. One recursive vp run would stop every remaining package after the
- * first failure.
+ * first failure. An empty selection, or a name vp does not know, fails instead of passing.
  */
 export async function eachPackage(
   ctx: Context,
@@ -14,12 +39,13 @@ export async function eachPackage(
   names: readonly string[],
   script: readonly string[],
 ): Promise<void> {
+  if (names.length === 0) throw new Error(`${label}: no packages selected`);
   const queue = [...names];
   const failed: string[] = [];
   const worker = async () => {
     for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
       const log = `${label}-${name.replace(/[^\w.-]+/g, "-")}`;
-      await logged(ctx, co, log, ["vp", "run", "--filter", name, ...script]).catch(() => failed.push(name));
+      await logged(ctx, co, log, ["vp", "run", "--fail-if-no-match", "--filter", name, ...script]).catch(() => failed.push(name));
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));
@@ -48,7 +74,7 @@ export const SUITES = {
       await logged(ctx, co, "test-server", ["vp", "run", "--filter", "t3", "test", "--maxWorkers=4"]);
     },
   },
-  packages: { cores: 4, run: (ctx, co) => eachPackage(ctx, co, "packages", packageTestNames(co.root), ["test"]) },
+  packages: { cores: 4, run: (ctx, co) => eachPackage(ctx, co, "packages", packageTestNames(co), ["test"]) },
 } satisfies Record<string, Suite>;
 
 export type SuiteName = keyof typeof SUITES;

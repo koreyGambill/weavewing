@@ -198,13 +198,14 @@ test("a tracked symlink that leaves the checkout makes the gate refuse to memoiz
     assert.equal(inputs(root).memoizable, false);
   }));
 
-test("the time zone and locale change the key, and cache locations do not", () =>
+test("the time zone, locale and task cache change the key, and the compile cache does not", () =>
   withFixture((clone) => {
     const root = clone("locale");
     const utc = inputs(root, { TZ: "UTC" }).sources;
     assert.notEqual(inputs(root, { TZ: "America/Los_Angeles" }).sources, utc);
     assert.notEqual(inputs(root, { TZ: "UTC", LC_ALL: "de_DE.UTF-8" }).sources, utc);
     assert.equal(inputs(root, { TZ: "UTC", NODE_COMPILE_CACHE: "/elsewhere/cache" }).sources, utc);
+    assert.notEqual(inputs(root, { TZ: "UTC", VITE_CACHE_PATH: "/elsewhere/tasks" }).sources, utc);
   }));
 
 test("a chain of tracked symlinks into an excluded directory makes the gate refuse to memoize", () =>
@@ -216,5 +217,17 @@ test("a chain of tracked symlinks into an excluded directory makes the gate refu
     FS.symlinkSync("second.ts", Path.join(root, "first.ts"));
     git(root, "add", "first.ts", "second.ts");
     git(root, "commit", "-m", "links into the cache");
+    assert.equal(inputs(root).memoizable, false);
+  }));
+
+test("a vendored reference's link into an excluded directory also refuses to memoize", () =>
+  withFixture((clone) => {
+    const root = clone("vendored");
+    FS.mkdirSync(Path.join(root, ".cache"));
+    FS.writeFileSync(Path.join(root, ".cache/input.ts"), "export const cached = 1;\n");
+    FS.mkdirSync(Path.join(root, ".repos/tool"), { recursive: true });
+    FS.symlinkSync("../../.cache/input.ts", Path.join(root, ".repos/tool/input.ts"));
+    git(root, "add", ".repos/tool/input.ts");
+    git(root, "commit", "-m", "vendored link into the cache");
     assert.equal(inputs(root).memoizable, false);
   }));

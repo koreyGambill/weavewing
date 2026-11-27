@@ -12,10 +12,8 @@ import {
   decideChanges,
   git,
   logged,
-  packageTestNames,
-  typecheckPackageNames,
 } from "../lib/checkout.ts";
-import { eachPackage, SUITES } from "../lib/suites.ts";
+import { eachPackage, packagesWithTask, packageTestNames, SUITES } from "../lib/suites.ts";
 
 // Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
 // mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
@@ -94,9 +92,10 @@ definePipeline({
     );
     lint.step("check", (ctx) => run(ctx, "check", ["vp", "check"]));
 
-    p.job("typecheck", (ctx) =>
-      eachPackage(ctx, checkout(ctx), "typecheck", typecheckPackageNames(checkout(ctx).root), ["--cache", "typecheck"]),
-    )
+    p.job("typecheck", (ctx) => {
+      const co = checkout(ctx);
+      return eachPackage(ctx, co, "typecheck", packagesWithTask(co, "typecheck"), ["--cache", "typecheck"]);
+    })
       .inline()
       .cores(4)
       .needs(changes, electron)
@@ -144,7 +143,7 @@ definePipeline({
     test.step("packages", async (ctx) => {
       const chosen = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
       const co = checkout(ctx);
-      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co.root), ["test"]);
+      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co), ["test"]);
     });
 
     p.job("test-web", (ctx) => SUITES.web.run(ctx, checkout(ctx)))

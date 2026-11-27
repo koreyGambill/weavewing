@@ -73,7 +73,7 @@ definePipeline({
           "npm", "ci", "--prefix", ".sparkwing", "--ignore-scripts", "--no-audit", "--no-fund",
         ]);
       await logged(ctx, co, "pipelines-typecheck", ["npm", "--prefix", ".sparkwing", "run", "typecheck"]);
-      await logged(ctx, co, "pipelines-test", ["node", "--test", ".sparkwing/lib/checkout.test.ts"]);
+      await logged(ctx, co, "pipelines-test", ["node", "--test", ".sparkwing/lib/checkout.test.ts", ".sparkwing/lib/suites.test.ts"]);
     })
       .inline()
       .cores(0.25)
