@@ -1,28 +1,13 @@
-import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { definePipeline, workDir } from "@sparkwing/sdk";
 
 import { evidenceDir, git } from "../lib/checkout.ts";
-import { appendReport, markdownCell } from "../lib/confirm.ts";
-import { failingTestFiles, receiptFor, receiptsDir } from "../lib/suites.ts";
+import { reportFailure } from "../lib/confirm.ts";
+import { receiptFor, receiptsDir } from "../lib/suites.ts";
 
 const BRANCH = "main";
-
-/** Appends a dated section naming the failing test files in the suite logs. */
-function recordFailures(file: string, head: string, runId: string, logs: string) {
-  const rows = failingTestFiles(logs).map(({ log, file: path }) => `| ${markdownCell(log)} | ${markdownCell(path)} |`);
-  const body =
-    rows.length > 0
-      ? `| Log | File |\n| --- | --- |\n${rows.join("\n")}\n`
-      : `No failing test file appears in the suite logs; read them in \`${logs}\`.\n`;
-  appendReport(
-    file,
-    `\n## ${new Date().toISOString()}: daily confirmation of origin/${BRANCH} ${head.slice(0, 10)}\n\n` +
-      `Run \`${runId}\` failed. Logs: \`${logs}\`.\n\n${body}`,
-  );
-}
 
 definePipeline({
   name: "ConfirmMain",
@@ -66,12 +51,7 @@ definePipeline({
         );
         ctx.log.info(`origin/${BRANCH} ${tested.commit.slice(0, 10)} passed every suite`, tested.results);
       } catch (error) {
-        // Only a child that reached its checkout records what it tested; a child that could not
-        // plan or start tested nothing, so its failure is the run's error, not a finding about main.
-        // main may have moved between the fetch and the child's checkout, so name what it tested.
-        const tested = NodePath.join(logs, "tested.json");
-        if (NodeFS.existsSync(tested))
-          recordFailures(file, JSON.parse(NodeFS.readFileSync(tested, "utf8")).commit || head, ctx.run.id, logs);
+        reportFailure(file, `origin/${BRANCH}`, ctx.run.id, logs);
         throw error;
       }
     })
