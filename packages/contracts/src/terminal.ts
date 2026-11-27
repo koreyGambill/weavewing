@@ -426,10 +426,12 @@ export class TerminalCwdNotFoundError extends Schema.TaggedError<TerminalCwdNotF
   "TerminalCwdNotFoundError",
   {
     cwd: Schema.String,
+    /** Why the server could not bring the thread's checkout back, written for the user. */
+    restoreFailure: Schema.optional(Schema.String.check(Schema.isMaxLength(2_000))),
   },
 ) {
   override get message() {
-    return `Terminal folder does not exist: ${this.cwd}. Restore the folder at this path before retrying.`;
+    return `Terminal folder does not exist: ${this.cwd}. ${this.restoreFailure ?? "Restore the folder at this path before retrying."}`;
   }
 }
 

@@ -1,4 +1,4 @@
-import { ThreadId, type ProjectId, type TerminalCwdNotFoundError } from "@t3tools/contracts";
+import { ThreadId, type ProjectId, TerminalCwdNotFoundError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -308,7 +308,14 @@ export const makePrepareTerminalLaunch = Effect.fn(
             threadId: thread.id,
             worktreePath,
             cause,
-          }).pipe(Effect.andThen(Effect.fail(error))),
+          }).pipe(
+            // Restore errors carry fixed, client-safe messages, such as the branch that survives.
+            Effect.andThen(
+              Effect.fail(
+                new TerminalCwdNotFoundError({ cwd: error.cwd, restoreFailure: cause.message }),
+              ),
+            ),
+          ),
         ),
       );
     // The lease must cover the worktree root, even when the terminal opens in a subdirectory.
