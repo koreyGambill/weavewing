@@ -338,20 +338,24 @@ function withoutInstructionNotices(
   frame: unknown,
   expected: unknown,
 ): { readonly frame: unknown; readonly notices: ReadonlyArray<string> } {
+  if (typeof frame !== "object" || frame === null) return { frame, notices: [] };
   const message =
-    typeof frame === "object" && frame !== null && Reflect.get(frame, "type") === "prompt.offer"
+    Reflect.get(frame, "type") === "prompt.offer"
       ? (Reflect.get(frame, "message") as SDKUserMessage | undefined)
       : undefined;
   const content = message?.message?.content;
   if (message === undefined || !Array.isArray(content)) return { frame, notices: [] };
   const notices: Array<string> = [];
-  const kept = content.flatMap((block) => {
-    if (block.type !== "text") return [block];
-    const text = withoutClaudeInstructionNotice(block.text);
-    if (text === block.text) return [block];
+  const kept: Array<(typeof content)[number]> = [];
+  for (const block of content) {
+    const text = block.type === "text" ? withoutClaudeInstructionNotice(block.text) : undefined;
+    if (block.type !== "text" || text === block.text) {
+      kept.push(block);
+      continue;
+    }
     notices.push(block.text);
-    return text === "" ? [] : [{ ...block, text }];
-  });
+    if (text !== "") kept.push({ ...block, text: text ?? "" });
+  }
   if (notices.length === 0) return { frame, notices };
   const expectedMessage =
     typeof expected === "object" && expected !== null
