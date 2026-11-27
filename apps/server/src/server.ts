@@ -770,7 +770,10 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       const service = yield* EvidencePromptService.EvidencePromptService;
       yield* service.start();
     }),
-  ).pipe(Layer.provide(EvidencePromptService.layer), Layer.provide(ProjectionStoreV2.layer)),
+  ).pipe(
+    Layer.provide(EvidencePromptService.layer),
+    Layer.provide(Layer.mergeAll(ProjectionStoreV2.layer, EffectOutboxV2.layer)),
+  ),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ProviderInstallation.layer,

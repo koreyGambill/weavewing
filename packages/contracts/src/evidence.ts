@@ -112,10 +112,13 @@ export const EvidenceChange = Schema.Struct({
 });
 export type EvidenceChange = typeof EvidenceChange.Type;
 
+/** The origin event of the message that asks an agent to record evidence for work it landed. */
+export const EVIDENCE_PROMPT_ORIGIN_EVENT = "evidence prompt";
+
 /** Landed work the agent says needs no evidence; it covers its target like a landing does. */
 export const EvidenceExempt = Schema.Struct({
-  reason: Reason.check(Schema.isPattern(/^[^\n]*$/)).annotate({
-    description: "Why this landing needs no evidence, in one line.",
+  reason: Reason.check(Schema.isPattern(/^[^\r\n\u0085\u2028\u2029]*$/u)).annotate({
+    description: "One line.",
   }),
 });
 
@@ -154,11 +157,7 @@ const EvidenceChangeInput = EvidenceChangeInputFields.check(
 const EvidenceRecordInputFields = Schema.Struct({
   ...EvidenceRecord.fields,
   verifications: Schema.Array(EvidenceVerificationInput).check(Schema.isMaxLength(20)),
-  changes: Schema.optional(
-    Schema.Array(EvidenceChangeInput).check(Schema.isMaxLength(20)).annotate({
-      description: "At least one, unless exempt.",
-    }),
-  ),
+  changes: Schema.optional(Schema.Array(EvidenceChangeInput).check(Schema.isMaxLength(20))),
   threadId: Schema.optional(ThreadId),
   landedAt: Schema.optional(IsoDateTime),
 });

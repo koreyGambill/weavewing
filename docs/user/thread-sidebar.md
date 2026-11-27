@@ -162,16 +162,21 @@ thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#wai
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
-Agents record a landing with `evidence_record` after they merge work. For landed work
-with nothing to check, such as a typo fix, the agent records an exemption with a
-one-line reason instead; it covers those commits and shows in Evidence as **Exempt**.
+Agents record a landing with `evidence_record` after they merge work. A landing with
+nothing you or a reviewer could check records an exemption with a one-line reason
+instead; it covers its commits and shows in Evidence as **Exempt**. Agents never exempt
+work you asked to see or verify, and an exemption cannot replace a landing that already
+records changes.
 
-When an agent's turn ends after it ran a landing command (`git merge`, `git push` to
-the target branch, `gh pr merge`, `xwing env land` or `sparkwing run land`) and the
-target branch gained commits during that command that no landing or exemption covers,
-Weavewing sends the agent one message asking it to record evidence or an exemption.
-It asks once per landing and never about the turn that answers. Turn this off with
-**Ask agents to record landed work** in **Settings → Threads**.
+When an agent's turn ends after a landing command moved the project's target branch,
+and no landing or exemption covers the commits it added, Weavewing sends that agent one
+message asking it to record evidence or an exemption. The landing commands are
+`git merge`, `git push` to the project's remote and target branch, `xwing env land`, and
+`gh pr merge` when it updates your local copy of the branch; a merge made only on the
+forge is not seen. Each commit is asked about once, in one thread. Work landed during
+the turn that answers that message is not asked about again, so an answer can never
+start another round. Turn this off with **Ask agents to record landed work** in
+**Settings → Threads**.
 
 A change that has something only you can judge, such as captures, a waived review
 or one that asked for changes, a failed or skipped check, or a gap, shows a

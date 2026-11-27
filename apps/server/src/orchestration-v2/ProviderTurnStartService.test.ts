@@ -1484,6 +1484,7 @@ function layerStartEffectWorker(
         Layer.mock(ThreadManagementService.ThreadManagementService)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
         ServerSettings.layerTest(),
+        SqlitePersistence.layerMemory,
       ),
     ),
   );

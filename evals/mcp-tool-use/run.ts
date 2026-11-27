@@ -6,11 +6,13 @@
  * README.md for how to run it and add cases.
  */
 import { monitoringAdvisory } from "../../apps/server/src/monitoring/MonitoringDelivery.ts";
+import { evidencePromptText } from "../../apps/server/src/evidence/EvidencePromptService.ts";
 import {
-  EVIDENCE_PROMPT_EVENT,
-  evidencePromptText,
-} from "../../apps/server/src/evidence/EvidencePromptService.ts";
-import { ModelSelection, MonitoringFinding, MonitoringRule } from "@t3tools/contracts";
+  EVIDENCE_PROMPT_ORIGIN_EVENT,
+  ModelSelection,
+  MonitoringFinding,
+  MonitoringRule,
+} from "@t3tools/contracts";
 import { idleCheckinPrompt } from "../../apps/server/src/scheduledTasks/IdleCheckin.ts";
 import { automationRunPreface } from "../../apps/server/src/scheduledTasks/AutomationPrompt.ts";
 import { ScheduledTaskId } from "@t3tools/contracts";
@@ -3095,7 +3097,7 @@ const main = Effect.gen(function* () {
         : {
             ...item,
             prompt: renderTurnOriginText(
-              { kind: "system", event: EVIDENCE_PROMPT_EVENT },
+              { kind: "system", event: EVIDENCE_PROMPT_ORIGIN_EVENT },
               evidencePromptText(item.evidencePrompt.branch, item.evidencePrompt.shas),
               null,
             ),

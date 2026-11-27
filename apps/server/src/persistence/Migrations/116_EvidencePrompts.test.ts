@@ -18,18 +18,19 @@ layer("116_EvidencePrompts", (it) => {
 
       yield* runMigrations({ toMigrationInclusive: 116 });
       yield* Migration0116;
-      yield* sql`INSERT INTO evidence_prompts (thread_id, target_sha, run_id, message_id, prompted_at, outcome)
-        VALUES ('lead', 'abc', 'run-1', 'message-1', ${at}, 'sent')`;
-      const duplicate =
-        yield* sql`INSERT INTO evidence_prompts (thread_id, target_sha, run_id, message_id, prompted_at, outcome)
-        VALUES ('lead', 'abc', 'run-2', 'message-2', ${at}, 'sent')`.pipe(Effect.exit);
+      const claim = (threadId: string) =>
+        sql`INSERT INTO evidence_prompts (project_id, target_sha, thread_id, run_id, message_id, move, position, prompted_at, outcome)
+          VALUES ('project', 'abc', ${threadId}, 'run-1', 'message-1', 0, 0, ${at}, 'sent')`;
+      yield* claim("lead");
+      // One commit of a project is claimed once, whichever thread asks second.
+      const duplicate = yield* claim("child").pipe(Effect.exit);
       assert.strictEqual(duplicate._tag, "Failure");
       assert.deepStrictEqual(yield* sql`SELECT landing_id FROM evidence_landings`, [
         { landing_id: "kept" },
       ]);
       assert.deepStrictEqual(
-        yield* sql`SELECT thread_id, target_sha, run_id, outcome FROM evidence_prompts`,
-        [{ thread_id: "lead", target_sha: "abc", run_id: "run-1", outcome: "sent" }],
+        yield* sql`SELECT project_id, target_sha, thread_id, outcome FROM evidence_prompts`,
+        [{ project_id: "project", target_sha: "abc", thread_id: "lead", outcome: "sent" }],
       );
     }),
   );

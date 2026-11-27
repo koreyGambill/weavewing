@@ -427,6 +427,8 @@ it("the record contract refuses shapes the agent cannot send", () => {
     { ...valid, changes: [] },
     { ...exempt, changes: [change("a")] },
     { ...exempt, exempt: { reason: "first line\nsecond line" } },
+    { ...exempt, exempt: { reason: "first line\rsecond line" } },
+    { ...exempt, exempt: { reason: "first line\u2028second line" } },
     { ...exempt, exempt: { reason: " " } },
     { ...valid, id: "has space" },
     { ...valid, changes: [change("a", { commits: ["not-a-sha"] })] },
@@ -573,7 +575,7 @@ it.effect("flags merges on the target branch that no landing covers", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("finds the uncovered commits a branch gained while a window was open", () =>
+it.effect("reads the commits each landing command's own ref move added", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const evidence = yield* Service.EvidenceService;
@@ -585,51 +587,57 @@ it.effect("finds the uncovered commits a branch gained while a window was open",
     yield* git(["checkout", "-q", "main"]);
     yield* git(["merge", "-q", "--ff-only", "feature"], "2026-02-01T00:00:00Z");
     const at = (iso: string) => DateTime.toEpochMillis(DateTime.makeUnsafe(iso));
-    const landedWindow = { fromMs: at("2026-02-01T00:00:00Z"), toMs: at("2026-02-01T00:00:05Z") };
+    const merge = [{ ref: "branch" as const, subject: /^merge /u }];
+    const push = [{ ref: "remote" as const, subject: /^update by push/u }];
+    const window = (
+      from: string,
+      to: string,
+      moves: Service.LandingWindow["moves"] = merge,
+      dir: string | null = null,
+    ) => ({
+      fromMs: at(from),
+      toMs: at(to),
+      dir,
+      moves,
+    });
 
     const target = yield* evidence.landingTarget(project);
     assert.deepStrictEqual(target, { projectId: project, cwd: repo, branch: "main", remote: null });
-    const landed = (windows = [landedWindow]) =>
+    const landed = (windows: ReadonlyArray<Service.LandingWindow>, onto = target!) =>
       evidence
-        .uncoveredLanded({ target: target!, windows })
-        .pipe(Effect.map((commits) => commits.map(({ sha }) => sha)));
-    assert.deepStrictEqual(yield* landed(), [second, first]);
-    // Nothing moved in mid-January, and the branch was created, not moved, on January 1.
+        .landedMoves({ target: onto, windows })
+        .pipe(Effect.map((moves) => moves.map((move) => move.map(({ sha }) => sha))));
+    assert.deepStrictEqual(
+      yield* landed([window("2026-02-01T00:00:00.400Z", "2026-02-01T00:00:00.900Z")]),
+      [[second, first]],
+    );
+    assert.deepStrictEqual(
+      yield* landed([window("2026-02-01T00:00:00Z", "2026-02-01T00:00:01Z", merge, repo)]),
+      [[second, first]],
+    );
+    // Nothing moved in mid-January; the branch was created, not moved, on January 1; the move
+    // is not a push; and a directory outside the repository is not the project's.
     assert.deepStrictEqual(
       yield* landed([
-        { fromMs: at("2026-01-15T00:00:00Z"), toMs: at("2026-01-16T00:00:00Z") },
-        { fromMs: at("2025-12-31T00:00:00Z"), toMs: at("2026-01-02T00:00:00Z") },
+        window("2026-01-15T00:00:00Z", "2026-01-16T00:00:00Z"),
+        window("2025-12-31T00:00:00Z", "2026-01-02T00:00:00Z"),
+        window("2026-02-01T00:00:00Z", "2026-02-01T00:00:01Z", push),
+        window("2026-02-01T00:00:00Z", "2026-02-01T00:00:01Z", merge, "/"),
       ]),
       [],
     );
     // A branch created inside the window has no earlier value, so nothing counts as landed on it.
     yield* git(["branch", "release", "feature"], "2026-02-10T00:00:00Z");
     assert.deepStrictEqual(
-      yield* evidence.uncoveredLanded({
-        target: { ...target!, branch: "release" },
-        windows: [{ fromMs: at("2026-02-10T00:00:00Z"), toMs: at("2026-02-10T00:00:01Z") }],
-      }),
+      yield* landed(
+        [
+          window("2026-02-10T00:00:00Z", "2026-02-10T00:00:01Z", [
+            { ref: "branch", subject: /./u },
+          ]),
+        ],
+        { ...target!, branch: "release" },
+      ),
       [],
-    );
-
-    // A change's commits cover only themselves.
-    yield* evidence.record(
-      recordInput("partial", [change("a", { commits: [second.slice(0, 7)] })], {
-        target: { branch: "main", sha: base },
-      }),
-    );
-    assert.deepStrictEqual(yield* landed(), [first]);
-    // An exemption names the tip it left, which covers the whole batch it landed.
-    yield* evidence.record({
-      ...recordInput("docs-only", [], { target: { branch: "main", sha: second } }),
-      changes: [],
-      exempt: { reason: "Docs-only change." },
-    });
-    assert.deepStrictEqual(yield* landed(), []);
-    const listed = (yield* evidence.list({})).items.find((item) => item.id === "docs-only");
-    assert.deepStrictEqual(
-      { changeCount: listed?.changeCount, exempt: listed?.exempt },
-      { changeCount: 0, exempt: { reason: "Docs-only change." } },
     );
 
     // A push to the remote's branch moves the remote-tracking ref while local main stays put.
@@ -645,12 +653,96 @@ it.effect("finds the uncovered commits a branch gained while a window was open",
     const remoteTarget = yield* evidence.landingTarget(project);
     assert.deepStrictEqual(remoteTarget?.remote, "origin");
     assert.deepStrictEqual(
-      (yield* evidence.uncoveredLanded({
-        target: remoteTarget!,
-        windows: [{ fromMs: at("2026-03-02T00:00:00Z"), toMs: at("2026-03-02T00:00:01Z") }],
-      })).map(({ sha }) => sha),
-      [pushed],
+      yield* landed(
+        [window("2026-03-02T00:00:00Z", "2026-03-02T00:00:00.500Z", push)],
+        remoteTarget!,
+      ),
+      [[pushed]],
     );
+
+    // A change's commits cover only themselves; a target covers the older commits of its move.
+    const move = [
+      { sha: second, brought: [] },
+      { sha: first, brought: [] },
+    ];
+    yield* evidence.record(
+      recordInput("partial", [change("a", { commits: [second.slice(0, 7)] })], {
+        target: { branch: "main", sha: base },
+      }),
+    );
+    const covered = Effect.gen(function* () {
+      const recorded = yield* evidence.recordedRefs({ projectId: project });
+      return Service.coveringLandings(move, recorded).map((cover) => cover !== undefined);
+    });
+    assert.deepStrictEqual(yield* covered, [true, false]);
+    yield* evidence.record({
+      ...recordInput("docs-only", [], { target: { branch: "main", sha: second.slice(0, 9) } }),
+      changes: [],
+      exempt: { reason: "Docs-only change." },
+    });
+    assert.deepStrictEqual(yield* covered, [true, true]);
+    const listed = (yield* evidence.list({})).items.find((item) => item.id === "docs-only");
+    assert.deepStrictEqual(
+      { changeCount: listed?.changeCount, exempt: listed?.exempt },
+      { changeCount: 0, exempt: { reason: "Docs-only change." } },
+    );
+    // A merge is covered by a landing that names a commit it brought in.
+    assert.deepStrictEqual(
+      Service.coveringLandings(
+        [{ sha: "aaaaaaa1", brought: ["bbbbbbb2"] }],
+        [{ sha: "bbbbbbb", target: false, exempt: false }],
+      ).map((cover) => cover !== undefined),
+      [true],
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("refuses an exemption that would replace recorded changes, keeping their QA", () =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    yield* evidence.record(
+      recordInput("landed", [
+        change("pending"),
+        change("confirmed"),
+        change("problem"),
+        change("dismissed"),
+      ]),
+    );
+    yield* evidence.setQa({ landingId: "landed", changeId: "confirmed", state: "confirmed" });
+    yield* evidence.setQa({ landingId: "landed", changeId: "dismissed", state: "waived" });
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE evidence_qa SET state = 'problem', by = 'agent' WHERE change_id = 'problem'`;
+    const before = yield* sql`SELECT change_id, state FROM evidence_qa ORDER BY change_id`;
+    const error = yield* errorOf(
+      evidence.record({
+        ...recordInput("landed", []),
+        changes: [],
+        exempt: { reason: "Nothing to check." },
+      }),
+    );
+    assert.strictEqual(
+      error,
+      "Landing landed records changes, so an exemption cannot replace it; exempt under a new id.",
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT change_id, state FROM evidence_qa ORDER BY change_id`,
+      before,
+    );
+    assert.strictEqual((yield* evidence.get({ landingId: "landed" })).changes.length, 4);
+    // An exemption may replace an exemption.
+    yield* evidence.record({
+      ...recordInput("exempt", []),
+      changes: [],
+      exempt: { reason: "One." },
+    });
+    yield* evidence.record({
+      ...recordInput("exempt", []),
+      changes: [],
+      exempt: { reason: "Two." },
+    });
+    assert.deepStrictEqual((yield* evidence.get({ landingId: "exempt" })).exempt, {
+      reason: "Two.",
+    });
   }).pipe(Effect.provide(testLayer)),
 );
 
