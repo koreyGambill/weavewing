@@ -101,6 +101,7 @@ it.effect.each([
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
         ServerSettings.layerTest(),
+        SqlitePersistence.layerMemory,
         Layer.mock(ProviderTurnStart.ProviderTurnStartServiceV2)({
           start: () => Effect.sync(() => calls.push("start")).pipe(Effect.asVoid),
         }),

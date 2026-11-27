@@ -3,6 +3,7 @@ import * as NodeSqlite from "node:sqlite";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EVIDENCE_PROMPT_ORIGIN_EVENT,
   MessageId,
   EventId,
   EnvironmentId,
@@ -24,6 +25,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
@@ -2851,6 +2853,63 @@ it.effect("admits idle check-ins only for an idle main with at most one working 
           before.messages.length + 1,
         );
       }
+    }
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("refuses a done prompt to a thread archived or deleted after it was claimed", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    for (const state of ["live", "archived", "deleted"] as const) {
+      const threadId = ThreadId.make(`thread:evidence-prompt:${state}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create:${threadId}`),
+        threadId,
+        projectId: ProjectId.make("project:evidence-prompt"),
+        title: state,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const thread = (yield* projections.getThreadRecords(threadId, [])).thread;
+      if (state !== "live")
+        yield* projections.apply({
+          id: EventId.make(`metadata:${threadId}`),
+          type: "thread.metadata-updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...thread,
+            ...(state === "archived" ? { archivedAt: now } : { deletedAt: now }),
+          },
+        });
+      const sent = yield* orchestrator
+        .dispatch({
+          type: "message.dispatch",
+          origin: { kind: "system", event: EVIDENCE_PROMPT_ORIGIN_EVENT },
+          commandId: CommandId.make(`prompt:${threadId}`),
+          threadId,
+          messageId: MessageId.make(`prompt:${threadId}`),
+          text: "Work landed on main in your last turn.",
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "system",
+          creationSource: "server",
+        })
+        .pipe(Effect.exit);
+      assert.strictEqual(Exit.isSuccess(sent), state === "live", state);
+      assert.strictEqual(
+        (yield* projections.getThreadRecords(threadId, ["messages"])).messages.length,
+        state === "live" ? 1 : 0,
+        state,
+      );
     }
   }).pipe(Effect.provide(layerTest)),
 );

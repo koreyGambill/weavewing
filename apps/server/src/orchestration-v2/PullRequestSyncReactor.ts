@@ -85,9 +85,9 @@ const SHELL_WRAPPER = /^\s*(?:\S*\/)?(?:ba|z|da|k)?sh\s+-l?c\s+(?=["'])([\s\S]*)
 const SHELL_WORD_PIECE = /"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|\\([\s\S])|(\S)/gu;
 // Heredoc bodies, quoted strings and comments are text a command carries, not commands it runs.
 const HEREDOC_BODY =
-  /<<-?[ \t]*(['"]?)(\w+)\1[^\n]*\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/gu;
+  /<<-?[ \t]*(['"]?)([^\s'"<>;&|()]+)\1[^\n]*\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/gu;
 const QUOTED_OR_COMMENT = /'[^']*'|"(?:\\[\s\S]|[^"\\])*"|(?<=^|[\s;&|(])#[^\n]*/gmu;
-export const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/u;
+const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/u;
 // Commands that print other change requests' URLs, so output beside them proves nothing.
 const LISTS_CHANGE_REQUESTS =
   /\b(?:gh\s+(?:pr\s+(?:list|status)|search\s+prs|api)|glab\s+(?:mr\s+list|api))\b/u;
@@ -106,7 +106,7 @@ export function shellScript(input: string): string {
 }
 
 /** A script split at command separators that sit outside quotes. */
-function shellSegments(script: string): ReadonlyArray<string> {
+export function shellSegments(script: string): ReadonlyArray<string> {
   const segments: Array<string> = [];
   let current = "";
   let quote: string | null = null;
@@ -136,8 +136,11 @@ function shellSegments(script: string): ReadonlyArray<string> {
   return segments;
 }
 
+/** A script without its heredoc bodies, which are text a command reads, not commands it runs. */
+export const withoutHeredocBodies = (script: string) => script.replace(HEREDOC_BODY, "<<");
+
 /** The commands a script runs, without the text it carries. */
-export const shellCode = (script: string) =>
+const shellCode = (script: string) =>
   script.replace(HEREDOC_BODY, "<<").replace(QUOTED_OR_COMMENT, "''");
 
 const isPushCommand = (input: string) => PUSH_COMMAND.test(shellCode(shellScript(input)));

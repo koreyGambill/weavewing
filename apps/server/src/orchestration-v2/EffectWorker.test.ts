@@ -27,6 +27,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as SqlError from "effect/sql/SqlError";
+
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -177,6 +179,7 @@ function layerExecutorFor(input: {
         layerDependencies,
         Layer.mock(ThreadManagementService.ThreadManagementService)(input.threads ?? {}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+        SqlitePersistence.layerMemory,
         ServerSettings.layerTest(
           input.continueAfterRestart === true ? { continueThreadsAfterServerUpdate: true } : {},
         ),

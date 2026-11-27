@@ -219,7 +219,12 @@ const runEnded = (
   {
     status = "completed",
     ordinal = 1,
-  }: { status?: OrchestrationV2Run["status"]; ordinal?: number } = {},
+    inputMessageIds,
+  }: {
+    status?: OrchestrationV2Run["status"];
+    ordinal?: number;
+    inputMessageIds?: ReadonlyArray<string>;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const now = yield* DateTime.now;
@@ -231,6 +236,9 @@ const runEnded = (
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       providerThreadId: null,
       userMessageId: MessageId.make(userMessageId),
+      ...(inputMessageIds === undefined
+        ? {}
+        : { inputMessageIds: inputMessageIds.map((id) => MessageId.make(id)) }),
       rootNodeId: null,
       activeAttemptId: null,
       status,
@@ -538,6 +546,50 @@ it.effect("a review automation reviews the ended turn's thread and skips advisor
           yield* decode({ ...reviewInput, id: task.id, agent: { type: "turn" } }),
         );
         expect(turned.task.agent).toBeUndefined();
+      }),
+    );
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a turn that only answers a done prompt starts no run_ended task", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    const sql = yield* SqlClient.SqlClient;
+    for (const id of ["thread:a", "thread:b", "thread:c"]) yield* insertThread(id);
+    yield* withService(f, (service, queued) =>
+      Effect.gen(function* () {
+        yield* service.upsert(
+          yield* decode({
+            ...input,
+            schedule: { type: "event", event: "run_ended", projectId: "project:test" },
+          }),
+        );
+        for (const [id, threadId, origin] of [
+          ["message:prompt-a", "thread:a", { kind: "system", event: "evidence prompt" }],
+          ["message:prompt-b", "thread:b", { kind: "system", event: "evidence prompt" }],
+          ["message:user-b", "thread:b", { kind: "user" }],
+        ] as const)
+          yield* sql`INSERT INTO orchestration_v2_projection_messages (message_id, thread_id, role,
+            streaming, created_at, updated_at, payload_json)
+            VALUES (${id}, ${threadId}, 'user', 0, '1970-01-01T00:00:00.000Z',
+              '1970-01-01T00:00:00.000Z', ${JSON.stringify({ origin })})`;
+
+        yield* f.publish(yield* runEnded("run:answer", "thread:a", "message:prompt-a"));
+        // A turn that also took the user's message is new work.
+        yield* f.publish(
+          yield* runEnded("run:mixed", "thread:b", "message:prompt-b", {
+            inputMessageIds: ["message:prompt-b", "message:user-b"],
+          }),
+        );
+        yield* queued("thread:b", "run:run:mixed");
+        yield* f.tick;
+        yield* f.publish(yield* runEnded("run:c", "thread:c"));
+        yield* queued("thread:c", "run:run:c");
+        yield* f.tick;
+        const launches = yield* Ref.get(f.launches);
+        expect(launches).toHaveLength(2);
+        expect(launches[0]).toContain("thread:b");
+        expect(launches[1]).toContain("thread:c");
       }),
     );
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),

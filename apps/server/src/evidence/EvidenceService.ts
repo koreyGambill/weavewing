@@ -73,6 +73,15 @@ export interface MarkDiscussedInput {
   readonly changes: ReadonlyArray<{ readonly landingId: string; readonly changeId: string }>;
 }
 
+/** A landing command's run: when it ran, where, and the reflog subjects its own moves leave. */
+export interface LandingWindow {
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** An absolute directory the command named, or null for the thread's own checkout. */
+  readonly dir: string | null;
+  readonly moves: ReadonlyArray<{ readonly ref: "branch" | "remote"; readonly subject: RegExp }>;
+}
+
 export interface LandingTarget {
   readonly projectId: ProjectId;
   readonly cwd: string;
@@ -126,17 +135,23 @@ export class EvidenceService extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<LandingTarget | null, EvidenceError>;
     /**
-     * First-parent commits the target branch, or its remote-tracking branch, gained while any of
-     * `windows` was open, newest first, that no landing or exemption covers. A moved ref is read
-     * from its reflog, so a ref created or moved outside the windows contributes nothing.
+     * The first-parent commits (newest first) each window's own ref moves added to the target
+     * branch or its remote-tracking branch, one list per move. A move counts only when its reflog
+     * entry falls in the window, has a subject the window expects, and the window's directory is
+     * the project's repository.
      */
-    readonly uncoveredLanded: (input: {
+    readonly landedMoves: (input: {
       readonly target: LandingTarget;
-      readonly windows: ReadonlyArray<{ readonly fromMs: number; readonly toMs: number }>;
-    }) => Effect.Effect<
-      ReadonlyArray<{ readonly sha: string; readonly subject: string }>,
-      EvidenceError
-    >;
+      readonly windows: ReadonlyArray<LandingWindow>;
+    }) => Effect.Effect<ReadonlyArray<ReadonlyArray<LandedCommit>>, EvidenceError>;
+    /**
+     * Every commit a project's landings and exemptions name, recorded at or after `since`. It runs
+     * inside a caller's transaction.
+     */
+    readonly recordedRefs: (input: {
+      readonly projectId: ProjectId;
+      readonly since?: string;
+    }) => Effect.Effect<ReadonlyArray<RecordedRef>, EvidenceError>;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
     readonly coverage: (
       input: EvidenceCoverageInput,
@@ -247,13 +262,12 @@ interface CoverageRow {
 const COVERAGE_TTL_MS = 30_000;
 
 /**
- * First-parent merges (`log` lines: sha, parents, subject; newest first) whose sha, or a commit
- * they brought in, is not in `recorded`. `revs` is `rev-list --parents` over
- * `<oldest merge>^1..tip`; a merge brings in what its later parents reach that neither the
- * first-parent chain nor an older merge already claimed.
+ * First-parent commits (`log` lines: sha, parents, subject; newest first), each with the commits it
+ * brought in: what its later parents reach that neither the first-parent chain nor an older commit
+ * already claimed. `revs` is `rev-list --parents` over the same range.
  */
-function uncoveredMerges(tip: string, log: string, revs: string, recorded: ReadonlySet<string>) {
-  const merges = log.split("\n").flatMap((line) => {
+function firstParentBatches(tip: string, log: string, revs: string) {
+  const commits = log.split("\n").flatMap((line) => {
     const [sha, parents, subject = ""] = line.split("\x1f");
     return sha && parents ? [{ sha, parents: parents.split(" "), subject }] : [];
   });
@@ -265,19 +279,61 @@ function uncoveredMerges(tip: string, log: string, revs: string, recorded: Reado
   );
   const claimed = new Set<string>();
   for (let sha = tip; graph.has(sha); sha = graph.get(sha)![0] ?? "") claimed.add(sha);
-  const uncovered = [];
-  for (const { parents, ...merge } of merges.toReversed()) {
-    let covered = recorded.has(merge.sha);
+  const batches: Array<LandedCommit> = [];
+  for (const { parents, ...commit } of commits.toReversed()) {
+    const brought: string[] = [];
     const queue = parents.slice(1);
     for (let sha = queue.pop(); sha !== undefined; sha = queue.pop()) {
       if (claimed.has(sha) || !graph.has(sha)) continue;
       claimed.add(sha);
-      covered ||= recorded.has(sha);
+      brought.push(sha);
       queue.push(...graph.get(sha)!);
     }
-    if (!covered) uncovered.unshift(merge);
+    batches.unshift({ ...commit, brought });
   }
-  return uncovered;
+  return batches;
+}
+
+/** Commits from `firstParentBatches` over `--merges` whose sha, or a commit it brought in, is not in `recorded`. */
+function uncoveredMerges(tip: string, log: string, revs: string, recorded: ReadonlySet<string>) {
+  return firstParentBatches(tip, log, revs)
+    .filter(({ sha, brought }) => !recorded.has(sha) && !brought.some((sha) => recorded.has(sha)))
+    .map(({ sha, subject }) => ({ sha, subject }));
+}
+
+/** A first-parent commit a branch gained, with the commits a merge brought in. */
+export interface LandedCommit {
+  readonly sha: string;
+  readonly subject: string;
+  readonly brought: ReadonlyArray<string>;
+}
+
+/** A commit a landing names: its target, or one of its changes' commits. Possibly abbreviated. */
+export interface RecordedRef {
+  readonly sha: string;
+  readonly target: boolean;
+  readonly exempt: boolean;
+}
+
+/**
+ * The landing that covers each commit of one ref move (newest first), or undefined: one that
+ * names the commit or a commit it brought in, or one whose target names a newer commit of the same
+ * move, since a landing's target is the tip it left. An ambiguous abbreviation covers every match.
+ *
+ * @example coveringLandings([b, a], [{ sha: b.sha.slice(0, 7), target: true, exempt: true }]) // both
+ */
+export function coveringLandings(
+  move: ReadonlyArray<Pick<LandedCommit, "sha" | "brought">>,
+  recorded: ReadonlyArray<RecordedRef>,
+): Array<RecordedRef | undefined> {
+  const named = (sha: string) =>
+    recorded.filter((ref) => sha.toLowerCase().startsWith(ref.sha.toLowerCase()));
+  let tip: RecordedRef | undefined;
+  return move.map(({ sha, brought }) => {
+    const own = [...named(sha), ...brought.flatMap(named)];
+    tip ??= own.find((ref) => ref.target && named(sha).includes(ref));
+    return own[0] ?? tip;
+  });
 }
 
 const make = Effect.gen(function* () {
@@ -463,10 +519,17 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const [owner] = yield* sql<{
             readonly thread_id: string;
-          }>`SELECT thread_id FROM evidence_landings WHERE landing_id = ${input.id}`;
+            readonly changes: number;
+          }>`SELECT thread_id, json_array_length(record_json, '$.changes') AS changes
+            FROM evidence_landings WHERE landing_id = ${input.id}`;
           if (owner !== undefined && owner.thread_id !== input.threadId)
             return yield* invalid(
               `Landing id ${input.id} is already used by thread ${owner.thread_id}; pick another id.`,
+            );
+          // Replacing recorded changes with an exemption would erase their proof and the user's QA.
+          if (owner !== undefined && owner.changes > 0 && input.exempt !== undefined)
+            return yield* invalid(
+              `Landing ${input.id} records changes, so an exemption cannot replace it; exempt under a new id.`,
             );
           yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, qa_thread_id, project_id, landed_at, record_json, updated_at)
               VALUES (${input.id}, ${input.threadId}, ${qaThreadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
@@ -1043,81 +1106,82 @@ const make = Effect.gen(function* () {
       : { projectId, cwd, branch, remote };
   }, Effect.mapError(storage));
 
-  // Reflog lines are `sha<US>ref@{unix seconds}`, newest first.
-  const reflogMoves = (log: string, fromS: number, toS: number) => {
-    const entries = log.split("\n").flatMap((line) => {
-      const [sha, selector = ""] = line.split("\x1f");
+  // Reflog lines are `sha<US>ref@{unix seconds}<US>subject`, newest first.
+  const parseReflog = (log: string) =>
+    log.split("\n").flatMap((line) => {
+      const [sha, selector = "", subject = ""] = line.split("\x1f");
       const at = /@\{(\d+)\}$/u.exec(selector)?.[1];
-      return sha && at ? [{ sha, at: Number(at) }] : [];
+      return sha && at ? [{ sha, at: Number(at), subject }] : [];
     });
-    const inside = entries.findIndex((entry) => entry.at <= toS);
-    if (inside === -1 || entries[inside]!.at < fromS) return null;
-    const before = entries.find((entry, index) => index > inside && entry.at < fromS);
-    // A ref created inside the window has no earlier value to compare against.
-    return before === undefined || before.sha === entries[inside]!.sha
+
+  /**
+   * The move of a ref that entries in `[fromS, toS]` with a matching subject made: from the value
+   * before the oldest of them to the newest. A ref created inside the window has no earlier value.
+   */
+  const reflogMove = (
+    entries: ReturnType<typeof parseReflog>,
+    subject: RegExp,
+    fromS: number,
+    toS: number,
+  ) => {
+    const inside = entries.flatMap((entry, index) =>
+      entry.at >= fromS && entry.at <= toS && subject.test(entry.subject) ? [index] : [],
+    );
+    const newest = entries[inside[0] ?? -1];
+    const before = entries[(inside.at(-1) ?? -2) + 1];
+    return newest === undefined || before === undefined || before.sha === newest.sha
       ? null
-      : { from: before.sha, to: entries[inside]!.sha };
+      : { from: before.sha, to: newest.sha };
   };
 
-  const uncoveredLanded = Effect.fn("EvidenceService.uncoveredLanded")(function* (input: {
+  const landedMoves = Effect.fn("EvidenceService.landedMoves")(function* (input: {
     readonly target: LandingTarget;
-    readonly windows: ReadonlyArray<{ readonly fromMs: number; readonly toMs: number }>;
+    readonly windows: ReadonlyArray<LandingWindow>;
   }) {
-    const { cwd, branch, remote, projectId } = input.target;
-    const refs = [
-      `refs/heads/${branch}`,
-      ...(remote === null ? [] : [`refs/remotes/${remote}/${branch}`]),
-    ];
-    const ranges = new Map<string, { from: string; to: string }>();
-    for (const ref of refs) {
-      const log = yield* runGit(cwd, [
-        "reflog",
-        "show",
-        "-n",
-        "500",
-        "--date=unix",
-        "--format=%H%x1f%gd",
-        ref,
-        "--",
-      ]);
-      if (log === null) continue;
-      for (const { fromMs, toMs } of input.windows) {
-        const move = reflogMoves(log, Math.floor(fromMs / 1000), Math.ceil(toMs / 1000));
-        if (move !== null) ranges.set(`${move.from}..${move.to}`, move);
+    const { cwd, branch, remote } = input.target;
+    const refNames = {
+      branch: `refs/heads/${branch}`,
+      remote: remote === null ? null : `refs/remotes/${remote}/${branch}`,
+    };
+    const commonDir = (dir: string) =>
+      runGit(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).pipe(
+        Effect.map((out) => out?.trim() || null),
+      );
+    const home = yield* commonDir(cwd);
+    if (home === null) return [];
+    const logs = new Map<string, ReturnType<typeof parseReflog> | null>();
+    const ranges = new Map<string, { readonly from: string; readonly to: string }>();
+    for (const window of input.windows) {
+      if (window.dir !== null && (yield* commonDir(window.dir)) !== home) continue;
+      for (const move of window.moves) {
+        const ref = refNames[move.ref];
+        if (ref === null) continue;
+        if (!logs.has(ref)) {
+          const log = yield* runGit(cwd, [
+            "reflog",
+            "show",
+            "-n",
+            "500",
+            "--date=unix",
+            "--format=%H%x1f%gd%x1f%gs",
+            ref,
+            "--",
+          ]);
+          logs.set(ref, log === null ? null : parseReflog(log));
+        }
+        const entries = logs.get(ref);
+        if (!entries) continue;
+        // Reflog times are whole seconds: the seconds the command's start and end fall in.
+        const found = reflogMove(
+          entries,
+          move.subject,
+          Math.floor(window.fromMs / 1000),
+          Math.floor(window.toMs / 1000),
+        );
+        if (found !== null) ranges.set(`${found.from}..${found.to}`, found);
       }
     }
-    if (ranges.size === 0) return [];
-    const recordedRows = yield* sql<{
-      readonly sha: string;
-      readonly commits: string;
-    }>`SELECT json_extract(l.record_json, '$.target.sha') AS sha,
-          (SELECT json_group_array(c.value) FROM json_each(l.record_json, '$.changes') ch, json_each(ch.value, '$.commits') c) AS commits
-        FROM evidence_landings l WHERE l.project_id = ${projectId}`;
-    const asked = recordedRows
-      .flatMap((row) => [
-        { sha: row.sha, target: true },
-        ...(JSON.parse(row.commits) as string[]).map((sha) => ({ sha, target: false })),
-      ])
-      .filter(({ sha }) => /^[0-9a-f]{4,64}$/i.test(sha));
-    // Git resolves abbreviations; ambiguous or unknown ones print "missing" and cover nothing.
-    const checked =
-      asked.length === 0
-        ? ""
-        : yield* runGit(
-            cwd,
-            ["cat-file", "--batch-check"],
-            asked.map(({ sha }) => `${sha}^{commit}\n`).join(""),
-          );
-    if (checked === null) return [];
-    const recorded = new Set<string>();
-    const targets = new Set<string>();
-    checked.split("\n").forEach((line, index) => {
-      const [sha = "", type] = line.split(" ");
-      if (type !== "commit") return;
-      recorded.add(sha);
-      if (asked[index]?.target) targets.add(sha);
-    });
-    const uncovered = new Map<string, { readonly sha: string; readonly subject: string }>();
+    const moves: Array<ReadonlyArray<LandedCommit>> = [];
     for (const { from, to } of ranges.values()) {
       const log = yield* runGit(cwd, [
         "log",
@@ -1129,17 +1193,34 @@ const make = Effect.gen(function* () {
       ]);
       const revs = yield* runGit(cwd, ["rev-list", "--parents", to, `^${from}`, "--"]);
       if (log === null || revs === null || !log.trim()) continue;
-      const chain = log
-        .trim()
-        .split("\n")
-        .map((line) => line.split("\x1f")[0] ?? "");
-      // A landing names the branch tip it left, so its target covers the batch it landed.
-      const tip = chain.findIndex((sha) => targets.has(sha));
-      const batch = new Set(tip === -1 ? [] : chain.slice(tip));
-      for (const commit of uncoveredMerges(to, log.trim(), revs, recorded))
-        if (!batch.has(commit.sha)) uncovered.set(commit.sha, commit);
+      moves.push(firstParentBatches(to, log.trim(), revs));
     }
-    return [...uncovered.values()];
+    return moves;
+  }, Effect.mapError(storage));
+
+  const recordedRefs = Effect.fn("EvidenceService.recordedRefs")(function* (input: {
+    readonly projectId: ProjectId;
+    readonly since?: string;
+  }) {
+    const rows = yield* sql<{
+      readonly sha: string | null;
+      readonly commits: string;
+      readonly exempt: number;
+    }>`SELECT json_extract(l.record_json, '$.target.sha') AS sha,
+          (SELECT json_group_array(c.value) FROM json_each(l.record_json, '$.changes') ch, json_each(ch.value, '$.commits') c) AS commits,
+          json_extract(l.record_json, '$.exempt') IS NOT NULL AS exempt
+        FROM evidence_landings l WHERE l.project_id = ${input.projectId}
+          AND ${input.since === undefined ? sql`1 = 1` : sql`l.updated_at >= ${input.since}`}`;
+    return rows.flatMap((row): RecordedRef[] =>
+      [
+        { sha: row.sha ?? "", target: true, exempt: row.exempt === 1 },
+        ...(JSON.parse(row.commits) as string[]).map((sha) => ({
+          sha,
+          target: false,
+          exempt: row.exempt === 1,
+        })),
+      ].filter(({ sha }) => /^[0-9a-f]{4,64}$/iu.test(sha)),
+    );
   }, Effect.mapError(storage));
 
   const coverage = Effect.fn("EvidenceService.coverage")(function* (input: EvidenceCoverageInput) {
@@ -1171,7 +1252,8 @@ const make = Effect.gen(function* () {
     waitingQaThreads,
     qaThreadChanges: Stream.fromPubSub(qaThreads),
     landingTarget,
-    uncoveredLanded,
+    landedMoves,
+    recordedRefs,
     coverage,
     subscribe: () =>
       Stream.unwrap(

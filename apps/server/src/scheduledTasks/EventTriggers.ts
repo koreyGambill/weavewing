@@ -1,4 +1,5 @@
 import {
+  EVIDENCE_PROMPT_ORIGIN_EVENT,
   scheduledTaskEventMatchesProject,
   eventCooldownSeconds,
   isListedThreadLineage,
@@ -35,6 +36,8 @@ export interface EventFact {
   /** The thread's project and parent, when the event carries them. */
   readonly thread?: { readonly projectId: string; readonly parentId: string | null };
   readonly runUserMessageId?: string;
+  /** Every message the run took as input. */
+  readonly runInputMessageIds?: ReadonlyArray<string>;
   readonly runOrdinal?: number;
   readonly statusSource?: string;
   readonly toState?: string;
@@ -60,6 +63,7 @@ export function factFromDomainEvent(event: OrchestrationV2DomainEvent): EventFac
       key: `run:${run.id}`,
       threadId: run.threadId,
       runUserMessageId: run.userMessageId,
+      runInputMessageIds: run.inputMessageIds ?? [run.userMessageId],
       runOrdinal: run.ordinal,
       detail: `A turn ended (${run.status}) on thread ${run.threadId}.`,
       occurredAt,
@@ -209,6 +213,14 @@ export const recordEventFact = Effect.fn("ScheduledTaskEventTriggers.recordEvent
       WHERE thread_id = ${fact.threadId} AND ordinal > ${fact.runOrdinal}
         AND status IN ${sql.in([...ENDED_RUN])} LIMIT 1`;
     if (newer.length > 0) return [];
+  }
+  // A turn that only answers T3's done prompt is a follow-up of the turn that landed, not new work.
+  if (fact.runInputMessageIds !== undefined && fact.runInputMessageIds.length > 0) {
+    const [inputs] = yield* sql<{ readonly prompts: number; readonly total: number }>`
+      SELECT count(*) AS total,
+        coalesce(sum(json_extract(payload_json, '$.origin.event') = ${EVIDENCE_PROMPT_ORIGIN_EVENT}), 0) AS prompts
+      FROM orchestration_v2_projection_messages WHERE message_id IN ${sql.in(fact.runInputMessageIds)}`;
+    if (inputs !== undefined && inputs.total > 0 && inputs.prompts === inputs.total) return [];
   }
   const [origin] =
     fact.runUserMessageId === undefined

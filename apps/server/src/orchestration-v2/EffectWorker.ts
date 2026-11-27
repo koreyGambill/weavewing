@@ -11,6 +11,7 @@ import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
 
 import {
@@ -33,6 +34,7 @@ import * as MessageSummaryService from "./MessageSummaryService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
+import { deliverEvidencePrompt } from "../evidence/EvidencePromptDelivery.ts";
 
 const isProviderTurnControlError = Schema.is(ProviderTurnControlService.ProviderTurnControlError);
 
@@ -104,6 +106,7 @@ export const layerExecutor: Layer.Layer<
   | ThreadManagementService.ThreadManagementService
   | ProjectionStore.ProjectionStoreV2
   | ServerSettings.ServerSettingsService
+  | SqlClient.SqlClient
 > = Layer.effect(
   OrchestrationEffectExecutorV2,
   Effect.gen(function* () {
@@ -120,6 +123,12 @@ export const layerExecutor: Layer.Layer<
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const settings = yield* ServerSettings.ServerSettingsService;
+    const evidencePromptServices = yield* Effect.context<
+      | SqlClient.SqlClient
+      | ThreadManagementService.ThreadManagementService
+      | ServerSettings.ServerSettingsService
+      | ProjectionStore.ProjectionStoreV2
+    >();
     const startRun = (
       effect: EffectOutbox.OrchestrationEffectV2,
       runId: RunId,
@@ -707,6 +716,21 @@ export const layerExecutor: Layer.Layer<
               threadId: effect.threadId,
               messageId: effect.request.messageId,
             });
+          case "evidence-prompt.deliver":
+            return deliverEvidencePrompt(
+              { threadId: effect.threadId, commandId: effect.commandId, request: effect.request },
+              { willRetry },
+            ).pipe(
+              Effect.provide(evidencePromptServices),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            );
           case "delegated-tasks.stop":
             return threads
               .stopDelegatedTasks({

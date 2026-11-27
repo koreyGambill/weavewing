@@ -102,6 +102,22 @@ blocked work. It records the activity timestamp for stable
 sorting and detaches idle provider sessions. Clients render the persisted result; they do not
 derive settlement from their own clocks or PR caches.
 
+## Done prompt
+
+When a run completes, the [evidence prompt service](../../apps/server/src/evidence/EvidencePromptService.ts)
+checks whether a successful landing command in it moved the project's target branch. The
+proof is a reflog entry on the branch or its remote-tracking ref, with the subject that
+command leaves, inside the command's own start and end at the reflog's one-second
+resolution, in the project's own repository. In one transaction it re-reads which
+commits landings and exemptions cover, claims the uncovered ones in `evidence_prompts`
+(one row per project and commit, so no second thread is ever asked), and enqueues an
+`evidence-prompt.deliver` outbox effect. The effect worker sends the system message with
+ids fixed by the claim, so a retry after a restart adds nothing; the orchestrator refuses
+it for a thread archived or deleted since. The run that answers the prompt is never
+evaluated, and work landed inside it is deliberately never prompted for later, so an
+answer cannot start another round. Scheduled `run_ended` triggers also skip a run whose inputs are all done
+prompts.
+
 ## Waiting for asynchronous work
 
 Tests use [drainable workers](../../packages/shared/src/DrainableWorker.ts) to wait until both the
