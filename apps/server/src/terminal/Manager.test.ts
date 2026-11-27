@@ -58,6 +58,7 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as TerminalManager from "./Manager.ts";
 import { threadCheckoutGuard } from "./threadCheckoutGuard.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
 import { makePrepareTerminalLaunch } from "../workspace/restoreMissingWorktree.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { terminalOutputStream } from "./OutputProtocol.ts";
@@ -592,6 +593,61 @@ it.layer(
         assert.equal(ptyAdapter.spawnInputs.length, 1);
         assert.isTrue(yield* fs.exists(cwd));
       }),
+  );
+
+  it.effect("tells a terminal opening in a lost Xwing checkout which branch survives", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const { manager, ptyAdapter, baseDir } = yield* createManager();
+      const cwd = path.join(baseDir, "xwing", "envs", "3", "project");
+      const prepareLaunch = yield* makePrepareTerminalLaunch(() =>
+        Effect.succeed({
+          id: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+          worktreePath: cwd,
+          branch: "feature",
+          developmentEnvironment: { xwingEnvironmentId: "0123abcd", repositorySource: baseDir },
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ServerConfig.ServerConfig)({
+              worktreesDir: path.join(baseDir, "worktrees"),
+            } as ServerConfig.ServerConfig["Service"]),
+            ServerSettings.layerTest({ worktreeProvider: "xwing" }),
+            Layer.mock(ProjectService.ProjectService)({
+              getById: () => Effect.succeedSome({ workspaceRoot: baseDir } as never),
+            }),
+            Layer.mock(GitWorkflowService.GitWorkflowService)({}),
+            Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
+              recover: () =>
+                Effect.fail(
+                  new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError({
+                    xwingEnvironmentId: "0123abcd",
+                    branch: "feature",
+                    reason: "environment-missing",
+                  }),
+                ),
+            }),
+          ),
+        ),
+      );
+      const error = yield* prepareLaunch(openInput({ cwd, worktreePath: cwd })).pipe(
+        Effect.flatMap(({ input, recover }) =>
+          manager
+            .open(input)
+            .pipe(Effect.provideService(TerminalManager.TerminalCwdRecovery, recover)),
+        ),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "TerminalCwdNotFoundError");
+      assert.include(error.message, `Terminal folder does not exist: ${cwd}.`);
+      assert.include(
+        error.message,
+        "Its branch 'feature' remains in the project repository; the thread was not moved",
+      );
+      assert.equal(ptyAdapter.spawnInputs.length, 0);
+    }),
   );
 
   it.effect("spawns lazily and reuses running terminal per thread", () =>

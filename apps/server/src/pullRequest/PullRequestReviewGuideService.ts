@@ -35,7 +35,7 @@ import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
+import { readWorktreeProvider } from "../git/worktreeProvider.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { PATCH_RENDER_PREFIX_ARGS } from "../vcs/GitVcsDriverCore.ts";
@@ -470,7 +470,8 @@ const make = Effect.gen(function* () {
     if ((yield* readWorktreeProvider(serverSettings)) === "off") {
       return yield* new PullRequestOperationError({
         operation: "generateReviewGuide",
-        detail: `Review guides need a T3 worktree of the pull request. ${worktreeProviderRefusal("off")}`,
+        detail:
+          "Review guides read the pull request in a temporary checkout, which the `worktreeProvider` server setting (off) does not allow. To write a guide, choose T3 worktrees or Xwing environments in Settings → Worktrees.",
       });
     }
     // A supplied thread that cannot be read fails the request: guessing a model could send the
