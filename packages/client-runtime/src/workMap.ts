@@ -5,6 +5,8 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+
 import type { EnvironmentThreadShell } from "./state/models.ts";
 
 export type WorkMapStage =
@@ -293,10 +295,17 @@ const isFinished = (thread: WorkMapThread) =>
   thread.latestRun?.status === "completed" &&
   thread.pendingBackgroundTasks.length === 0;
 
+const pendingRequest = (thread: WorkMapThread) =>
+  thread.hasPendingApprovals || thread.hasPendingUserInput ? 1 : 0;
+
 // Waiting counts already include an open question; a pending approval adds one when nothing else does.
 const userWaitCount = (thread: WorkMapThread) =>
-  waitingTotal(thread.waitingCounts) ||
-  (thread.hasPendingApprovals || thread.hasPendingUserInput ? 1 : 0);
+  waitingTotal(thread.waitingCounts) || pendingRequest(thread);
+
+// QA is about a change that already landed, so only questions and tasks hold work in flight.
+const userBlockCount = (thread: WorkMapThread) =>
+  (thread.waitingCounts?.question ?? 0) + (thread.waitingCounts?.task ?? 0) ||
+  pendingRequest(thread);
 
 const userWaitSince = (thread: WorkMapThread) =>
   parse(thread.pendingUserInputAt) ??
@@ -311,7 +320,10 @@ const startedMs = (thread: WorkMapThread) =>
 const awaitedCommands = (thread: WorkMapThread) =>
   thread.pendingBackgroundTasks.filter(
     (task) =>
-      (task.kind === "command" || task.kind === "background_task") && task.awaited !== false,
+      (task.kind === "command" || task.kind === "background_task") &&
+      backgroundWorkHoldsCompletion([task], {
+        awaitUnmarked: thread.lineage.relationshipToParent === "subagent",
+      }),
   );
 
 /** When a run's awaited command last wrote output, if it has been silent for 15 minutes. */
@@ -341,11 +353,15 @@ interface ChangeGroup {
 }
 
 const sameChange = (change: ChangeGroup, thread: WorkMapThread) =>
-  (thread.branch !== null &&
-    change.branch === thread.branch &&
-    change.projectId === thread.projectId) ||
-  (thread.worktreePath !== null &&
-    change.implementers.some((other) => other.worktreePath === thread.worktreePath));
+  change.projectId === thread.projectId &&
+  (thread.branch !== null
+    ? change.branch === thread.branch
+    : thread.worktreePath !== null &&
+      change.implementers.some(
+        (other) =>
+          other.environmentId === thread.environmentId &&
+          other.worktreePath === thread.worktreePath,
+      ));
 
 type EnvState = (environmentId: EnvironmentId) => {
   readonly connected: boolean;
@@ -495,7 +511,7 @@ export function deriveWorkMap(input: WorkMapInput): WorkMap {
   const builtLanes: WorkMapLane[] = [];
   for (const lane of lanes.values()) {
     const laneItems = lane.changes.map((change) => deriveItem(lane, change, input, envState));
-    const laneState = deriveLaneState(lane, laneItems, input, envState);
+    const laneState = deriveLaneState(lane, input, envState);
     if (
       laneItems.length === 0 &&
       lane.children.length === 0 &&
@@ -626,7 +642,7 @@ function deriveItem(
     const failedAt = Math.max(...members.filter(isFailed).map((t) => completedMs(t) ?? 0));
     return make(stage, stageSource, "failing", null, failedAt);
   }
-  const askingUser = members.filter((thread) => userWaitCount(thread) > 0);
+  const askingUser = members.filter((thread) => userBlockCount(thread) > 0);
   if (askingUser.length > 0) {
     const since = Math.min(...askingUser.map(userWaitSince));
     return make(stage, stageSource, "waits_on_you", "you", since);
@@ -643,10 +659,8 @@ function deriveItem(
     return make(stage, stageSource, "blocked", declared.blockedOn, declaredReadyMs ?? lastMs);
   }
   if (stage === "ready_to_land") {
-    const readyMs = declaredReadyMs ?? Math.max(...members.map((t) => completedMs(t) ?? 0));
-    const late = input.now - readyMs > READY_TO_LAND_MS;
-    // Only a declared ready time says the change waits on landing rather than on its lead.
-    const state = !late ? "waiting" : declaredReadyMs !== null ? "blocked" : "stalled";
+    const readyMs = declaredReadyMs ?? lastMs;
+    const state = input.now - readyMs > READY_TO_LAND_MS ? "blocked" : "waiting";
     const reason = `waited ${formatWorkMapDuration(input.now - readyMs)} to land`;
     return make(stage, stageSource, state, "landing", readyMs, reason);
   }
@@ -661,28 +675,47 @@ function deriveItem(
   if (stage === "briefed") {
     return make(stage, stageSource, stalled ? "stalled" : "not_started", null, lastMs);
   }
-  const waitsOn = stage === "in_review" ? "reviewers" : null;
-  return make(stage, stageSource, stalled ? "stalled" : "waiting", waitsOn, lastMs, quiet);
+  if (stage === "in_review") {
+    // A review that finished after the implementer leaves the change with its lead, which has
+    // not declared it ready.
+    const reviewedMs = reviewedAfterMs(live);
+    if (reviewedMs !== null) {
+      const reason = `reviewed ${formatWorkMapDuration(input.now - reviewedMs)} ago`;
+      return make(stage, stageSource, stalled ? "stalled" : "waiting", null, reviewedMs, reason);
+    }
+    return make(stage, stageSource, stalled ? "stalled" : "waiting", "reviewers", lastMs, quiet);
+  }
+  return make(stage, stageSource, stalled ? "stalled" : "waiting", null, lastMs, quiet);
 }
 
+const reviewDoneMs = (reviewers: ReadonlyArray<WorkMapThread>) =>
+  Math.max(
+    0,
+    ...reviewers.map((t) => (t.latestRun?.status === "completed" ? (completedMs(t) ?? 0) : 0)),
+  );
+
+function reviewedAfterMs(change: Pick<ChangeGroup, "implementers" | "reviewers">): number | null {
+  const reviewed = reviewDoneMs(change.reviewers);
+  const implemented = Math.max(0, ...change.implementers.map((t) => completedMs(t) ?? 0));
+  return reviewed > 0 && reviewed >= implemented ? reviewed : null;
+}
+
+/** Ready to land, Batch and verify and their times come only from a declaration. */
 function inferStage(change: Pick<ChangeGroup, "implementers" | "reviewers">): WorkMapStage {
   const { implementers, reviewers } = change;
-  const reviewDoneMs = Math.max(0, ...reviewers.map((thread) => completedMs(thread) ?? 0));
+  const reviewedMs = reviewDoneMs(reviewers);
   if (implementers.some(isRunning)) {
     const restartedMs = Math.max(...implementers.map((thread) => startedMs(thread) ?? 0));
-    return reviewDoneMs > 0 && reviewDoneMs <= restartedMs ? "fixing" : "implementing";
+    return reviewedMs > 0 && reviewedMs <= restartedMs ? "fixing" : "implementing";
   }
   if (implementers.length === 0) return "in_review";
   if (!implementers.some(hasRun)) return "briefed";
-  if (!implementers.every(isFinished)) return reviewDoneMs > 0 ? "fixing" : "implementing";
-  const implDoneMs = Math.max(...implementers.map((thread) => completedMs(thread) ?? 0));
-  // Ready only once a review finished after the implementer's last run; until then it awaits one.
-  return reviewDoneMs >= implDoneMs ? "ready_to_land" : "in_review";
+  if (!implementers.every(isFinished)) return reviewedMs > 0 ? "fixing" : "implementing";
+  return "in_review";
 }
 
 function deriveLaneState(
   lane: LaneDraft,
-  items: ReadonlyArray<WorkMapItem>,
   input: WorkMapInput,
   envState: EnvState,
 ): Pick<WorkMapLane, "state" | "sinceMs" | "lastSeenAt"> {
@@ -692,7 +725,7 @@ function deriveLaneState(
     return { state: "unknown", sinceMs: null, lastSeenAt: env.lastSeenAt };
   }
   if (isRunning(lead)) return { state: "working", sinceMs: startedMs(lead), lastSeenAt: null };
-  if (userWaitCount(lead) > 0) {
+  if (userBlockCount(lead) > 0) {
     return { state: "waits_on_you", sinceMs: userWaitSince(lead), lastSeenAt: null };
   }
   if (isFailed(lead)) return { state: "failing", sinceMs: completedMs(lead), lastSeenAt: null };
@@ -701,7 +734,9 @@ function deriveLaneState(
     lead.runtime?.status === "waiting" ||
     lead.blockedOnThreadWait === true ||
     lead.pendingBackgroundTasks.some((task) => task.kind === "subagent");
-  const anyWorking = lane.children.some(isRunning);
+  const anyWorking = lane.children.some(
+    (child) => envState(child.environmentId).connected && isRunning(child),
+  );
   if (!leadWaits) {
     return { state: anyWorking ? "working" : "idle", sinceMs: null, lastSeenAt: null };
   }
@@ -726,6 +761,8 @@ function rankWaitingOnYou(
     if (item.waitsOn !== "you" || !item.blocked) continue;
     for (const ref of item.threads) held.set(threadKey(ref), (held.get(threadKey(ref)) ?? 0) + 1);
   }
+  const holds = (thread: WorkMapThread) =>
+    userBlockCount(thread) > 0 ? (held.get(threadKey(refOf(thread))) ?? 0) : 0;
   return threads
     .flatMap((thread) => {
       const count = userWaitCount(thread);
@@ -738,7 +775,7 @@ function rankWaitingOnYou(
           title: thread.title,
           count,
           sinceMs: Math.min(userWaitSince(thread), now),
-          holds: held.get(key) ?? 0,
+          holds: holds(thread),
         },
       ];
     })
