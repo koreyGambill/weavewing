@@ -13,6 +13,7 @@ import {
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
   SecretProviderId,
+  ServerConfigStreamEvent,
   ServerSettings,
   ServerSettingsPatch,
   UsageLimitSourceId,
@@ -252,6 +253,56 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       );
       assert.equal(persisted.responseStreamingMode, "turn");
       assert.deepEqual(persisted.projectSettingsOverrides, settings.projectSettingsOverrides);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("sends settings loaded from disk when saved layout views are unreadable", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const layout = {
+        id: "saved",
+        name: "Saved",
+        root: { kind: "group", areas: ["chat"] },
+      } as const;
+      yield* fs.writeFileString(
+        config.settingsPath,
+        JSON.stringify({
+          defaultTileLayoutId: layout.id,
+          projectSettingsFolded: true,
+          tileLayouts: [{ ...layout, viewRoot: { kind: "group", areas: ["chat", "future-area"] } }],
+        }),
+      );
+
+      const settingsWire = Schema.toCodecJson(ServerSettings);
+      const eventWire = Schema.toCodecJson(ServerConfigStreamEvent);
+      const forClient = (settings: ServerSettings) =>
+        ServerSettingsModule.redactServerSettingsForClient(settings, { secretReferences: true });
+      const loaded = yield* service.getSettings;
+      const response = yield* Schema.encodeEffect(settingsWire)(forClient(loaded));
+      const received = yield* Schema.decodeEffect(settingsWire)(response);
+      assert.deepEqual(received.tileLayouts, [layout]);
+      assert.isTrue(received.projectSettingsFolded);
+      assert.equal(received.defaultTileLayoutId, layout.id);
+
+      const changes = yield* service.subscribeChanges;
+      const updated = yield* service.updateSettings({ continueThreadsAfterServerUpdate: false });
+      const updateResponse = yield* Schema.encodeEffect(settingsWire)(forClient(updated));
+      const update = yield* Schema.decodeEffect(settingsWire)(updateResponse);
+      const broadcast = Option.getOrThrow(yield* Stream.runHead(changes));
+      const event = yield* Schema.encodeEffect(eventWire)({
+        version: 1,
+        type: "settingsUpdated",
+        payload: { settings: forClient(broadcast), scratchWorkspaceRoot: null },
+      });
+      assert.deepEqual(yield* Schema.decodeEffect(eventWire)(event), {
+        version: 1,
+        type: "settingsUpdated",
+        payload: { settings: update, scratchWorkspaceRoot: null },
+      });
+      assert.deepEqual(update.tileLayouts, [layout]);
+      assert.isFalse(update.continueThreadsAfterServerUpdate);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 

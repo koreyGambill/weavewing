@@ -31,6 +31,9 @@ const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
 const encodeClientSettings = Schema.encodeSync(ClientSettingsSchema);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
+const serverSettingsWireCodec = Schema.toCodecJson(ServerSettings);
+const encodeServerSettingsWire = Schema.encodeSync(serverSettingsWireCodec);
+const decodeServerSettingsWire = Schema.decodeUnknownSync(serverSettingsWireCodec);
 const encodeProviderInstanceEnvironment = Schema.encodeSync(ProviderInstanceEnvironment);
 const decodeProviderInstanceEnvironment = Schema.decodeSync(ProviderInstanceEnvironment);
 // The environment variable shape builds released before secret references decode.
@@ -558,7 +561,7 @@ describe("ServerSettings tile layouts", () => {
     { label: "an unknown area", viewRoot: { kind: "group", areas: ["chat", "future-area"] } },
     { label: "a malformed group", viewRoot: { kind: "group", areas: "chat" } },
     { label: "a non-object", viewRoot: "chat" },
-  ])("drops a viewRoot with $label and keeps the rest of the settings", ({ viewRoot }) => {
+  ])("omits a viewRoot with $label when sending settings to a client", ({ viewRoot }) => {
     const layout = { id: "fallback", name: "Fallback", root: { kind: "group", areas: ["chat"] } };
     const otherLayout = {
       id: "views",
@@ -575,8 +578,10 @@ describe("ServerSettings tile layouts", () => {
       ...settings,
       tileLayouts: [{ ...layout, viewRoot }, otherLayout],
     });
-    expect(decoded.tileLayouts[0]?.viewRoot).toBeUndefined();
-    expect(decoded).toEqual(decodeServerSettings(settings));
+    const wire = encodeServerSettingsWire(decoded);
+    expect(decoded.tileLayouts[0]).not.toHaveProperty("viewRoot");
+    expect(wire).toStrictEqual(encodeServerSettingsWire(decodeServerSettings(settings)));
+    expect(decodeServerSettingsWire(wire).tileLayouts).toStrictEqual([layout, otherLayout]);
   });
 });
 

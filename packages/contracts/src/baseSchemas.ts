@@ -45,18 +45,16 @@ export type DpopFailureReason = typeof DpopFailureReason.Type;
 export const IsoDateTime = Schema.String;
 export type IsoDateTime = typeof IsoDateTime.Type;
 
+/** Discards unreadable values so the containing object can still be sent as JSON. */
 export const ForwardCompatibleOptional = <Value extends Schema.Top>(value: Value) => {
   const decodeValue = Schema.decodeUnknownOption(value as never);
-  return Schema.optionalKey(
-    Schema.Unknown.pipe(
-      Schema.decodeTo(
-        Schema.UndefinedOr(value),
-        SchemaTransformation.transform<Value["Encoded"] | undefined, unknown>({
-          decode: (raw) =>
-            Option.isSome(decodeValue(raw)) ? (raw as Value["Encoded"]) : undefined,
-          encode: (raw) => raw,
-        }),
-      ),
+  return Schema.optionalKey(Schema.Unknown).pipe(
+    Schema.decodeTo(
+      Schema.optional(value),
+      SchemaTransformation.transformOptional<Value["Encoded"] | undefined, unknown>({
+        decode: Option.filter((raw): raw is Value["Encoded"] => Option.isSome(decodeValue(raw))),
+        encode: Option.filter((raw) => raw !== undefined),
+      }),
     ),
   );
 };
