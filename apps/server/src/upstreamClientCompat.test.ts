@@ -1,8 +1,6 @@
-// Decodes upstream clients' requests with the fork's schemas and the fork's mapped responses with
-// upstream's, bundled in upstreamClientCompat.snapshot.js at the commit on its first line. After each
-// upstream merge with a compatible Effect version, run upstream-contracts with --write and --ref
-// for the merged upstream commit, then commit the snapshot.
-// The rule, the checks and how to fix a failure: docs/internals/fork-wire-compatibility.md.
+// After an upstream merge that uses the fork's Effect version, run upstream-contracts with
+// --write and --ref <merged upstream commit>, then commit the refreshed snapshot.
+// See docs/internals/fork-wire-compatibility.md for the checks and how to fix a failure.
 import { describe, expect, it } from "@effect/vitest";
 import {
   ASSISTANT_TEXT_PARTS_CAPABILITY,
