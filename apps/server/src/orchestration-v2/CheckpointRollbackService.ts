@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -81,6 +82,9 @@ const isVcsProcessExitError = Schema.is(VcsProcessExitError);
 const isCheckpointRestoreError = Schema.is(CheckpointRestoreError);
 const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingError);
 const isWorktreeProviderDisabledError = Schema.is(WorktreeProviderDisabledError);
+const isCheckoutRecoveryError = Schema.is(
+  DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError,
+);
 
 /**
  * The message clients see when a rollback fails. Only a held Git index lock
@@ -88,7 +92,11 @@ const isWorktreeProviderDisabledError = Schema.is(WorktreeProviderDisabledError)
  * output, so they fall back to the generic message.
  */
 export function rollbackFailureClientMessage(error: CheckpointRollbackExecutionError): string {
-  if (isRuntimePolicyAboveCeilingError(error.cause) || isWorktreeProviderDisabledError(error.cause))
+  if (
+    isRuntimePolicyAboveCeilingError(error.cause) ||
+    isWorktreeProviderDisabledError(error.cause) ||
+    isCheckoutRecoveryError(error.cause)
+  )
     return error.cause.message;
   const restoreCause = isCheckpointRestoreError(error.cause) ? error.cause.cause : undefined;
   return isVcsProcessExitError(restoreCause) && restoreCause.detail === GIT_INDEX_LOCKED_DETAIL
@@ -143,6 +151,9 @@ export const layer: Layer.Layer<
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const checkouts = yield* Effect.serviceOption(
+      DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts,
+    );
 
     const execute = Effect.fn("orchestrationV2.checkpointRollback.execute")(function* (input: {
       readonly threadId: ThreadId;
@@ -240,9 +251,27 @@ export const layer: Layer.Layer<
           checkpointId: input.checkpointId,
         });
 
-      const { worktreePath, branch } = context.thread;
-      // Recreated only where the server would have made it, as turn start does. Xwing owns its checkouts.
-      if (worktreePath != null && branch != null && context.thread.developmentEnvironment == null) {
+      const { worktreePath, branch, developmentEnvironment } = context.thread;
+      // Xwing owns a bound thread's checkout, so only Xwing brings it back, as turn start does.
+      if (
+        worktreePath != null &&
+        developmentEnvironment != null &&
+        Option.isSome(checkouts) &&
+        !(yield* fileSystem.exists(worktreePath))
+      ) {
+        const project = yield* projects.get(context.thread.projectId);
+        if (Option.isSome(project)) {
+          yield* checkouts.value.recover({
+            xwingEnvironmentId: developmentEnvironment.xwingEnvironmentId,
+            repositorySource: developmentEnvironment.repositorySource,
+            workspaceRoot: project.value.workspaceRoot,
+            checkoutPath: worktreePath,
+            branch,
+          });
+        }
+      }
+      // Recreated only where the server would have made it, as turn start does.
+      if (worktreePath != null && branch != null && developmentEnvironment == null) {
         // A failed removal can leave the folder without its checkout; only a file restore replaces it.
         const leftover =
           restoreFiles &&
@@ -254,7 +283,11 @@ export const layer: Layer.Layer<
         ) {
           const project = yield* projects.get(context.thread.projectId);
           if (Option.isSome(project)) {
-            yield* refuseUnlessT3Worktrees(serverSettings, "checkpointRollback.recreateWorktree");
+            yield* refuseUnlessT3Worktrees(
+              serverSettings,
+              "checkpointRollback.recreateWorktree",
+              branch,
+            );
             const recreate = gitWorkflow.pruneWorktrees({ cwd: project.value.workspaceRoot }).pipe(
               Effect.andThen(
                 gitWorkflow.createWorktree({

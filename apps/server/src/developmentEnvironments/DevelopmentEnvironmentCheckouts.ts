@@ -20,8 +20,36 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { type WorktreeOwnership, WorktreeRemovalOwnership } from "../vcs/worktreeRemoval.ts";
 import * as XwingEnvironments from "../xwing/XwingEnvironments.ts";
+import * as XwingOperations from "../xwing/XwingOperations.ts";
 
 export { DevelopmentEnvironmentCheckoutUnavailableError };
+
+/**
+ * Xwing could not bring a bound thread's checkout back where the thread recorded it. The thread
+ * keeps its binding; the message names the branch its work survives on.
+ */
+export class DevelopmentEnvironmentCheckoutRecoveryError extends Schema.TaggedError<DevelopmentEnvironmentCheckoutRecoveryError>()(
+  "DevelopmentEnvironmentCheckoutRecoveryError",
+  {
+    xwingEnvironmentId: Schema.String,
+    branch: Schema.NullOr(Schema.String),
+    reason: Schema.Literals(["environment-missing", "checkout-moved", "not-restored"]),
+  },
+) {
+  override get message(): string {
+    const problem = {
+      "environment-missing": "Xwing no longer has this thread's development environment",
+      "checkout-moved":
+        "Xwing brought back this thread's development environment, but not at the thread's folder",
+      "not-restored": "Xwing could not bring back this thread's checkout",
+    }[this.reason];
+    const work =
+      this.branch === null
+        ? "The thread has no branch to continue from"
+        : `Its branch '${this.branch}' remains in the project repository`;
+    return `${problem}. ${work}; the thread was not moved to another checkout.`;
+  }
+}
 
 export interface ResolvedDevelopmentEnvironmentCheckout extends OrchestrationV2DevelopmentEnvironmentCheckout {
   /** The branch Xwing reports checked out, or null when it reports none. */
@@ -50,6 +78,18 @@ export class DevelopmentEnvironmentCheckouts extends Context.Service<
     readonly list: (input: {
       readonly workspaceRoot: string;
     }) => Effect.Effect<ReadonlyArray<DevelopmentEnvironmentCheckoutChoice>, XwingListError>;
+    /**
+     * Brings back a bound thread's missing checkout through Xwing: restores an archived
+     * environment, and re-adds the repository on `branch` when an active one lacks its checkout.
+     * Succeeds only when the checkout is back at `checkoutPath`; never moves the thread.
+     */
+    readonly recover: (input: {
+      readonly xwingEnvironmentId: string;
+      readonly repositorySource: string;
+      readonly workspaceRoot: string;
+      readonly checkoutPath: string;
+      readonly branch: string | null;
+    }) => Effect.Effect<void, DevelopmentEnvironmentCheckoutRecoveryError>;
   }
 >()("t3/developmentEnvironments/DevelopmentEnvironmentCheckouts") {}
 
@@ -91,6 +131,7 @@ export const makeGitCheckoutLookup = Effect.gen(function* () {
 
 const makeXwing = Effect.gen(function* () {
   const xwing = yield* XwingEnvironments.XwingEnvironments;
+  const operations = yield* XwingOperations.XwingOperations;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const { canonical, repositoryOf } = yield* makeGitCheckoutLookup;
@@ -223,7 +264,55 @@ const makeXwing = Effect.gen(function* () {
     } satisfies ResolvedDevelopmentEnvironmentCheckout;
   });
 
-  return DevelopmentEnvironmentCheckouts.of({ resolve, list });
+  const recover = Effect.fn("DevelopmentEnvironmentCheckouts.recover")(function* (input: {
+    readonly xwingEnvironmentId: string;
+    readonly repositorySource: string;
+    readonly workspaceRoot: string;
+    readonly checkoutPath: string;
+    readonly branch: string | null;
+  }) {
+    const refused = (reason: DevelopmentEnvironmentCheckoutRecoveryError["reason"]) =>
+      new DevelopmentEnvironmentCheckoutRecoveryError({
+        xwingEnvironmentId: input.xwingEnvironmentId,
+        branch: input.branch,
+        reason,
+      });
+    // Xwing's output stays in the server log, as for `resolve`.
+    const refusedFrom =
+      (reason: DevelopmentEnvironmentCheckoutRecoveryError["reason"]) => (cause: unknown) =>
+        Effect.logWarning("Xwing could not recover a development environment checkout", cause).pipe(
+          Effect.andThen(Effect.fail(refused(reason))),
+        );
+    const id = decodeXwingEnvironmentId(input.xwingEnvironmentId);
+    if (Option.isNone(id)) return yield* refused("environment-missing");
+    const environment = (yield* xwing.list().pipe(Effect.catch(refusedFrom("not-restored")))).find(
+      (entry) => entry.id === id.value,
+    );
+    if (environment === undefined) return yield* refused("environment-missing");
+    if (environment.status === "archived") {
+      yield* operations.restore({ id: id.value }).pipe(Effect.catch(refusedFrom("not-restored")));
+    }
+    const target = { xwingEnvironmentId: id.value, workspaceRoot: input.workspaceRoot };
+    const { branch } = input;
+    const recovered = yield* resolve(target).pipe(
+      Effect.catch((unavailable) =>
+        (unavailable.reason === "repository-missing" ||
+          unavailable.reason === "checkout-missing") &&
+        branch !== null
+          ? operations
+              .attachRepository({ id: id.value, sourcePath: input.repositorySource, branch })
+              .pipe(Effect.andThen(resolve(target)), Effect.catch(refusedFrom("not-restored")))
+          : refusedFrom(
+              unavailable.reason === "environment-missing" ? "environment-missing" : "not-restored",
+            )(unavailable),
+      ),
+    );
+    if (path.resolve(recovered.checkoutPath) !== path.resolve(input.checkoutPath)) {
+      return yield* refused("checkout-moved");
+    }
+  });
+
+  return DevelopmentEnvironmentCheckouts.of({ resolve, list, recover });
 });
 
 /** Resolves checkouts through this machine's Xwing CLI. */

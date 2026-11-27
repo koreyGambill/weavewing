@@ -86,6 +86,7 @@ import * as RunExecutionService from "./RunExecutionService.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as Discovery from "../developmentEnvironments/DevelopmentEnvironmentDiscovery.ts";
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
 import * as ManagedFolders from "../project/ManagedProjectFolders.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 
@@ -119,6 +120,7 @@ function startWithMissingWorktree(
   },
   xwingEnvironmentId?: string,
   worktreeProvider: "t3" | "xwing" | "off" = "t3",
+  recover?: DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts["Service"]["recover"],
 ) {
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
   const runId = RunId.make("run_provider_turn_start_projection_failure");
@@ -249,6 +251,11 @@ function startWithMissingWorktree(
         }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({}),
+        recover === undefined
+          ? Layer.empty
+          : Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
+              recover,
+            }),
       ),
     ),
   );
@@ -348,11 +355,60 @@ it.each(["xwing", "off"] as const)(
       _tag: "ProviderTurnStartError",
       cause: { _tag: "WorktreeProviderDisabledError", worktreeProvider },
     });
-    expect((failure.cause as Error).message).toContain(
-      `\`worktreeProvider\` server setting (${worktreeProvider})`,
-    );
+    const message = (failure.cause as Error).message;
+    expect(message).toContain(`\`worktreeProvider\` server setting (${worktreeProvider})`);
+    // Under Xwing the refusal names the surviving branch and how to continue it in an environment.
+    expect(message.includes("branch: 'feature/restore'")).toBe(worktreeProvider === "xwing");
     expect(harness.pruneWorktrees).not.toHaveBeenCalled();
     expect(harness.createWorktree).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { worktreeProvider: "t3", recovered: true },
+  { worktreeProvider: "xwing", recovered: true },
+  { worktreeProvider: "xwing", recovered: false },
+  { worktreeProvider: "off", recovered: true },
+] as const)(
+  "brings back a bound thread's missing checkout through Xwing under $worktreeProvider (recovered: $recovered)",
+  async ({ worktreeProvider, recovered }) => {
+    const worktreePath = "/tmp/xwing/envs/3/provider-turn-start-project";
+    const recover = vi.fn(() =>
+      recovered
+        ? Effect.void
+        : Effect.fail(
+            new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError({
+              xwingEnvironmentId: "0123abcd",
+              branch: "feature/restore",
+              reason: "environment-missing",
+            }),
+          ),
+    );
+    const harness = startWithMissingWorktree(
+      worktreePath,
+      undefined,
+      "0123abcd",
+      worktreeProvider,
+      recover,
+    );
+    const failure = await harness.start;
+    expect(recover).toHaveBeenCalledWith({
+      xwingEnvironmentId: "0123abcd",
+      repositorySource: "/tmp/provider-turn-start-project",
+      workspaceRoot: "/tmp/provider-turn-start-project",
+      checkoutPath: worktreePath,
+      branch: "feature/restore",
+    });
+    expect(harness.createWorktree).not.toHaveBeenCalled();
+    // A recovered checkout lets the start go on to its next read, which this harness fails.
+    expect(failure.cause).toMatchObject({
+      _tag: recovered ? "ProjectionStoreReadError" : "DevelopmentEnvironmentCheckoutRecoveryError",
+    });
+    if (!recovered) {
+      expect((failure.cause as Error).message).toContain(
+        "Its branch 'feature/restore' remains in the project repository; the thread was not moved",
+      );
+    }
   },
 );
 

@@ -624,7 +624,14 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
   }),
 );
 
+const layerXwingOperations = XwingOperations.layer.pipe(Layer.provide(ProcessRunner.layer));
+// Turn start, rollback and terminal recovery bring back a bound thread's checkout through it.
+const layerDevelopmentEnvironmentCheckouts = DevelopmentEnvironmentCheckouts.layerXwing.pipe(
+  Layer.provide(layerXwingOperations),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  Layer.provide(layerDevelopmentEnvironmentCheckouts),
   Layer.provide(UsageLimitSources.layerResetFallback),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
@@ -639,7 +646,6 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   ),
 );
 
-const layerXwingOperations = XwingOperations.layer.pipe(Layer.provide(ProcessRunner.layer));
 // One instance: binding and cleanup serialize on its per-environment lock.
 const layerDevelopmentEnvironmentHolds = DevelopmentEnvironmentHolds.layer.pipe(
   Layer.provide(layerXwingOperations),
@@ -648,12 +654,13 @@ const layerDevelopmentEnvironmentHolds = DevelopmentEnvironmentHolds.layer.pipe(
 const layerOrchestrationApplication = Layer.mergeAll(
   CheckpointDiffQuery.layer,
   NativeChildWorkQuery.layer,
+  layerDevelopmentEnvironmentCheckouts,
   // The same layer the MCP worktree toolkit provides, so both share one per-thread handoff guard.
   WorktreeMcpService.layer,
   DevelopmentEnvironments.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        DevelopmentEnvironmentCheckouts.layerXwing,
+        layerDevelopmentEnvironmentCheckouts,
         WorkspacePaths.layer,
         RuntimeLayer.layerDevelopmentEnvironmentDiscoveryProvided,
         ProjectionStoreV2.layer,

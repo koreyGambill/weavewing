@@ -12,10 +12,12 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as XwingEnvironments from "../xwing/XwingEnvironments.ts";
+import * as XwingOperations from "../xwing/XwingOperations.ts";
 import * as DevelopmentEnvironmentCheckouts from "./DevelopmentEnvironmentCheckouts.ts";
 
 const environmentId = XwingEnvironmentId.make("0123abcd");
@@ -62,6 +64,7 @@ const resolveWith = (
     Effect.provide(
       DevelopmentEnvironmentCheckouts.layerXwing.pipe(
         Layer.provide(Layer.mock(XwingEnvironments.XwingEnvironments)({ inspect })),
+        Layer.provide(Layer.mock(XwingOperations.XwingOperations)({})),
       ),
     ),
   );
@@ -261,6 +264,7 @@ it.effect("lists active present checkouts of the project's repository from the c
                 inspect: () => Effect.die("listing never inspects an environment"),
               }),
             ),
+            Layer.provide(Layer.mock(XwingOperations.XwingOperations)({})),
           ),
         ),
       );
@@ -290,6 +294,158 @@ it.effect("lists active present checkouts of the project's repository from the c
     Effect.provide(
       GitVcsDriver.layer.pipe(
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "xwing-list-" })),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
+    ),
+  ),
+);
+
+it.effect.each([
+  {
+    label: "restores an archived environment",
+    status: "archived",
+    attached: true,
+    calls: ["restore"],
+  },
+  {
+    label: "re-adds the thread's branch to an active environment missing the repository",
+    status: "active",
+    attached: false,
+    calls: ["attach repo feature/env"],
+  },
+  {
+    label: "refuses when Xwing leaves a listed checkout missing",
+    status: "active",
+    attached: true,
+    calls: ["attach repo feature/env"],
+    refused: "not-restored",
+  },
+  {
+    label: "refuses a deleted environment without touching Xwing",
+    status: "absent",
+    attached: true,
+    calls: [],
+    refused: "environment-missing",
+  },
+  {
+    label: "refuses a checkout Xwing restores at another path",
+    status: "archived",
+    attached: true,
+    restoredRoot: "envs/13",
+    calls: ["restore"],
+    refused: "checkout-moved",
+  },
+  {
+    label: "refuses an active environment it cannot re-add without a branch",
+    status: "active",
+    attached: false,
+    branch: null,
+    calls: [],
+    refused: "not-restored",
+  },
+] as const)("recover $label", (row) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const root = yield* fileSystem.realPath(
+      yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-xwing-recover-" }),
+    );
+    const project = `${root}/project`;
+    yield* fileSystem.makeDirectory(project);
+    const checkoutPath = `${root}/envs/12/repo`;
+    const branch = "branch" in row ? row.branch : "feature/env";
+    const calls: Array<string> = [];
+    let status: "active" | "archived" | "absent" = row.status;
+    let repositories = row.attached ? [{ path: checkoutPath, branch: "feature/env" }] : [];
+    const restoredPath = "restoredRoot" in row ? `${root}/${row.restoredRoot}/repo` : checkoutPath;
+    const summary = (): XwingEnvironmentSummary => ({
+      id: environmentId,
+      number: 12,
+      name: "checkout work",
+      status: status === "archived" ? "archived" : "active",
+      rootPath: `${root}/envs/12`,
+      createdAt: "2026-11-07T00:00:00Z",
+      updatedAt: "2026-11-07T00:00:00Z",
+      repositories: repositories.map((entry) => ({
+        name: "repo",
+        sourcePath: project,
+        path: entry.path,
+        branch: entry.branch,
+        present: false,
+      })),
+    });
+    const recover = Effect.flatMap(
+      DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts,
+      (checkouts) =>
+        checkouts.recover({
+          xwingEnvironmentId: environmentId,
+          repositorySource: project,
+          workspaceRoot: project,
+          checkoutPath,
+          branch,
+        }),
+    ).pipe(
+      Effect.provide(
+        DevelopmentEnvironmentCheckouts.layerXwing.pipe(
+          Layer.provide(
+            Layer.mock(XwingEnvironments.XwingEnvironments)({
+              list: () => Effect.succeed(status === "absent" ? [] : [summary()]),
+              inspect: () =>
+                status === "active"
+                  ? Effect.succeed(
+                      environment(repositories.map((entry) => repository(project, entry.path))),
+                    )
+                  : Effect.fail(new XwingEnvironmentNotFoundError({ environmentId })),
+            }),
+          ),
+          Layer.provide(
+            Layer.mock(XwingOperations.XwingOperations)({
+              restore: () =>
+                Effect.gen(function* () {
+                  calls.push("restore");
+                  status = "active";
+                  repositories = repositories.map((entry) => ({ ...entry, path: restoredPath }));
+                  yield* fileSystem
+                    .makeDirectory(restoredPath, { recursive: true })
+                    .pipe(Effect.orDie);
+                  return { environmentId, outcome: "restored", rootPath: `${root}/envs/12` };
+                }),
+              attachRepository: (input) =>
+                Effect.gen(function* () {
+                  calls.push(
+                    `attach ${input.sourcePath === project ? "repo" : input.sourcePath} ${input.branch}`,
+                  );
+                  // Xwing refreshes a repository it already lists and leaves a deleted worktree missing.
+                  if (repositories.length > 0) return {} as never;
+                  repositories = [{ path: checkoutPath, branch: input.branch }];
+                  yield* fileSystem
+                    .makeDirectory(checkoutPath, { recursive: true })
+                    .pipe(Effect.orDie);
+                  return {} as never;
+                }),
+            }),
+          ),
+        ),
+      ),
+    );
+
+    const result = yield* Effect.result(recover);
+    assert.deepEqual(calls, [...row.calls]);
+    if (!("refused" in row)) {
+      assert.isTrue(Result.isSuccess(result));
+      assert.isTrue(yield* fileSystem.exists(checkoutPath));
+      return;
+    }
+    assert.isTrue(Result.isFailure(result));
+    if (Result.isSuccess(result)) return;
+    const failure = result.failure;
+    assert.equal(failure.reason, row.refused);
+    assert.include(failure.message, "the thread was not moved");
+    if (branch !== null) assert.include(failure.message, `'${branch}'`);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      GitVcsDriver.layer.pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "xwing-recover-" })),
         Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
     ),
