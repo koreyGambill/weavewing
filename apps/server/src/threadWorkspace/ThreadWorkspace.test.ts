@@ -349,6 +349,32 @@ it.effect("keeps tracking idempotent and preserves a user edit and a sent follow
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("keeps an answered ask settled until its queued discussion is delivered", () =>
+  Effect.gen(function* () {
+    const { service } = yield* harness();
+    yield* service.recordTrackedMessages(threadId, [trackedMessage("first")], true);
+    yield* service.answerAsk({ threadId, id: "A1", text: "Reconnect.", runId: null });
+    const followUp = {
+      ...trackedMessage("follow-up"),
+      context: { version: 1 as const, records: [], discussAnswers: ["A1"] },
+    };
+    yield* service.recordTrackedMessages(threadId, [followUp], false);
+    const edited = { ...followUp, context: { ...followUp.context, discussAnswers: [] } };
+    yield* service.recordTrackedMessages(threadId, [edited], false, true);
+    yield* service.recordTrackedMessages(threadId, [edited], true);
+    expect((yield* service.get({ threadId })).asks?.[0]).toMatchObject({
+      state: "answered",
+      followUps: [],
+    });
+    const nextFollowUp = { ...followUp, id: MessageId.make("next-follow-up") };
+    yield* service.recordTrackedMessages(threadId, [nextFollowUp], true);
+    expect((yield* service.get({ threadId })).asks?.[0]).toMatchObject({
+      state: "owed",
+      followUps: [{ messageId: nextFollowUp.id }],
+    });
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect(
   "refuses duplicate and foreign marks and directs a child to give its result to its lead",
   () =>

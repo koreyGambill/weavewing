@@ -920,7 +920,7 @@ const make = Effect.gen(function* () {
       const tracking = message.context?.trackedAsk;
       const discussedIds = message.context?.discussAnswers;
       const at = DateTime.formatIso(message.createdAt);
-      if (discussedIds?.length) {
+      if (delivered && discussedIds?.length) {
         const asks = (next.asks ?? []).map((ask): TrackedAsk => {
           if (
             !discussedIds.includes(ask.id) ||
