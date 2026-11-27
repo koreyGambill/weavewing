@@ -43,6 +43,35 @@ describe("WebSocket RPC contracts", () => {
         }),
       ),
     ).toBe(true);
+    const delegation = {
+      type: "delegated_task.request",
+      commandId: "forged-delegated-checkout",
+      parentThreadId: "thread-1",
+      parentRunId: "run-1",
+      parentNodeId: "node-1",
+      task: "Work in a forged checkout",
+      modelSelection: { instanceId: "codex", model: "test" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      workspaceStrategy: { type: "existing_worktree", worktreePath: "/etc" },
+      createdBy: "agent",
+      creationSource: "mcp",
+    };
+    expect(Exit.isSuccess(decode(delegation))).toBe(true);
+    expect(
+      Exit.isFailure(
+        decode({
+          ...delegation,
+          developmentEnvironment: {
+            xwingEnvironmentId: "0123abcd",
+            repositorySource: "/repo",
+            checkoutPath: "/etc",
+            number: 1,
+            name: "forged",
+          },
+        }),
+      ),
+    ).toBe(true);
     expect(
       Exit.isSuccess(
         decode({

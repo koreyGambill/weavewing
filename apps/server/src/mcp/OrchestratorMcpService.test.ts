@@ -40,6 +40,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  ThreadWorkspaceError,
   XwingEnvironmentId,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
@@ -2804,7 +2805,16 @@ describe("OrchestratorMcpService provider resolution", () => {
       reused: true,
     },
     { case: "an ambiguous failure keeps the environment and its hold", outcome: "ambiguous" },
+    {
+      case: "a parent that began stopping during preparation removes the environment",
+      outcome: "parent-stopping",
+    },
+    {
+      case: "an unreadable receipt keeps the environment and its hold",
+      outcome: "receipt-unreadable",
+    },
     { case: "an unusable checkout removes the environment", outcome: "no-checkout" },
+    { case: "an unreadable child preamble makes no environment", outcome: "no-preamble" },
   ] as const)(
     "isolates a child in an Xwing environment under worktreeProvider xwing: $case",
     ({ outcome, ...options }) =>
@@ -2870,6 +2880,11 @@ describe("OrchestratorMcpService provider resolution", () => {
           NodeCrypto.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             hasReceipt: () => Effect.succeed(outcome === "retried"),
+            // The decider's refusal of a stopping parent records a rejected receipt.
+            commandAccepted: (commandId) =>
+              outcome === "receipt-unreadable"
+                ? Effect.fail(new CommandReceiptStore.CommandReceiptStoreReadError({ commandId }))
+                : Effect.succeed(outcome !== "parent-stopping"),
             getThreadRecords: (threadId) =>
               Effect.succeed(
                 threadId === parentThreadId
@@ -2884,7 +2899,13 @@ describe("OrchestratorMcpService provider resolution", () => {
                     commandId: command.commandId,
                     commandType: command.type,
                   });
-                if (outcome === "ambiguous")
+                if (outcome === "parent-stopping")
+                  return yield* new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: `Parent run ${parentRunId} is stopping.`,
+                  });
+                if (outcome === "ambiguous" || outcome === "receipt-unreadable")
                   return yield* new OrchestratorDispatchError({
                     commandId: command.commandId,
                     commandType: command.type,
@@ -2946,6 +2967,11 @@ describe("OrchestratorMcpService provider resolution", () => {
             }
             return;
           }
+          if (outcome === "no-preamble") {
+            assert.deepEqual(prepared, []);
+            assert.deepEqual(commands, []);
+            return;
+          }
           const launchKey = (prepared[0] as { readonly launchKey: string } | undefined)?.launchKey;
           assert.deepEqual(prepared, [
             {
@@ -2981,13 +3007,27 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.deepEqual(holds, [DevelopmentEnvironmentHolds.holdKey(hold)]);
           assert.deepEqual(
             discarded,
-            outcome === "rejected" && options.reused !== true ? [{ xwingEnvironmentId, hold }] : [],
+            (outcome === "rejected" && options.reused !== true) || outcome === "parent-stopping"
+              ? [{ xwingEnvironmentId, hold }]
+              : [],
           );
         }).pipe(
           Effect.provide(
             OrchestratorMcpService.layer.pipe(
               Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
-              Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
+              Layer.provide(
+                Layer.merge(
+                  outcome === "no-preamble"
+                    ? Layer.mock(ThreadWorkspace.ThreadWorkspace)({
+                        get: () =>
+                          Effect.fail(
+                            new ThreadWorkspaceError({ code: "storage", message: "unreadable" }),
+                          ),
+                      })
+                    : ThreadWorkspace.layerTest,
+                  ThreadMarks.layerTest,
+                ),
+              ),
               Layer.provide(layerEnvironments),
               Layer.provide(layerDependencies),
             ),

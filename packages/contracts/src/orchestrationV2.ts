@@ -5125,12 +5125,15 @@ export const OrchestrationV2RpcSchemas = {
   },
   dispatchCommand: {
     input: OrchestrationV2Command.check(
-      Schema.makeFilter(
-        (command) =>
-          command.type !== "thread.metadata.update" ||
-          (command.linkDevelopmentEnvironments === undefined &&
-            command.unlinkDevelopmentEnvironmentId === undefined) ||
-          "Environment discovery links are set by the server.",
+      Schema.makeFilter((command) =>
+        command.type === "thread.metadata.update" &&
+        (command.linkDevelopmentEnvironments !== undefined ||
+          command.unlinkDevelopmentEnvironmentId !== undefined)
+          ? "Environment discovery links are set by the server."
+          : command.type === "delegated_task.request" &&
+              command.developmentEnvironment !== undefined
+            ? "A delegated task's Xwing checkout is set by the server."
+            : true,
       ),
     ),
     output: OrchestrationV2DispatchCommandResult,

@@ -1036,6 +1036,10 @@ it.effect("a run Stop reached cannot delegate or start a watch, even after it en
     });
 
     assert.isTrue(Exit.isFailure(yield* Effect.exit(delegate(threadId, "late task"))));
+    // The refusal commits nothing, so a caller can discard what it prepared for the child.
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    assert.isFalse(yield* threads.commandAccepted(CommandId.make("delegate:late task")));
+    assert.isTrue(yield* threads.commandAccepted(CommandId.make("cancel-queued")));
     assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 5))));
 
     yield* projections.apply({
