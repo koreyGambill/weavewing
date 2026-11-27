@@ -92,16 +92,36 @@ export const SUITES = {
 export type SuiteName = keyof typeof SUITES;
 
 /** Runs web, server and packages one after another, then fails naming every suite that failed. */
-export async function everySuite(ctx: Context, co: Checkout): Promise<Record<SuiteName, "passed" | "failed">> {
-  const results = {} as Record<SuiteName, "passed" | "failed">;
+/** passed or failed once vitest reported its test files; not-run when it never got that far. */
+export type SuiteResult = "passed" | "failed" | "not-run";
+
+// Vitest prints this summary only after it has collected and run test files.
+const TEST_FILES_SUMMARY = /^\s*Test Files\s+\d/m;
+
+/** Whether a suite's logs in dir show that vitest ran test files: every one of its logs has the summary. */
+export function suiteRan(dir: string, suite: SuiteName): boolean {
+  const names = NodeFS.existsSync(dir) ? NodeFS.readdirSync(dir) : [];
+  const logs = suite === "packages" ? names.filter((name) => /^packages-.+\.log$/.test(name)) : [`test-${suite}.log`];
+  return (
+    logs.length > 0 &&
+    logs.every((log) => {
+      const path = NodePath.join(dir, log);
+      return NodeFS.existsSync(path) && TEST_FILES_SUMMARY.test(NodeFS.readFileSync(path, "utf8"));
+    })
+  );
+}
+
+export async function everySuite(ctx: Context, co: Checkout): Promise<Record<SuiteName, SuiteResult>> {
+  const results = {} as Record<SuiteName, SuiteResult>;
   for (const [name, suite] of Object.entries(SUITES) as Array<[SuiteName, Suite]>) {
-    results[name] = await suite.run(ctx, co).then(
-      () => "passed" as const,
+    const passed = await suite.run(ctx, co).then(
+      () => true,
       (error: unknown) => {
         ctx.log.error(`${name} failed: ${error instanceof Error ? error.message : String(error)}`);
-        return "failed" as const;
+        return false;
       },
     );
+    results[name] = !suiteRan(co.evidence, name) ? "not-run" : passed ? "passed" : "failed";
   }
   return results;
 }

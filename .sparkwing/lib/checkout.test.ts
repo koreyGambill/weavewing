@@ -5,7 +5,7 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { test } from "node:test";
 
-import { checkChangedInputs, comparisonBase, definitionDigest } from "./checkout.ts";
+import { checkChangedInputs, comparisonBase, definitionDigest, isCommittedCheckout } from "./checkout.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   CP.execFileSync(
@@ -231,3 +231,33 @@ test("a vendored reference's link into an excluded directory also refuses to mem
     git(root, "commit", "-m", "vendored link into the cache");
     assert.equal(inputs(root).memoizable, false);
   }));
+
+test("only a private, detached and clean Sparkwing branch checkout counts as committed", () => {
+  const dir = FS.realpathSync(FS.mkdtempSync(Path.join(OS.tmpdir(), "committed-")));
+  try {
+    const revision = Path.join(dir, "home/workspaces/revision-1");
+    const root = Path.join(revision, "checkout");
+    FS.mkdirSync(root, { recursive: true });
+    FS.chmodSync(Path.join(dir, "home/workspaces"), 0o700);
+    FS.chmodSync(revision, 0o700);
+    git(root, "init", "--initial-branch=main");
+    FS.writeFileSync(Path.join(root, "a.ts"), "1\n");
+    git(root, "add", ".");
+    git(root, "commit", "-m", "first");
+    assert.equal(isCommittedCheckout(root), false, "a branch is checked out");
+    git(root, "checkout", "--quiet", "--detach");
+    assert.equal(isCommittedCheckout(root), true);
+    FS.writeFileSync(Path.join(root, "b.ts"), "2\n");
+    assert.equal(isCommittedCheckout(root), false, "an untracked file");
+    FS.rmSync(Path.join(root, "b.ts"));
+    FS.chmodSync(revision, 0o755);
+    assert.equal(isCommittedCheckout(root), false, "a directory others can read");
+    FS.chmodSync(revision, 0o700);
+    const plain = Path.join(dir, "code/weavewing");
+    FS.mkdirSync(plain, { recursive: true });
+    git(plain, "init", "--initial-branch=main");
+    assert.equal(isCommittedCheckout(plain), false, "a developer checkout");
+  } finally {
+    FS.rmSync(dir, { recursive: true, force: true });
+  }
+});

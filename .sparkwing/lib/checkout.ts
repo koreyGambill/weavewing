@@ -92,6 +92,28 @@ export async function logged(
   return log;
 }
 
+/**
+ * Whether dir is a checkout Sparkwing made for a committed source, such as a child run on a branch:
+ * `<home>/workspaces/revision-*\/checkout` inside private directories this user owns, with a
+ * detached HEAD and a clean tree. A developer's checkout never has that shape.
+ */
+export function isCommittedCheckout(dir: string): boolean {
+  const real = NodeFS.realpathSync(dir);
+  if (!/\/workspaces\/revision-[^/]+\/checkout$/.test(real)) return false;
+  const revision = NodePath.dirname(real);
+  for (const path of [revision, NodePath.dirname(revision)]) {
+    const stat = NodeFS.lstatSync(path);
+    const owned = typeof process.getuid !== "function" || stat.uid === process.getuid();
+    if (!stat.isDirectory() || (stat.mode & 0o077) !== 0 || !owned) return false;
+  }
+  try {
+    git(real, "symbolic-ref", "--quiet", "HEAD");
+    return false;
+  } catch {
+    return git(real, "status", "--porcelain", "--untracked-files=all") === "";
+  }
+}
+
 export function git(root: string, ...args: string[]): string {
   // Unquoted paths, as check:changed reads them, so non-ASCII names hash and stat correctly.
   return NodeChildProcess.execFileSync("git", ["-C", root, "-c", "core.quotePath=false", ...args], {

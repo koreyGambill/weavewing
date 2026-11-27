@@ -1,3 +1,4 @@
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -58,12 +59,21 @@ definePipeline({
       const logs = NodePath.join(evidenceDir(ctx), "suites");
       try {
         // An awaited child holds no runner slot, so only the child's own cores are admitted.
-        await ctx.runPipeline("suite", "suite", {
-          branch: `origin/${BRANCH}`,
-          args: { full: "true", evidence: logs },
-        });
+        const tested = await ctx.runPipeline<{ commit: string; tree: string; results: Record<string, string> }>(
+          "suite",
+          "suite",
+          { branch: `origin/${BRANCH}`, args: { full: "true", evidence: logs } },
+        );
+        ctx.log.info(`origin/${BRANCH} ${tested.commit.slice(0, 10)} passed every suite`, tested.results);
       } catch (error) {
-        recordFailures(file, head, ctx.run.id, logs);
+        // main may have moved between the fetch and the child's checkout, so name what it tested.
+        let commit = head;
+        try {
+          commit = JSON.parse(NodeFS.readFileSync(NodePath.join(logs, "tested.json"), "utf8")).commit || head;
+        } catch {
+          // The child failed before it recorded a commit.
+        }
+        recordFailures(file, commit, ctx.run.id, logs);
         throw error;
       }
     })
