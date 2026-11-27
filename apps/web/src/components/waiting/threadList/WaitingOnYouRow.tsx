@@ -21,7 +21,7 @@ import { Sheet, SheetHeader, SheetPopup, SheetTitle } from "../../ui/sheet";
 import { SidebarMenuButton, useSidebar } from "../../ui/sidebar";
 import { toastManager } from "../../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
-import { WAITING_KIND_ICON } from "../WaitingItemsList";
+import { WAITING_KIND_ICON } from "../waitingKindIcon";
 import { WAITING_KIND_LABEL } from "../waitingStrip.logic";
 import { registerWaitingListOpener } from "./waitingListCommand";
 import { useWaitingOnYou } from "./waitingOnYou";

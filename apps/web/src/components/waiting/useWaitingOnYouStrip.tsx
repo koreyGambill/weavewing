@@ -26,7 +26,8 @@ import {
 import { questionDraftWriter } from "../questions/questionDraftWriter";
 import { reconcileQuestionNoteImages } from "../questions/questionNoteImages";
 import { Button } from "../ui/button";
-import { WaitingItemsList, WAITING_KIND_ICON } from "./WaitingItemsList";
+import { WaitingItemsList } from "./WaitingItemsList";
+import { WAITING_KIND_ICON } from "./waitingKindIcon";
 import { WAITING_KIND_LABEL, groupWaitingItems, waitingStripSummary } from "./waitingStrip.logic";
 
 /**

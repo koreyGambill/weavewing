@@ -6,7 +6,6 @@ import { threadTaskUpdate } from "../../state/threadQuestions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
 import { threadTaskElementId } from "../questions/questionReveal";
-import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
   CardReasonForm,
   HelpButton,
@@ -20,7 +19,8 @@ import {
   useWaitingItemsInComposer,
   waitingItemDiscussRecord,
 } from "../waiting/waitingItemComposer";
-import { taskCardOutcome, taskCardStatus, type TaskCardStatus } from "./taskCard.logic";
+import { taskCardOutcome, taskCardStatus } from "./taskCard.logic";
+import { TaskStatusBadge } from "./TaskStatusBadge";
 
 const HELP = {
   dismiss: "Cancel this task. Nothing is sent to the agent; it hears with your next message.",
@@ -30,45 +30,6 @@ const HELP = {
   reopen: "Open this again. Nothing is sent to the agent.",
   reason: "Say why you dismissed it. The agent reads it with your next message.",
 };
-
-const STATUS: Record<
-  TaskCardStatus,
-  { readonly label: string; readonly variant: CardBadgeVariant; readonly help: string }
-> = {
-  open: {
-    label: "Open",
-    variant: "outline",
-    help: "Only you can do this. Mark it Done when you have.",
-  },
-  "in-composer": {
-    label: "In composer",
-    variant: "info-outline",
-    help: "A reference to this task is in your composer. It goes with your next message.",
-  },
-  discussing: {
-    label: "Discussing",
-    variant: "warning-outline",
-    help: "You sent a message about this task. The agent records what it settled; you can still mark it here.",
-  },
-  "done-by-you": {
-    label: "Done by you",
-    variant: "success-outline",
-    help: "You marked this done.",
-  },
-  recorded: {
-    label: "Recorded by the agent",
-    variant: "success-outline",
-    help: "The agent recorded this as done from your message. Reopen it if the agent misread you.",
-  },
-  dismissed: { label: "Dismissed", variant: "outline", help: "Closed without doing it." },
-};
-
-/** A task's badge, with the recorded note as its meaning when the agent or user left one. */
-export function TaskStatusBadge({ status, note }: { status: TaskCardStatus; note: string }) {
-  const { label, variant, help } = STATUS[status];
-  const noted = note !== "" && (status === "recorded" || status === "dismissed");
-  return <CardStatusBadge label={label} variant={variant} help={noted ? note : help} />;
-}
 
 /** One read-only row: a muted label column, then the content, with the option rows' padding. */
 function TaskRow({ label, children }: { label: string; children: ReactNode }) {

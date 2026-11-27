@@ -10,12 +10,6 @@ import type {
   WaitingItemKind,
   WaitingItemSummary,
 } from "@t3tools/contracts";
-import {
-  ClipboardCheckIcon,
-  ListChecksIcon,
-  MessageCircleQuestionIcon,
-  type LucideIcon,
-} from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -25,7 +19,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { QaStatusBadge } from "../evidence/ThreadQaCard";
-import { TaskStatusBadge } from "../tasks/ThreadTaskCard";
+import { TaskStatusBadge } from "../tasks/TaskStatusBadge";
 import {
   addQuestionAnswersToComposer,
   removeQuestionAnswerFromComposer,
@@ -43,13 +37,8 @@ import { HelpButton } from "../questions/ThreadCardShell";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { removeWaitingItemDiscuss, useWaitingItemsInComposer } from "./waitingItemComposer";
+import { WAITING_KIND_ICON } from "./waitingKindIcon";
 import { WAITING_KIND_HEADING, qaKeyParts } from "./waitingStrip.logic";
-
-export const WAITING_KIND_ICON: Record<WaitingItemKind, LucideIcon> = {
-  question: MessageCircleQuestionIcon,
-  qa: ClipboardCheckIcon,
-  task: ListChecksIcon,
-};
 
 /**
  * Moves focus from a row the user just settled to the next row's title, or the previous one's,

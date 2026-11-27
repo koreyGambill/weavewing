@@ -36,6 +36,11 @@ vi.mock(import("./waitingOnYou"), () => ({
   }),
 }));
 
+it("loads without the cards and chat markdown, so the always-mounted row stays light", () => {
+  // ChatMarkdown's file icons add this sprite when their module loads.
+  expect(document.getElementById("t3code-pierre-file-icon-sprite")).toBeNull();
+});
+
 it("opens from the keyboard, moves with arrows, and hands focus back to the row on Escape", async () => {
   await page.viewport(1280, 800);
   await using screen = await render(
