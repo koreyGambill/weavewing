@@ -129,11 +129,19 @@ function widthOf(selector: string) {
 }
 
 it("shows the menu's thread in Checklist, locked, while a side chat of it is focused", async () => {
-  const [main, side] = [threadWithHistory("menu-main", 1), threadWithHistory("menu-side", 1)];
+  const main = threadWithHistory("menu-main", 1);
+  const side = {
+    ...threadWithHistory("menu-side", 1),
+    sideChatOf: main.id,
+    olderSettled: true as const,
+  };
   const { stack, screen } = await mountApp([main, side], 1280);
   await using _app = stack;
   const mainRef = scopeThreadRef(ENVIRONMENT_ID, main.id);
   await act(() => useRightPanelStore.getState().openSideChat(mainRef, side.id));
+  await expect
+    .element(screen.getByRole("textbox", { name: `Message ${side.title}`, exact: true }))
+    .toBeVisible();
   expect(readSelectedThreadRef(mainRef)).toEqual(scopeThreadRef(ENVIRONMENT_ID, side.id));
   // From the keyboard: a pointer click on the same spot as an earlier test's reads as a double-click.
   screen

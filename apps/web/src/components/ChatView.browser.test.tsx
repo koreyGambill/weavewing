@@ -759,7 +759,7 @@ it("a mounted thread view lets go of the thread structures it has replaced", asy
 
 it("selecting a side-chat tab focuses that side chat's composer", async () => {
   const parent = threadWithHistory("focus-parent", 1);
-  // The shell loaded by the file's first test stays; a family read serves side chats added later.
+  // Side chats stay in the shell while the server trims older settled top-level rows.
   const sideChat = (name: string) => ({
     ...threadWithHistory(name, 1),
     sideChatOf: parent.id,

@@ -7,6 +7,7 @@ import {
   EnvironmentId,
   EventId,
   ExecutionEnvironmentDescriptor,
+  isOlderSettledThreadShell,
   MessageId,
   NodeId,
   OrchestrationV2DispatchCommandError,
@@ -228,7 +229,7 @@ export interface FakeThread {
   readonly sideChatOf?: ThreadId;
   readonly contextArchive?: OrchestrationV2ThreadShell["lineage"]["contextArchive"];
   readonly inheritedItems?: ReadonlyArray<OrchestrationV2TurnItem>;
-  /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
+  /** Marks the thread settled before the fixture shell’s cutoff. */
   readonly olderSettled?: true;
   readonly id: ThreadId;
   readonly title: string;
@@ -425,7 +426,9 @@ function shellSnapshot(): OrchestrationV2ShellStreamItem {
       schemaVersion: 1,
       snapshotSequence: sequence,
       projects,
-      threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
+      threads: threads
+        .map(shellOf)
+        .filter((row) => !isOlderSettledThreadShell(row, Number.POSITIVE_INFINITY)),
       archivedThreads: [],
     },
   };
