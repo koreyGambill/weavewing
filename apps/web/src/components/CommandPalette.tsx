@@ -199,7 +199,8 @@ import {
 } from "../commandPaletteStore";
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
-import { toggleTrackAnswer } from "./answers/trackedAnswerDraft";
+import { toggleTrackAnswer, useTrackedAnswerDraft } from "./answers/trackedAnswerDraft";
+import { useQueuedRunEditTarget } from "./chat/useQueuedRunEdit";
 import { openTrackedAnswersSection } from "./answers/AnswersSection";
 import { openInbox, openInboxView } from "./inbox/openInbox";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
@@ -583,6 +584,21 @@ function OpenCommandPaletteDialog(props: {
     changeThreadFolder.permissionAtom(activeThread?.environmentId ?? preferredEnvironmentId),
   );
   const waitingCardsEnvironmentIds = useAtomValue(waitingCardsEnvironmentIdsAtom);
+  const trackThreadRef = activeThread
+    ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+    : null;
+  const queuedTrackTarget = useQueuedRunEditTarget(trackThreadRef);
+  const trackDraftTarget =
+    paletteRouteTarget?.kind === "draft"
+      ? paletteRouteTarget.draftId
+      : (queuedTrackTarget ?? trackThreadRef);
+  const trackDraftEnvironmentId =
+    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
+  const tracking = useTrackedAnswerDraft(trackDraftTarget);
+  const canToggleTracking = useEnvironmentScope(
+    trackDraftEnvironmentId,
+    AuthOrchestrationOperateScope,
+  );
   const canShareActiveThreadWithGuest = useAtomValue(
     canShareWithGuestAtom(activeThread?.environmentId ?? ("" as EnvironmentId)),
   );
@@ -1899,16 +1915,28 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread !== null && waitingCardsEnvironmentIds.includes(activeThread.environmentId)) {
-    const draftTarget = scopeThreadRef(activeThread.environmentId, activeThread.id);
+  if (
+    trackDraftTarget !== null &&
+    trackDraftEnvironmentId !== null &&
+    waitingCardsEnvironmentIds.includes(trackDraftEnvironmentId)
+  ) {
     actionItems.push({
       kind: "action",
       value: "action:track-answer",
       title: "Track the answer to this message",
       searchTerms: ["track", "answer", "question"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-      run: async () => toggleTrackAnswer(draftTarget),
+      checked: tracking.track,
+      disabled: !canToggleTracking,
+      keepOpen: true,
+      shortcutCommand: "composer.trackAnswer",
+      titleTrailingContent: (
+        <span className="text-muted-foreground">{tracking.track ? "On" : "Off"}</span>
+      ),
+      run: async () => toggleTrackAnswer(trackDraftTarget),
     });
+  }
+  if (activeThread !== null && waitingCardsEnvironmentIds.includes(activeThread.environmentId)) {
     actionItems.push({
       kind: "action",
       value: "action:show-tracked-answers",

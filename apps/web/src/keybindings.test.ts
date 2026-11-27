@@ -38,6 +38,29 @@ function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
   };
 }
 
+it("runs the Track Answer keybinding only in the composer and honors a custom binding", () => {
+  const defaultShortcut = event({ key: "y", ctrlKey: true, shiftKey: true });
+  const inComposer = { platform: "Linux", context: { composerFocus: true } };
+  assert.equal(
+    resolveShortcutCommand(defaultShortcut, DEFAULT_RESOLVED_KEYBINDINGS, inComposer),
+    "composer.trackAnswer",
+  );
+  assert.notEqual(
+    resolveShortcutCommand(defaultShortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+      ...inComposer,
+      context: { composerFocus: false },
+    }),
+    "composer.trackAnswer",
+  );
+  const custom = compileResolvedKeybindingsConfig([
+    { key: "mod+alt+k", command: "composer.trackAnswer", when: "composerFocus" },
+  ]);
+  assert.equal(
+    resolveShortcutCommand(event({ key: "k", ctrlKey: true, altKey: true }), custom, inComposer),
+    "composer.trackAnswer",
+  );
+});
+
 describe("terminal word navigation", () => {
   it.each([
     ["Backspace", "ctrlKey", "Win32", "\x15"],

@@ -122,6 +122,7 @@ in Settings.
 With **Waiting-on-you cards** enabled, press **Cmd+Shift+Y** on macOS or
 **Ctrl+Shift+Y** on Windows and Linux to toggle **Track answer** while the
 composer has focus.
+Change the **Composer: Track Answer** binding in **Settings → Keybindings**.
 
 ## Copy pull request references
 

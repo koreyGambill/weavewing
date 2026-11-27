@@ -92,6 +92,11 @@ const queuedRunEdits = makeQueuedRunEditStore<EditingQueuedRun>({
   label: "web-queued-run-edits",
 });
 
+export function useQueuedRunEditTarget(threadRef: ScopedThreadRef | null) {
+  const edit = useAtomValue(queuedRunEdits.atom)[threadRef ? scopedThreadKey(threadRef) : ""];
+  return threadRef && edit ? queuedRunEditDraftId(threadRef, edit.runId) : null;
+}
+
 interface QueuedRunEditContent {
   readonly prompt: string;
   readonly images: ReadonlyArray<ComposerImageAttachment>;

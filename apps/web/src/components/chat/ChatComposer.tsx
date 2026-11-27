@@ -151,7 +151,11 @@ import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmiss
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { shortcutLabelForCommand, type ShortcutMatchContext } from "../../keybindings";
+import {
+  resolveShortcutCommand,
+  shortcutLabelForCommand,
+  type ShortcutMatchContext,
+} from "../../keybindings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -3438,17 +3442,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ref={composerFormRef}
       onSubmit={submitComposerStable}
       onKeyDownCapture={(event) => {
-        const mod = isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey;
         if (
           showTrackAnswer &&
           pendingPrimaryAction === null &&
           canOperateThread &&
-          mod &&
-          event.shiftKey &&
-          !event.altKey &&
           !event.repeat &&
           !event.nativeEvent.isComposing &&
-          event.key.toLowerCase() === "y"
+          resolveShortcutCommand(event.nativeEvent, keybindings, {
+            context: getShortcutContext(event.target),
+          }) === "composer.trackAnswer"
         ) {
           event.preventDefault();
           event.stopPropagation();
@@ -3982,6 +3984,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         pressed={answerDraft.track}
                         compact={isComposerFooterCompact}
                         disabled={!canOperateThread}
+                        shortcut={shortcutLabelForCommand(keybindings, "composer.trackAnswer", {
+                          context: { composerFocus: true },
+                        })}
                         onToggle={onToggleTrackAnswer}
                       />
                     ) : null}
