@@ -5457,6 +5457,11 @@ describe("AcpAdapterV2", () => {
         runtimePolicy,
       });
 
+      assert.isTrue((yield* adapter.getCapabilities()).tools.supportsMcpTools);
+      assert.isTrue(
+        runtime.providerSession.trackedAnswersAvailable,
+        "The stdio tool server can record answers.",
+      );
       assert.isTrue(runtime.providerSession.capabilities.threads.canForkThread);
       assert.isTrue(runtime.providerSession.capabilities.threads.canReadThreadSnapshot);
       assert.isTrue(runtime.providerSession.capabilities.sessions.supportsModelSwitchInSession);

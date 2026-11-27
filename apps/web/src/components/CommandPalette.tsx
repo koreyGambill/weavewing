@@ -1935,7 +1935,7 @@ function OpenCommandPaletteDialog(props: {
     trackDraftTarget !== null &&
     trackDraftEnvironmentId !== null &&
     waitingCardsEnvironmentIds.includes(trackDraftEnvironmentId) &&
-    (canAnswer || tracking.track)
+    canAnswer
   ) {
     actionItems.push({
       kind: "action",

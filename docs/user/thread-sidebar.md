@@ -505,6 +505,8 @@ thread** from its long-press menu on mobile.
 
 ## Keep a tracked answer
 
+Some agents cannot give tracked answers.
+
 Enable **Waiting-on-you cards** in **Settings → Labs**. Turn on **Track answer**
 before you send a question, including when you send a follow-up from a card.
 For a message you already sent, choose **Track the answer** from its actions.

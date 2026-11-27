@@ -761,7 +761,7 @@ export const AcpProviderCapabilitiesV2 = {
     emitsToolStarted: true,
     emitsToolCompleted: true,
     emitsToolOutput: true,
-    supportsMcpTools: false,
+    supportsMcpTools: true,
     supportsDynamicToolCallbacks: false,
   },
   approvals: {
@@ -7553,7 +7553,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         yield* Ref.set(activeSessionId, started.sessionId);
         yield* Ref.set(loadingSessionId, null);
         yield* setActiveSessionSetup(started);
-        rememberTerminalEnvironment(started.sessionId, yield* readMcpContext(input.threadId));
+        const mcpContext = yield* readMcpContext(input.threadId);
+        rememberTerminalEnvironment(started.sessionId, mcpContext);
         yield* runtime.drainEvents;
         const capabilities = negotiatedCapabilities(
           yield* readCapabilities,
@@ -7561,10 +7562,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           flavor.modelOptionArrivesLate === true,
           flavor.forkFromTurn?.supported(started.initializeResult) === true,
         );
-        const mcpCapabilities = started.initializeResult.agentCapabilities?.mcpCapabilities;
-        const trackedAnswersAvailable =
-          mcpCapabilities?.acp === true ||
-          (flavor.mcpOverHttp === true && mcpCapabilities?.http === true);
+        const trackedAnswersAvailable = mcpContext.servers.length > 0;
         const canLoadSession = started.initializeResult.agentCapabilities?.loadSession === true;
         const canResumeSession =
           started.initializeResult.agentCapabilities?.sessionCapabilities?.resume != null;
