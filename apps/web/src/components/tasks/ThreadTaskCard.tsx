@@ -30,7 +30,7 @@ const HELP = {
   done: "You did it. Nothing is sent to the agent; it hears with your next message.",
   reopen: "Open this again. Nothing is sent to the agent.",
   reason:
-    "Say why you dismissed it. It is saved with the task; the agent sees it when it reads the list.",
+    "Say why you dismissed it. It is saved with the task; the agent sees it when it reads closed tasks.",
 };
 
 /** One read-only row: a muted label column, then the content, with the option rows' padding. */
