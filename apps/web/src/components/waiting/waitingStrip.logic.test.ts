@@ -14,9 +14,16 @@ import {
   groupWaitingItems,
   hasLiveQuestions,
   qaKeyParts,
+  trackedAnswerCountLabel,
   waitingChipLabel,
   waitingStripSummary,
 } from "./waitingStrip.logic";
+
+it("uses singular and plural tracked-answer labels", () => {
+  expect(trackedAnswerCountLabel(1, "to read")).toBe("1 answer to read");
+  expect(trackedAnswerCountLabel(1, "owed")).toBe("1 answer owed");
+  expect(trackedAnswerCountLabel(2, "owed")).toBe("2 answers owed");
+});
 
 const item = (
   kind: WaitingItemSummary["kind"],

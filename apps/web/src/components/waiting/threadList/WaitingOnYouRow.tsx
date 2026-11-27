@@ -22,7 +22,7 @@ import { SidebarMenuButton, useSidebar } from "../../ui/sidebar";
 import { toastManager } from "../../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { WaitingAnswerIcon, WAITING_KIND_ICON } from "../waitingKindIcon";
-import { WAITING_KIND_LABEL } from "../waitingStrip.logic";
+import { WAITING_KIND_LABEL, trackedAnswerCountLabel } from "../waitingStrip.logic";
 import { registerWaitingListOpener } from "./waitingListCommand";
 import { useWaitingOnYou } from "./waitingOnYou";
 import {
@@ -358,8 +358,8 @@ function ThreadEntry({
         `${count} ${count === 1 ? WAITING_KIND_LABEL[kind].one : WAITING_KIND_LABEL[kind].many}`,
     ),
     ...(thread.discussing > 0 ? [`${thread.discussing} discussing`] : []),
-    ...(thread.answersToRead ? [`${thread.answersToRead} answers to read`] : []),
-    ...(thread.owedAnswers ? [`${thread.owedAnswers} answers owed`] : []),
+    ...(thread.answersToRead ? [trackedAnswerCountLabel(thread.answersToRead, "to read")] : []),
+    ...(thread.owedAnswers ? [trackedAnswerCountLabel(thread.owedAnswers, "owed")] : []),
   ].join(", ");
   return (
     <li>

@@ -38,6 +38,10 @@ export interface WaitingStripSummary {
 export const waitingTotalWithAnswers = (counts: WaitingCounts | undefined) =>
   waitingTotal(counts) + (counts?.answer ?? 0);
 
+export function trackedAnswerCountLabel(count: number, status: "to read" | "owed"): string {
+  return `${count} ${count === 1 ? "answer" : "answers"} ${status}`;
+}
+
 /**
  * Null when nothing waits on the user and nothing is being discussed, so the strip hides. Every
  * number comes from the exact counts, never from how many rows the thread lists.

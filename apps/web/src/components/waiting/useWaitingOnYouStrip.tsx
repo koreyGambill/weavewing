@@ -29,7 +29,12 @@ import { reconcileQuestionNoteImages } from "../questions/questionNoteImages";
 import { Button } from "../ui/button";
 import { WaitingItemsList } from "./WaitingItemsList";
 import { WaitingAnswerIcon, WAITING_KIND_ICON } from "./waitingKindIcon";
-import { WAITING_KIND_LABEL, groupWaitingItems, waitingStripSummary } from "./waitingStrip.logic";
+import {
+  WAITING_KIND_LABEL,
+  groupWaitingItems,
+  trackedAnswerCountLabel,
+  waitingStripSummary,
+} from "./waitingStrip.logic";
 
 /**
  * The one strip above the composer for what waits on the user: questions, landed changes to
@@ -119,8 +124,8 @@ export function useWaitingOnYouStrip(input: {
       ({ kind, count }) =>
         `${count} ${count === 1 ? WAITING_KIND_LABEL[kind].one : WAITING_KIND_LABEL[kind].many}`,
     ),
-    ...(summary.answersToRead ? [`${summary.answersToRead} answers to read`] : []),
-    ...(summary.owedAnswers ? [`${summary.owedAnswers} answers owed`] : []),
+    ...(summary.answersToRead ? [trackedAnswerCountLabel(summary.answersToRead, "to read")] : []),
+    ...(summary.owedAnswers ? [trackedAnswerCountLabel(summary.owedAnswers, "owed")] : []),
     ...(summary.discussing > 0 ? [`${summary.discussing} discussing`] : []),
   ].join(", ");
   return {

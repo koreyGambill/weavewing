@@ -58,7 +58,8 @@ export function TrackedAskActions({
             <Button
               size="icon-xs"
               variant="ghost-muted"
-              disabled={!canUpdate || busy}
+              disabled={!canUpdate}
+              aria-busy={busy}
               aria-label={`Actions for ${ask.id}`}
               ref={trigger}
             />
@@ -66,10 +67,11 @@ export function TrackedAskActions({
         >
           <EllipsisIcon aria-hidden="true" />
         </MenuTrigger>
-        <MenuPopup align="end">
+        <MenuPopup align="end" finalFocus={trigger}>
           {showAnswer ? <MenuItem onClick={onShow}>Show answer</MenuItem> : null}
           {canEdit ? (
             <MenuItem
+              disabled={busy}
               onClick={() => {
                 setQuestion(ask.question);
                 setEditing(true);
@@ -79,10 +81,20 @@ export function TrackedAskActions({
             </MenuItem>
           ) : null}
           {canWithdraw ? (
-            <MenuItem onClick={() => void action("withdraw")}>Withdraw</MenuItem>
+            <MenuItem disabled={busy} onClick={() => void action("withdraw")}>
+              Withdraw
+            </MenuItem>
           ) : null}
-          {canRestore ? <MenuItem onClick={() => void action("restore")}>Restore</MenuItem> : null}
-          {canReopen ? <MenuItem onClick={() => void action("reopen")}>Reopen</MenuItem> : null}
+          {canRestore ? (
+            <MenuItem disabled={busy} onClick={() => void action("restore")}>
+              Restore
+            </MenuItem>
+          ) : null}
+          {canReopen ? (
+            <MenuItem disabled={busy} onClick={() => void action("reopen")}>
+              Reopen
+            </MenuItem>
+          ) : null}
         </MenuPopup>
       </Menu>
       <Popover open={editing} onOpenChange={setEditing}>
