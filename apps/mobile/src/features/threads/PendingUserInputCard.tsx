@@ -1,6 +1,7 @@
 import { Button } from "../../components/ui/Button";
 import { QuestionAttachments } from "./QuestionAttachments";
 import type { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 import type { ThreadUserInputQuestion } from "@t3tools/client-runtime/state/thread-requests";
 import {
   markdownProseDirection,
@@ -21,11 +22,20 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { cn } from "../../lib/cn";
-import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
+import {
+  normalizeNativeMarkdownUrl,
+  resolveMarkdownLinkPresentation,
+} from "../../lib/markdownLinks";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
-import { loadPendingRemoteMedia, useRemoteMediaImageSource } from "./remoteMediaConsent";
+import { RemoteMediaGate } from "./RemoteMediaGate";
+import {
+  loadPendingRemoteMedia,
+  remoteMediaSite,
+  useRemoteMediaImageSource,
+} from "./remoteMediaConsent";
+import { ThreadMarkdownImageView } from "./ThreadMarkdownImage";
 import {
   fileRoutePathSegments,
   resolveFileLinkPath,
@@ -116,6 +126,22 @@ export function QuestionText(props: {
         Platform.OS === "android" ? undefined : props.setDirection === "rtl" ? "right" : "left"
       }
       onLinkPress={openLink}
+      renderImage={(image) => {
+        const source = classifyMarkdownImageSource(image.href);
+        if (source._tag !== "Direct" || remoteMediaSite(source.uri) === null) return undefined;
+        return (
+          <RemoteMediaGate environmentId={props.environmentId} uri={source.uri} kind="image">
+            <ThreadMarkdownImageView
+              uri={normalizeNativeMarkdownUrl(source.uri)}
+              sourceKey={source.uri}
+              format={/\.svg(?:[?#]|$)/i.test(source.uri) ? "svg" : undefined}
+              unavailable={false}
+              alt={image.alt}
+              onPressPreview={() => openLink(image.href)}
+            />
+          </RemoteMediaGate>
+        );
+      }}
       resolveImageSource={resolveImageSource}
       onImagePress={(href) => loadPendingRemoteMedia(href) || openLink(href)}
       preserveSoftBreaks={props.preserveSoftBreaks}
