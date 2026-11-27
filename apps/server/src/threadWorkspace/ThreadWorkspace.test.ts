@@ -6,6 +6,7 @@ import {
   RunId,
   MessageId,
   ComposerContextId,
+  EnvironmentId,
   EventId,
   ProjectId,
   ProviderInstanceId,
@@ -61,7 +62,9 @@ function trackedMessage(id: string): OrchestrationV2ConversationMessage {
     updatedAt: at,
   };
 }
-const harness = Effect.fn("test.workspaceHarness")(function* () {
+const harness = Effect.fn("test.workspaceHarness")(function* (options?: {
+  remotelyDelegated: true;
+}) {
   // The user message of the thread's current turn, as the orchestrator reads it. `sole` says
   // whether it is the one user message since the anchor a caller passes, which `anchors` records.
   const turnMessage = {
@@ -93,6 +96,15 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
       worktreePath: null,
       activeProviderThreadId: null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      ...(options?.remotelyDelegated
+        ? {
+            delegatedFrom: {
+              environmentId: EnvironmentId.make("remote-environment"),
+              threadId: ThreadId.make("remote-lead"),
+              title: "Lead",
+            },
+          }
+        : {}),
       forkedFrom: null,
       createdAt: at,
       updatedAt: at,
@@ -413,6 +425,20 @@ it.effect(
       );
       expect((yield* service.get({ threadId })).asks?.[0]?.state).toBe("owed");
     }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("ignores sent tracking marks on remotely delegated threads", () =>
+  Effect.gen(function* () {
+    const { service, messages } = yield* harness({ remotelyDelegated: true });
+    const message = trackedMessage("sent");
+    messages.push(message);
+    expect(
+      (yield* Effect.flip(service.trackMessage({ threadId, messageId: message.id }))).message,
+    ).toBe("This agent can't give tracked answers.");
+    expect(yield* service.recordTrackedMessages(threadId, [message], false)).toEqual([]);
+    expect(yield* service.recordTrackedMessages(threadId, [message], true)).toEqual([]);
+    expect((yield* service.get({ threadId })).asks ?? []).toEqual([]);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("keeps a queued edit's ref and allocates a new ref after tracking is turned off", () =>

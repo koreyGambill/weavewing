@@ -16,6 +16,7 @@ import {
   threadQuestionTitle,
   questionWaitingItems,
   taskWaitingItems,
+  isDelegatedAppThread,
   TrackedAnswerText,
   TrackedAnswerMore,
   TrackedAsk,
@@ -917,6 +918,9 @@ const make = Effect.gen(function* () {
           message.context?.discussAnswers?.length),
     );
     if (userMessages.length === 0) return [];
+    const delegated =
+      userMessages.some((message) => message.context?.trackedAsk !== undefined) &&
+      isDelegatedAppThread(yield* requireThread(threadId));
     const current = yield* load(threadId);
     const next = { ...current };
     let changed = false;
@@ -952,6 +956,7 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (previous === undefined) {
+        if (delegated) continue;
         const added = addTrackedAsk(
           next,
           {
@@ -1087,11 +1092,7 @@ const make = Effect.gen(function* () {
           entry.status !== "stopped" &&
           entry.status !== "error",
       );
-      if (
-        thread.lineage.relationshipToParent === "subagent" ||
-        thread.delegatedFrom != null ||
-        session?.trackedAnswersAvailable === false
-      )
+      if (isDelegatedAppThread(thread) || session?.trackedAnswersAvailable === false)
         return yield* invalidAsk("This agent can't give tracked answers.");
       const message = records.messages.find((candidate) => candidate.id === input.messageId);
       if (message === undefined)
