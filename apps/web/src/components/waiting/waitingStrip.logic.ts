@@ -1,6 +1,6 @@
 import {
   isWaitingItemState,
-  waitingTotal,
+  waitingTotalWithAnswers,
   type WaitingCounts,
   type WaitingItemKind,
   type WaitingItemSummary,
@@ -34,9 +34,6 @@ export interface WaitingStripSummary {
   /** Any question still waits on someone, so the questions panel has something to show. */
   readonly hasQuestions: boolean;
 }
-
-export const waitingTotalWithAnswers = (counts: WaitingCounts | undefined) =>
-  waitingTotal(counts) + (counts?.answer ?? 0);
 
 export function trackedAnswerCountLabel(count: number, status: "to read" | "owed"): string {
   return `${count} ${count === 1 ? "answer" : "answers"} ${status}`;

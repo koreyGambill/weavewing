@@ -12,7 +12,7 @@ import {
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
-  waitingTotal,
+  waitingTotalWithAnswers,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -172,10 +172,7 @@ export function isAutoSettlementCandidate(
   if ((thread.pendingGuestMessageCount ?? 0) > 0) return false;
   // Questions, QA changes, tasks and unread answers wait on the user while the setting shows them.
   // Deferred and discussed items do not count. A manual settle still goes through.
-  if (
-    options.waitingCardsEnabled === true &&
-    waitingTotal(thread.waitingCounts) + (thread.waitingCounts?.answer ?? 0) > 0
-  )
+  if (options.waitingCardsEnabled === true && waitingTotalWithAnswers(thread.waitingCounts) > 0)
     return false;
   if (thread.activityRunStatus != null) return false;
   if (threadBackgroundWorkHoldsCompletion(thread)) return false;

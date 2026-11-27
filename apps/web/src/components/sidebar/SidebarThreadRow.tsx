@@ -32,6 +32,7 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environ
 import { toServerClock } from "@t3tools/client-runtime/clock";
 import {
   AuthOrchestrationOperateScope,
+  waitingTotalWithAnswers,
   type EnvironmentId,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
@@ -108,7 +109,6 @@ import {
   setFileDragActive,
 } from "../Sidebar.logic";
 import { ThreadWaitingCountChip } from "../waiting/ThreadWaitingCountChip";
-import { waitingTotalWithAnswers } from "../waiting/waitingStrip.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,

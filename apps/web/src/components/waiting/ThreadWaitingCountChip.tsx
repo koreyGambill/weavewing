@@ -1,4 +1,5 @@
 import {
+  waitingTotalWithAnswers,
   type TrackedAnswerWaitingRow,
   type WaitingCounts,
   type WaitingItemSummary,
@@ -11,7 +12,6 @@ import {
   groupWaitingItems,
   waitingChipLabel,
   waitingStripSummary,
-  waitingTotalWithAnswers,
 } from "./waitingStrip.logic";
 
 // Everything listed but not counted says why.

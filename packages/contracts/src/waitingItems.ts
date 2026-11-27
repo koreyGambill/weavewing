@@ -94,6 +94,10 @@ const waitingItemCounts = (items: ReadonlyArray<WaitingItemSummary>): WaitingCou
 export const waitingTotal = (counts: WaitingCounts | undefined): number =>
   counts === undefined ? 0 : counts.question + counts.qa + counts.task;
 
+/** Counts items waiting on the user, including unread tracked answers. */
+export const waitingTotalWithAnswers = (counts: WaitingCounts | undefined): number =>
+  waitingTotal(counts) + (counts?.answer ?? 0);
+
 export const sameWaitingCounts = (a: WaitingCounts | undefined, b: WaitingCounts | undefined) =>
   a === b ||
   (a !== undefined &&
