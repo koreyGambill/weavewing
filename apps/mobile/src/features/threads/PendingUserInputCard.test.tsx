@@ -1,3 +1,4 @@
+import { RegistryContext } from "@effect/atom-react";
 import type { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";
@@ -27,8 +28,14 @@ vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
   View: ({ children }: Children) => <div>{children}</div>,
   ScrollView: ({ children }: Children) => <div>{children}</div>,
-  Pressable: ({ children, onPress }: Children & { onPress?: () => void }) => (
-    <div onClick={onPress}>{children}</div>
+  Pressable: ({
+    children,
+    onPress,
+    accessibilityLabel,
+  }: Children & { onPress?: () => void; accessibilityLabel?: string }) => (
+    <button type="button" aria-label={accessibilityLabel} onClick={onPress}>
+      {children}
+    </button>
   ),
 }));
 vi.mock("react-native-reanimated", () => {
@@ -49,6 +56,11 @@ vi.mock("../../components/ui/AppText", () => ({
 vi.mock("../../components/ui/ControlPill", () => ({ ControlPill: () => null }));
 vi.mock("../../components/ui/Button", () => ({ Button: () => null }));
 vi.mock("./QuestionAttachments", () => ({ QuestionAttachments: () => null }));
+vi.mock("./ThreadMarkdownImage", () => ({
+  ThreadMarkdownImageView: ({ uri, alt }: { uri: string; alt: string }) => (
+    <img src={uri} alt={alt} />
+  ),
+}));
 vi.mock("../files/FileMarkdownPreview", () => ({
   useMarkdownPreviewStyles: () => ({ nativeTextStyle: {} }),
 }));
@@ -60,13 +72,22 @@ vi.mock("../../native/SelectableMarkdownText", () => ({
   SelectableMarkdownText: (props: SelectableMarkdownTextProps) => {
     harness.markdown = props;
     return (
-      <p>
-        {[...props.markdown.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map(([, label, href]) => (
-          <button key={href} type="button" onClick={() => props.onLinkPress?.(href!)}>
-            {label}
-          </button>
-        ))}
-      </p>
+      <div>
+        {props.markdown.split("\n").map((line) => {
+          const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(line);
+          if (image) {
+            const [, alt, href] = image;
+            return (
+              <div key={href}>{props.renderImage?.({ href: href!, alt: alt!, title: null })}</div>
+            );
+          }
+          return [...line.matchAll(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g)].map(([, label, href]) => (
+            <button key={href} type="button" onClick={() => props.onLinkPress?.(href!)}>
+              {label}
+            </button>
+          ));
+        })}
+      </div>
     );
   },
 }));
@@ -109,28 +130,31 @@ function setup(questionMarkdown: string) {
   const root = createRoot(container);
   act(() =>
     root.render(
-      <PendingUserInputCard
-        environmentId={"env-1" as EnvironmentId}
-        threadId={"thread-1" as ThreadId}
-        workspaceRoot="/repo"
-        canOperateThread
-        pendingUserInput={pendingUserInput}
-        maxHeight={{ value: 600 } as never}
-        cardProgress={{ value: 1, set: () => {} } as never}
-        cardCoverage={{ value: 0, set: () => {} } as never}
-        collapsed={false}
-        onToggleCollapsed={() => {}}
-        drafts={{}}
-        answers={null}
-        respondingUserInputId={null}
-        onSelectOption={() => {}}
-        onChangeCustomAnswer={() => {}}
-        onSubmit={async () => {}}
-        onDismiss={async () => {}}
-      />,
+      <RegistryContext.Provider value={atoms.registry}>
+        <PendingUserInputCard
+          environmentId={"env-1" as EnvironmentId}
+          threadId={"thread-1" as ThreadId}
+          workspaceRoot="/repo"
+          canOperateThread
+          pendingUserInput={pendingUserInput}
+          maxHeight={{ value: 600 } as never}
+          cardProgress={{ value: 1, set: () => {} } as never}
+          cardCoverage={{ value: 0, set: () => {} } as never}
+          collapsed={false}
+          onToggleCollapsed={() => {}}
+          drafts={{}}
+          answers={null}
+          respondingUserInputId={null}
+          onSelectOption={() => {}}
+          onChangeCustomAnswer={() => {}}
+          onSubmit={async () => {}}
+          onDismiss={async () => {}}
+        />
+      </RegistryContext.Provider>,
     ),
   );
   return {
+    container,
     async pressLink(label: string) {
       const link = [...container.querySelectorAll("button")].find(
         (button) => button.textContent === label,
@@ -174,4 +198,17 @@ it("holds a remote image in a question until the user taps it", async () => {
   await act(async () => harness.markdown.onImagePress!("https://tracker.example.com/p.gif"));
   expect(loaded).toBe(true);
   expect(harness.openedUrls).toEqual([]);
+});
+
+it("shows a load control for each remote image block and loads only the tapped image", async () => {
+  using screen = setup(
+    "![One](https://first.example.com/p.png)\n\n![Two](https://second.example.com/p.png)",
+  );
+
+  expect(screen.container.querySelector("img")).toBeNull();
+  await screen.pressLink("Load image from first.example.com");
+  expect([...screen.container.querySelectorAll("img")].map((image) => image.alt)).toEqual(["One"]);
+  expect(
+    screen.container.querySelector('[aria-label="Load image from second.example.com"]'),
+  ).not.toBeNull();
 });
