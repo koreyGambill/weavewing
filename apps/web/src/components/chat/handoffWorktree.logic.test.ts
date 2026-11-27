@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   handoffBranchNameProblem,
   handoffFailureMessage,
+  handoffDestination,
   handoffSuccessToast,
 } from "./handoffWorktree.logic";
 
@@ -53,7 +54,9 @@ describe("handoffSuccessToast", () => {
   };
 
   it("names the worktree when everything went as chosen", () => {
-    expect(handoffSuccessToast(result, { startFromOrigin: true })).toEqual({
+    expect(
+      handoffSuccessToast(result, { startFromOrigin: true, destination: "a worktree" }),
+    ).toEqual({
       type: "success",
       title: "Handed off to a worktree",
       description: "/worktrees/render/feature/toast",
@@ -63,7 +66,7 @@ describe("handoffSuccessToast", () => {
   it("says when the remote was asked for but the local commit was used", () => {
     const toast = handoffSuccessToast(
       { ...result, startedFromOrigin: false },
-      { startFromOrigin: true },
+      { startFromOrigin: true, destination: "a worktree" },
     );
     expect(toast.type).toBe("warning");
     expect(toast.description).toContain(
@@ -71,14 +74,30 @@ describe("handoffSuccessToast", () => {
     );
     // Not asking for the remote is not a fallback.
     expect(
-      handoffSuccessToast({ ...result, startedFromOrigin: false }, { startFromOrigin: false }).type,
+      handoffSuccessToast(
+        { ...result, startedFromOrigin: false },
+        { startFromOrigin: false, destination: "a worktree" },
+      ).type,
     ).toBe("success");
+  });
+
+  it("names the Xwing environment a handoff on an Xwing server moves the thread into", () => {
+    const toast = handoffSuccessToast(
+      { ...result, worktreePath: "/xwing/envs/7/render", setupScript: { status: "skipped" } },
+      { startFromOrigin: true, destination: handoffDestination("xwing") },
+    );
+    expect(toast).toEqual({
+      type: "success",
+      title: "Handed off to an Xwing environment",
+      description: "/xwing/envs/7/render",
+    });
+    expect(handoffDestination("t3")).toBe("a worktree");
   });
 
   it("says when the setup script failed", () => {
     const toast = handoffSuccessToast(
       { ...result, setupScript: { status: "failed", detail: "vp install exited 1" } },
-      { startFromOrigin: true },
+      { startFromOrigin: true, destination: "a worktree" },
     );
     expect(toast.type).toBe("warning");
     expect(toast.description).toContain("The setup script failed: vp install exited 1");

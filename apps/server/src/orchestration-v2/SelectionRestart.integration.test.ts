@@ -464,13 +464,25 @@ it.live("retries a failed selection restart session open before completing", () 
 );
 
 // regression: #22971 an exclusive session closes on detach; that failed the run and held the queue
-it.live.each(["pooled", "exclusive"] as const)(
-  "a workspace handoff on a %s session completes its run and starts the queued continuation",
-  (mode) =>
+it.live.each([
+  ["pooled", "worktree"],
+  ["exclusive", "worktree"],
+  ["pooled", "xwing"],
+  ["exclusive", "xwing"],
+] as const)(
+  "a workspace handoff on a %s session to its %s checkout completes its run and starts the queued continuation",
+  ([mode, checkout]) =>
     Effect.gen(function* () {
-      const cwd = yield* checkpointWorkspace(`workspace-handoff-${mode}`);
-      const handoffCwd = yield* checkpointWorkspace(`workspace-handoff-${mode}-target`);
-      const threadId = ThreadId.make(`thread:workspace-handoff:${mode}`);
+      const cwd = yield* checkpointWorkspace(`workspace-handoff-${mode}-${checkout}`);
+      const handoffCwd = yield* checkpointWorkspace(`workspace-handoff-${mode}-${checkout}-target`);
+      const threadId = ThreadId.make(`thread:workspace-handoff:${mode}:${checkout}`);
+      const developmentEnvironment = {
+        xwingEnvironmentId: "aaaaaaaaaaaaaaaa",
+        repositorySource: cwd,
+        checkoutPath: handoffCwd,
+        number: 1,
+        name: "Workspace handoff",
+      };
       const state = yield* Ref.make<RestartAdapterState>({
         activeTurn: null,
         opened: [],
@@ -548,6 +560,26 @@ it.live.each(["pooled", "exclusive"] as const)(
         yield* Fiber.join(running);
         yield* worker.drain();
 
+        const selectEnvironment = {
+          type: "thread.workspace.select" as const,
+          threadId,
+          expected: { worktreePath: cwd, xwingEnvironmentId: null },
+          worktreePath: handoffCwd,
+          branch: "repro-handoff",
+          developmentEnvironment,
+        };
+        if (checkout === "xwing") {
+          // Only an agent handing off from its own turn may move a running thread.
+          const refused = yield* orchestrator
+            .dispatch({
+              ...selectEnvironment,
+              commandId: CommandId.make("command:workspace-handoff:person-select"),
+            })
+            .pipe(Effect.flip);
+          assert.instanceOf(refused, Orchestrator.OrchestratorWorkspaceSelectionRejectedError);
+          assert.equal(refused.reason, "work-in-progress");
+        }
+
         const settled = yield* eventSink
           .stream({
             threadId,
@@ -567,18 +599,25 @@ it.live.each(["pooled", "exclusive"] as const)(
             Effect.forkScoped,
           );
         // What t3_worktree_handoff dispatches while the calling turn is still running.
-        const bound = yield* orchestrator.dispatch({
-          type: "thread.metadata.update",
+        const handoff = {
           commandId: CommandId.make("command:workspace-handoff:rebind"),
-          workspaceChange: "agent-handoff",
-          threadId,
-          branch: "repro-handoff",
-          worktreePath: handoffCwd,
+          workspaceChange: "agent-handoff" as const,
           continuation: {
             messageId: MessageId.make("message:workspace-handoff:continuation"),
             text: "continue in the worktree",
           },
-        });
+        };
+        const bound = yield* orchestrator.dispatch(
+          checkout === "xwing"
+            ? { ...selectEnvironment, ...handoff }
+            : {
+                type: "thread.metadata.update",
+                threadId,
+                branch: "repro-handoff",
+                worktreePath: handoffCwd,
+                ...handoff,
+              },
+        );
         // The detach can settle the run at once, so its follow-up must exist in the same commit.
         assert.deepEqual(
           bound.storedEvents.flatMap(({ event }) =>
@@ -599,6 +638,10 @@ it.live.each(["pooled", "exclusive"] as const)(
       );
 
       assert.equal(projection.thread.worktreePath, handoffCwd);
+      assert.equal(
+        projection.thread.developmentEnvironment?.checkoutPath,
+        checkout === "xwing" ? handoffCwd : undefined,
+      );
       assert.equal(projection.runs[0]?.status, "completed");
       assert.isNotNull(projection.runs[0]?.checkpointId ?? null);
       assert.isFalse(

@@ -965,8 +965,11 @@ function askedForLinkedMachine(
 
 // A workspace change detaches the session, which can settle the calling run at once. Queuing its
 // follow-up in a later command would let a delegated task report its result before that exists.
-function metadataUpdateContinuation(
-  command: Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }>,
+function workspaceChangeContinuation(
+  command: Extract<
+    OrchestrationV2ServerCommand,
+    { readonly type: "thread.metadata.update" | "thread.workspace.select" }
+  >,
 ): Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }> | undefined {
   return command.continuation === undefined
     ? undefined
@@ -4855,9 +4858,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.projectId !== undefined &&
       command.projectId !== thread.projectId;
     // Server preparation and an agent's handoff may move a running thread; clients may not.
+    const serverWorkspaceChange =
+      (command.type === "thread.metadata.update" || command.type === "thread.workspace.select") &&
+      command.workspaceChange !== undefined;
     const clientWorkspaceChange =
       command.type === "thread.metadata.update" &&
-      command.workspaceChange === undefined &&
+      !serverWorkspaceChange &&
       command.worktreePath !== undefined &&
       command.worktreePath !== thread.worktreePath;
     // An empty-thread claim has no work to protect and keeps its own refusal below.
@@ -4902,11 +4908,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         )
         .pipe(mapDispatchError(command));
       // Restores run in the checkpoint's checkout after the command commits.
-      if (threadHasUnfinishedWork(records) || (yield* checkpointRollbackPending(command, thread))) {
+      if (
+        !serverWorkspaceChange &&
+        (threadHasUnfinishedWork(records) || (yield* checkpointRollbackPending(command, thread)))
+      ) {
         return yield* rejectSelection("work-in-progress");
       }
       // Moving detaches every session, which would end background agents and commands.
-      if (projectChanged || command.worktreePath !== thread.worktreePath) {
+      if (
+        !serverWorkspaceChange &&
+        (projectChanged || command.worktreePath !== thread.worktreePath)
+      ) {
         for (const session of records.providerSessions) {
           if (session.status === "stopped" || session.status === "error") continue;
           if (yield* sessionHasBackgroundWork(session, records.providerThreads)) {
@@ -17393,7 +17405,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.tag.set":
       case "thread.sidebar-group.set":
       case "thread.mark-unread":
-      case "thread.workspace.select":
       case "thread.pull-request.link":
       case "thread.pull-request.unlink":
       case "thread.pull-request-link.sync":
@@ -17406,8 +17417,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);
         break;
-      case "thread.metadata.update": {
-        const continuation = metadataUpdateContinuation(command);
+      case "thread.metadata.update":
+      case "thread.workspace.select": {
+        const continuation = workspaceChangeContinuation(command);
         if (continuation !== undefined) yield* refuseNativeSubagentMessage(command);
         yield* dispatchThreadMutation(command, events, effects);
         if (continuation !== undefined) {
@@ -18102,7 +18114,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Taken before the lineage read, so a message whose read yields keeps its
     // place ahead of later messages to the same thread.
     const message =
-      command.type === "thread.metadata.update" ? metadataUpdateContinuation(command) : command;
+      command.type === "thread.metadata.update" || command.type === "thread.workspace.select"
+        ? workspaceChangeContinuation(command)
+        : command;
     if (message?.type === "message.dispatch")
       return yield* messageIntake.withLock(
         message.threadId,

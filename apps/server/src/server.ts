@@ -650,23 +650,27 @@ const layerOrchestrationApplication = Layer.mergeAll(
   NativeChildWorkQuery.layer,
   // The same layer the MCP worktree toolkit provides, so both share one per-thread handoff guard.
   WorktreeMcpService.layer,
-  DevelopmentEnvironments.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        DevelopmentEnvironmentCheckouts.layerXwing,
-        WorkspacePaths.layer,
-        RuntimeLayer.layerDevelopmentEnvironmentDiscoveryProvided,
-        ProjectionStoreV2.layer,
-        layerXwingOperations,
-      ).pipe(Layer.provideMerge(GitVcsDriver.layer)),
-    ),
-  ),
-  DevelopmentEnvironmentLifecycle.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(ProjectionStoreV2.layer, EffectOutboxV2.layer, layerXwingOperations),
-    ),
-  ),
 ).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      DevelopmentEnvironments.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            DevelopmentEnvironmentCheckouts.layerXwing,
+            WorkspacePaths.layer,
+            RuntimeLayer.layerDevelopmentEnvironmentDiscoveryProvided,
+            ProjectionStoreV2.layer,
+            layerXwingOperations,
+          ).pipe(Layer.provideMerge(GitVcsDriver.layer)),
+        ),
+      ),
+      DevelopmentEnvironmentLifecycle.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(ProjectionStoreV2.layer, EffectOutboxV2.layer, layerXwingOperations),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(layerDevelopmentEnvironmentHolds),
   Layer.provideMerge(layerCheckpointStore),
   Layer.provideMerge(layerOrchestrationV2Runtime),

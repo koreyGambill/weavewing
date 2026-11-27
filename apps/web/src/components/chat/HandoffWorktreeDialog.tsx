@@ -23,6 +23,7 @@ import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import {
   handoffBranchNameProblem,
+  handoffDestination,
   handoffFailureMessage,
   handoffSuccessToast,
 } from "./handoffWorktree.logic";
@@ -53,6 +54,9 @@ function HandoffWorktreeDialog({
     thread ? scopeProjectRef(threadRef.environmentId, thread.projectId) : null,
   );
   const settings = useEnvironmentSettings(threadRef.environmentId);
+  // Xwing runs an environment's installs itself, so T3's setup script is not offered there.
+  const intoEnvironment = settings.worktreeProvider === "xwing";
+  const destination = handoffDestination(settings.worktreeProvider);
   const projectDefault = resolveProjectSettings(settings, project?.id ?? null, project ?? undefined)
     .settings.newWorktreesStartFromOrigin;
   const [branch, setBranch] = useState("");
@@ -65,7 +69,7 @@ function HandoffWorktreeDialog({
   const canHandoff = useAtomValue(handoffThreadToWorktree.permissionAtom(threadRef.environmentId));
   // The dialog shows the server's refusal itself, beside the field it concerns.
   const handoff = useAtomCommand(handoffThreadToWorktree, {
-    label: "Hand off to a worktree",
+    label: `Hand off to ${destination}`,
     reportFailure: false,
   });
   const busy = thread !== null && threadRuntimeIsActive(thread.runtime);
@@ -85,7 +89,7 @@ function HandoffWorktreeDialog({
     });
     setPending(false);
     if (result._tag === "Failure") return refuse(handoffFailureMessage(result.cause));
-    toastManager.add(handoffSuccessToast(result.value, { startFromOrigin }));
+    toastManager.add(handoffSuccessToast(result.value, { startFromOrigin, destination }));
     close();
   };
   return (
@@ -104,10 +108,11 @@ function HandoffWorktreeDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Hand off to a worktree</DialogTitle>
+            <DialogTitle>Hand off to {destination}</DialogTitle>
             <DialogDescription>
-              Creates a new branch in its own worktree and moves this thread there. The next turn
-              starts in the worktree with this conversation.
+              {intoEnvironment
+                ? "Creates a new branch in a new Xwing environment and moves this thread there. The next turn starts in the environment with this conversation."
+                : "Creates a new branch in its own worktree and moves this thread there. The next turn starts in the worktree with this conversation."}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -143,14 +148,16 @@ function HandoffWorktreeDialog({
                 />
                 Start from the remote's latest commit
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={runSetupScript}
-                  disabled={pending}
-                  onCheckedChange={(checked) => setRunSetupScript(checked === true)}
-                />
-                Run the project's setup script
-              </label>
+              {intoEnvironment ? null : (
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={runSetupScript}
+                    disabled={pending}
+                    onCheckedChange={(checked) => setRunSetupScript(checked === true)}
+                  />
+                  Run the project's setup script
+                </label>
+              )}
               {busy ? (
                 <p className="text-sm text-muted-foreground">
                   Stop the turn or let it finish before handing off.
@@ -158,7 +165,7 @@ function HandoffWorktreeDialog({
               ) : null}
               {!canHandoff ? (
                 <p className="text-sm text-muted-foreground">
-                  This connection cannot create worktrees or move threads.
+                  This connection cannot create checkouts or move threads.
                 </p>
               ) : null}
             </div>

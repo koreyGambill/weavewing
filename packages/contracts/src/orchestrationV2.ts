@@ -4065,6 +4065,10 @@ const OrchestrationV2InternalCommand = Schema.Union([
     projectId: Schema.optional(ProjectId),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     developmentEnvironment: Schema.NullOr(OrchestrationV2DevelopmentEnvironmentCheckout),
+    /** An agent's explicit handoff from its own turn may move a thread that is not stopped. */
+    workspaceChange: Schema.optional(Schema.Literal("agent-handoff")),
+    /** A message queued in the same commit, so the workspace change cannot settle the thread first. */
+    continuation: Schema.optional(Schema.Struct({ messageId: MessageId, text: Schema.String })),
   }),
   /**
    * After a push, the thread's watches forget whether their checks were running, since the push

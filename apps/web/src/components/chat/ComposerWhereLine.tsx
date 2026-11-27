@@ -7,6 +7,7 @@ import { Boxes, FolderGit2Icon, FolderIcon, MapPinIcon, PlusIcon } from "lucide-
 
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import type { DraftId } from "~/composerDraftStore";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { registerCommands } from "~/shortcuts/dispatcher";
@@ -23,6 +24,7 @@ import { xwingEnvironmentLabel } from "../xwing/xwingEnvironments.logic";
 import { ComposerControl } from "./ComposerControl";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import { useComposerLocationActions } from "./composerLocationActions";
+import { handoffDestination } from "./handoffWorktree.logic";
 import { DraftProjectPicker } from "./DraftProjectPicker";
 import { openChangeThreadFolder } from "./changeThreadFolderDialogState";
 import { useDraftPlaceSelection } from "./useDraftPlaceSelection";
@@ -227,6 +229,9 @@ function ComposerLocationMenu(props: {
   // Set when an item hands focus to another popup, so the menu does not take it back.
   const [focusHandedOff, setFocusHandedOff] = useState(false);
   const { chooseXwingEnvironment, newEnvironment, handoffWorktree } = actions;
+  const handoffTo = useEnvironmentSettings(props.threadRef.environmentId, (settings) =>
+    handoffDestination(settings.worktreeProvider),
+  );
   return (
     <Menu
       onOpenChange={(open) => {
@@ -282,7 +287,7 @@ function ComposerLocationMenu(props: {
         {handoffWorktree ? (
           <MenuItem onClick={() => handoffWorktree(trigger)}>
             <FolderGit2Icon />
-            Hand off to a worktree…
+            Hand off to {handoffTo}…
           </MenuItem>
         ) : null}
       </MenuPopup>

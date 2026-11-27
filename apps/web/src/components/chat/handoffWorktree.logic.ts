@@ -1,4 +1,4 @@
-import type { WorktreeMcpHandoffResult } from "@t3tools/contracts";
+import type { WorktreeMcpHandoffResult, WorktreeProvider } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 
 /**
@@ -25,6 +25,11 @@ export function handoffBranchNameProblem(name: string): string | null {
   return null;
 }
 
+/** Where a handoff moves the thread on a server with this `worktreeProvider`. */
+export function handoffDestination(worktreeProvider: WorktreeProvider): string {
+  return worktreeProvider === "xwing" ? "an Xwing environment" : "a worktree";
+}
+
 /** The server's reason a handoff failed, to show beside the branch name. */
 export function handoffFailureMessage(cause: Cause.Cause<unknown>): string {
   const error = Cause.squash(cause);
@@ -35,7 +40,7 @@ export function handoffFailureMessage(cause: Cause.Cause<unknown>): string {
 
 /**
  * The success toast, which also says when an option the person chose did not happen as asked:
- * the setup script failed, or no remote held the base so the worktree started from the local
+ * the setup script failed, or no remote held the base so the checkout started from the local
  * commit.
  */
 export function handoffSuccessToast(
@@ -43,7 +48,7 @@ export function handoffSuccessToast(
     WorktreeMcpHandoffResult,
     "worktreePath" | "baseRef" | "startedFromOrigin" | "setupScript"
   >,
-  requested: { readonly startFromOrigin: boolean },
+  requested: { readonly startFromOrigin: boolean; readonly destination: string },
 ) {
   const notes = [
     requested.startFromOrigin && !result.startedFromOrigin
@@ -55,7 +60,7 @@ export function handoffSuccessToast(
   ].filter((note) => note !== null);
   return {
     type: notes.length > 0 ? ("warning" as const) : ("success" as const),
-    title: "Handed off to a worktree",
+    title: `Handed off to ${requested.destination}`,
     description: [result.worktreePath, ...notes].join("\n"),
   };
 }

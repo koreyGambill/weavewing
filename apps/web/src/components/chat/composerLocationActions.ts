@@ -10,8 +10,8 @@ export interface ComposerLocationActions {
   /** Opens the dialog that creates an Xwing environment and moves the thread into it. */
   readonly newEnvironment?: (() => void) | undefined;
   /**
-   * Opens the dialog that moves the thread into a new worktree on a new branch, returning focus
-   * to `returnFocus` when it closes.
+   * Opens the dialog that moves the thread into a new worktree or Xwing environment on a new
+   * branch, returning focus to `returnFocus` when it closes.
    */
   readonly handoffWorktree?: ((returnFocus: HTMLElement | null) => void) | undefined;
 }
