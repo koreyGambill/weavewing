@@ -92,24 +92,6 @@ export const THREAD_MODE_LABELS = {
   fresh_session: "One thread, fresh session per run",
 } as const;
 
-const RUN_OUTCOME_LABELS: Record<string, string> = {
-  running: "Running",
-  quiet: "Quiet",
-  notified: "Notified",
-  suppressed: "Suppressed",
-  failed: "Failed",
-  skipped: "Skipped",
-  budget_stopped: "Stopped at its budget",
-  capped: "Over its hourly cap",
-};
-
-export function runOutcomeLabel(run: Pick<ScheduledTaskRun, "status" | "skipCount">): string {
-  const label = RUN_OUTCOME_LABELS[run.status] ?? run.status.split("_").join(" ");
-  return run.status === "skipped" && (run.skipCount ?? 1) > 1
-    ? `${label} ×${run.skipCount}`
-    : label;
-}
-
 /** The run's whole price: the main agent's, plus the estimate for subagents and compaction. */
 export function runCostLabel(
   run: Pick<ScheduledTaskRun, "costUsd" | "otherCostUsdEstimate">,

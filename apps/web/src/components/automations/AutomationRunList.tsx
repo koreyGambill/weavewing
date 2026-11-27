@@ -1,3 +1,4 @@
+import { runOutcomeLabel } from "@t3tools/client-runtime/automations";
 import type { EnvironmentId, ScheduledTaskId, ScheduledTaskRun } from "@t3tools/contracts";
 import {
   BanIcon,
@@ -11,7 +12,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { runCostLabel, runOutcomeLabel } from "./automationsView.logic";
+import { runCostLabel } from "./automationsView.logic";
 import { useOpenThread } from "./useAutomations";
 
 const RUN_ICONS: Record<string, { icon: ReactNode; tone: string }> = {
