@@ -1,6 +1,6 @@
+import type { QaChange } from "@t3tools/client-runtime/qa-card";
 import {
   EVIDENCE_THREAD_LANDING_LIMIT,
-  MessageId,
   ThreadId,
   WaitingItemContextRecord,
   type EvidenceChangeQa,
@@ -12,16 +12,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   findQaChange,
   qaCapturePreview,
-  qaCardStatus,
   qaDiscussRecord,
   qaFullText,
   qaHistory,
   qaHistoryCapped,
   qaLandedLine,
-  qaShowsCard,
-  qaWaiting,
-  type QaChange,
-} from "./qaCard.logic";
+} from "./mobileQaCard.logic";
 
 const decodeWaitingItem = Schema.decodeSync(WaitingItemContextRecord);
 
@@ -58,32 +54,6 @@ const landing: EvidenceLanding = {
   landedAt: "2026-11-25T10:00:00.000Z",
   updatedAt: "2026-11-25T10:00:00.000Z",
 };
-
-describe("qaShowsCard", () => {
-  it("shows no card for a quiet change", () => {
-    expect(qaShowsCard(qa({ state: "quiet", raised: [] }))).toBe(false);
-  });
-
-  it("shows a change from before reasons were kept only while it waits on the user", () => {
-    const { raised: _raised, ...legacy } = qa();
-    expect(qaShowsCard(legacy)).toBe(true);
-    expect(qaShowsCard({ ...legacy, state: "problem" })).toBe(false);
-    expect(qaShowsCard(qa({ state: "problem", raised: ["legacy"] }))).toBe(true);
-  });
-});
-
-it.each([
-  [qa(), false, "open"],
-  [qa({ discussedMessageId: MessageId.make("message-1") }), false, "discussing"],
-  [qa(), true, "in-composer"],
-  [qa({ state: "quiet", raised: [] }), false, "quiet"],
-  [qa({ state: "quiet", raised: [] }), true, "in-composer"],
-  [qa({ state: "problem", by: "agent", note: "Overlaps" }), false, "agent-fixing"],
-  [qa({ state: "waived", by: "user" }), false, "dismissed"],
-  [qa({ state: "confirmed", by: "agent" }), false, "recorded"],
-] as const)("%o in composer %s reads %s", (value, inComposer, expected) => {
-  expect(qaCardStatus(value, inComposer)).toBe(expected);
-});
 
 it("adds the ask to the landed line only when the title is not the ask", () => {
   expect(qaLandedLine(landing, change())).toBe(
@@ -141,15 +111,6 @@ describe("qaHistory", () => {
 
   it("lists answered changes newest first, after the waiting rows dropped them", () => {
     expect(history.map((entry) => entry.change.id)).toEqual(["fixing", "dismissed", "confirmed"]);
-  });
-
-  it("keeps Reopen reachable for a settled change and the problem read-only", () => {
-    const [fixing, dismissed, confirmed] = history;
-    expect([confirmed, dismissed].map((entry) => qaWaiting(entry!.change.qa))).toEqual([
-      false,
-      false,
-    ]);
-    expect(qaCardStatus(fixing!.change.qa, false)).toBe("agent-fixing");
   });
 
   it("says older QA may exist once the read returns the server's landing cap", () => {

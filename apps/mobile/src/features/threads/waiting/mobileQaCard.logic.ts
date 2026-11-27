@@ -1,7 +1,16 @@
 import {
+  qaCardTitle,
+  qaKey,
+  qaPresence,
+  qaRef,
+  type QaCardStatus,
+  type QaChange,
+} from "@t3tools/client-runtime/qa-card";
+import {
   EVIDENCE_THREAD_LANDING_LIMIT,
   type EvidenceChangeQa,
   type EvidenceLanding,
+  type EvidenceQaRaiseReason,
   type EvidenceVerification,
   type WaitingItemContextRecord,
 } from "@t3tools/contracts";
@@ -11,64 +20,26 @@ import {
 } from "@t3tools/shared/composerContextReferences";
 import { filePreviewKind, hostPreviewMimeTypeFromExtension } from "@t3tools/shared/filePreview";
 
-export type QaChange = EvidenceLanding["changes"][number];
-
-export type QaCardStatus =
-  | "open"
-  | "quiet"
-  | "in-composer"
-  | "discussing"
-  | "confirmed"
-  | "recorded"
-  | "agent-fixing"
-  | "dismissed";
-
 export const QA_STATUS_LABEL: Record<QaCardStatus, string> = {
   open: "Open",
-  quiet: "Nothing to check",
   "in-composer": "In composer",
   discussing: "Discussing",
-  confirmed: "Confirmed by you",
+  "confirmed-by-you": "Confirmed by you",
   recorded: "Recorded by the agent",
   "agent-fixing": "Agent fixing",
   dismissed: "Dismissed",
 };
 
-/**
- * Whether a change shows a card. A quiet change had nothing to judge, and a landing from before
- * reasons were kept shows one only while it still waits on the user.
- */
-export function qaShowsCard(qa: EvidenceChangeQa): boolean {
-  if (qa.state === "quiet") return false;
-  return qa.raised !== undefined || qa.state === "pending";
-}
-
-export function qaCardStatus(qa: EvidenceChangeQa, inComposer: boolean): QaCardStatus {
-  switch (qa.state) {
-    case "pending":
-    case "quiet":
-      if (inComposer) return "in-composer";
-      if (qa.discussedMessageId !== undefined) return "discussing";
-      // Recorded quietly: only Evidence lists it, and the user may still answer it.
-      return qa.state === "quiet" ? "quiet" : "open";
-    case "problem":
-      return "agent-fixing";
-    case "confirmed":
-      return qa.by === "agent" ? "recorded" : "confirmed";
-    case "waived":
-      return qa.by === "agent" ? "recorded" : "dismissed";
-  }
-}
-
-/** The user can still answer: the change waits on them. */
-export const qaWaiting = (qa: EvidenceChangeQa) => qa.state === "pending" || qa.state === "quiet";
-
-const firstLine = (text: string) => text.split("\n", 1)[0]!.trim();
-
-/** The card's title: the change's summary, else the user's ask, else its id. */
-export function qaCardTitle(change: Pick<QaChange, "summary" | "ask" | "id">): string {
-  return firstLine(change.summary) || firstLine(change.ask) || change.id;
-}
+export const QA_RAISE_REASON_LABEL: Record<EvidenceQaRaiseReason, string> = {
+  legacy: "Previously requested",
+  captures: "Captures to review",
+  review_waived: "Review waived",
+  review_changes_requested: "Review changes requested",
+  check_failed: "Check failed",
+  check_skipped: "Check skipped",
+  gaps: "Gaps to review",
+  needs_you: "Needs you",
+};
 
 /**
  * The whole text, for a summary or ask with more than the first line the title and landed line
@@ -80,12 +51,9 @@ export function qaFullText(text: string): string | null {
   return newline >= 0 && trimmed.slice(newline + 1).trim() !== "" ? trimmed : null;
 }
 
-export const qaRef = (change: QaChange) =>
-  change.qa.ref === undefined ? "QA" : `QA${change.qa.ref}`;
-
 /** "Landed on main · abc1234", plus the ask when the title is not already the ask. */
 export function qaLandedLine(landing: Pick<EvidenceLanding, "target">, change: QaChange): string {
-  const ask = firstLine(change.ask);
+  const ask = change.ask.split("\n", 1)[0]!.trim();
   return [
     `Landed on ${landing.target.branch}`,
     landing.target.sha.slice(0, 7),
@@ -153,8 +121,10 @@ export function qaHistory(
   return landings
     .flatMap((landing) =>
       landing.changes.flatMap((change) => {
-        const key = `${landing.id}/${change.id}`;
-        return listedKeys.has(key) || !qaShowsCard(change.qa) || qaWaiting(change.qa)
+        const key = qaKey(landing.id, change.id);
+        return listedKeys.has(key) ||
+          qaPresence(change.qa) !== "card" ||
+          change.qa.state === "pending"
           ? []
           : [{ key, landing, change }];
       }),
@@ -192,7 +162,7 @@ export function qaDiscussRecord(
   landing: Pick<EvidenceLanding, "id" | "target">,
   change: QaChange,
 ): WaitingItemContextRecord {
-  const key = `${landing.id}/${change.id}`;
+  const key = qaKey(landing.id, change.id);
   const ref = qaRef(change);
   const title = qaCardTitle(change);
   return {
