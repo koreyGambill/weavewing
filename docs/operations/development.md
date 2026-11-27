@@ -232,7 +232,16 @@ such as `dist`; run `vp i` after editing inside `node_modules`, and pass `--no-m
 reads one of the others.
 `sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web` runs one full suite as CI
 does (`web`, `server` or `packages`), when someone needs one, and reports every failing file or package.
+`--full` in place of `--suite` runs all three one after another. To run a suite on a clean tree,
+`git clone` the repository and install it with `vp i`, not `xwing app install`, which also links
+the main checkout's env files that a clean clone must not contain.
 `sparkwing run gate --help` and `sparkwing run suite --help` list their arguments.
+
+`sparkwing run confirm-main` confirms `origin/main` and gates nothing. It waits as batch work for a
+suite's cores, then stops when a finished `suite --full` run already covers the head's tree (pass
+`-- --force` to run anyway). Otherwise it clones `origin/main` into a temporary directory, runs
+`suite --full` there, appends any failing files to the known-failures list, and removes the clone.
+Its daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB
 of available memory. On a large machine a run takes about as long as its slowest step, usually

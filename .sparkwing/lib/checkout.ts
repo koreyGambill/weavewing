@@ -31,7 +31,21 @@ export interface Checkout {
 
 /** Resolves --worktree and --evidence, and the Node runtime the checkout's engines.node pins. */
 export function checkout(ctx: Context): Checkout {
-  const root = ctx.args.worktree ?? "";
+  return checkoutAt(ctx, ctx.args.worktree ?? "");
+}
+
+/** --evidence, or ~/evidence/t3code/sparkwing/runs/<pipeline>/<run id>, created. */
+export function evidenceDir(ctx: Context): string {
+  const evidence =
+    ctx.args.evidence ||
+    NodePath.join(NodeOS.homedir(), "evidence/t3code/sparkwing/runs", ctx.run.pipeline, ctx.run.id);
+  if (!NodePath.isAbsolute(evidence)) throw new Error(`--evidence must be absolute: ${evidence}`);
+  NodeFS.mkdirSync(evidence, { recursive: true });
+  return evidence;
+}
+
+/** The checkout at root, whose dependencies `vp i` has installed. */
+export function checkoutAt(ctx: Context, root: string): Checkout {
   if (!NodePath.isAbsolute(root)) throw new Error(`--worktree must be absolute, got "${root}"`);
   if (!NodeFS.existsSync(NodePath.join(root, ".git")))
     throw new Error(`--worktree ${root} is not the root of a git checkout`);
@@ -43,15 +57,9 @@ export function checkout(ctx: Context): Checkout {
   if (!NodeFS.existsSync(NodePath.join(nodeBin, "node")))
     throw new Error(`Node ${nodeVersion} (engines.node) is missing at ${nodeBin}; run vp i first`);
 
-  const evidence =
-    ctx.args.evidence ||
-    NodePath.join(home, "evidence/t3code/sparkwing/runs", ctx.run.pipeline, ctx.run.id);
-  if (!NodePath.isAbsolute(evidence)) throw new Error(`--evidence must be absolute: ${evidence}`);
-  NodeFS.mkdirSync(evidence, { recursive: true });
-
   return {
     root,
-    evidence,
+    evidence: evidenceDir(ctx),
     nodeVersion,
     env: {
       PATH: [nodeBin, NodePath.join(home, ".vite-plus/bin"), process.env.PATH ?? ""].join(":"),

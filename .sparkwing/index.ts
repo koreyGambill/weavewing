@@ -10,6 +10,8 @@ import "./jobs/test.ts";
 
 import "./jobs/suite.ts";
 
+import "./jobs/confirm-main.ts";
+
 import "./jobs/desktop-install.ts";
 
 import "./jobs/upstream-contracts.ts";

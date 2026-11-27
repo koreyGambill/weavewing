@@ -1,4 +1,6 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 import type { Context } from "@sparkwing/sdk";
 
@@ -79,6 +81,30 @@ export const SUITES = {
 
 export type SuiteName = keyof typeof SUITES;
 
+/** Runs web, server and packages one after another, then fails naming every suite that failed. */
+export async function everySuite(ctx: Context, co: Checkout): Promise<void> {
+  const failed: string[] = [];
+  for (const [name, suite] of Object.entries(SUITES)) {
+    await suite.run(ctx, co).catch((error: unknown) => {
+      ctx.log.error(`${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+      failed.push(name);
+    });
+  }
+  if (failed.length > 0) throw new Error(`Suites failed: ${failed.join(", ")}`);
+}
+
 export function isSuiteName(name: string): name is SuiteName {
   return Object.hasOwn(SUITES, name);
+}
+
+/** Each test file vitest reports as failed in a directory of suite logs, by log name. */
+export function failingTestFiles(dir: string): Array<{ readonly log: string; readonly file: string }> {
+  if (!NodeFS.existsSync(dir)) return [];
+  const found = new Map<string, { log: string; file: string }>();
+  for (const name of NodeFS.readdirSync(dir).filter((entry) => entry.endsWith(".log")).sort()) {
+    const log = name.replace(/\.log$/, "");
+    for (const [, file] of NodeFS.readFileSync(NodePath.join(dir, name), "utf8").matchAll(/^ FAIL {2}(?:\|[^|]+\| )?(\S+)/gm))
+      found.set(`${log}\0${file}`, { log, file: file! });
+  }
+  return [...found.values()];
 }
