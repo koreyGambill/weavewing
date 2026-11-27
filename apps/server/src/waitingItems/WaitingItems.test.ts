@@ -109,6 +109,8 @@ const harness = Effect.fn("test.waitingItemsHarness")(function* (
         archivedThreads: [],
       })),
     streamDomainEvents: Stream.empty,
+    // Agents record these answers in turns no user message started.
+    getCurrentUserMessageId: () => Effect.succeed(null),
     dispatch: (command: OrchestrationV2ServerCommand) =>
       Effect.sync(() => {
         if (command.type === "thread.waiting.sync") {
