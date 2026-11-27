@@ -102,7 +102,7 @@ export function ComposerContextMeter({ threadRef }: { readonly threadRef: Scoped
       </Pressable>
       {open ? (
         <Sheet title="Context usage" onClose={() => setOpen(false)}>
-          <FitSheet contentContainerClassName="gap-4 px-5 pt-4">
+          <FitSheet header={null} contentContainerClassName="gap-4 px-5 pt-4">
             <Text className="font-t3-medium text-base">
               {percent === null ? amount : `${amount} (${percent}%)`}
             </Text>
