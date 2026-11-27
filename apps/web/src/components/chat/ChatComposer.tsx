@@ -235,6 +235,8 @@ import {
   type ExpandedImagePreview,
 } from "./ExpandedImagePreview";
 import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
+import { TrackAnswerToggle } from "../answers/TrackAnswerToggle";
+import { useTrackedAnswerDraft, useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
 import {
   getComposerPromptLengthValidationMessage,
   getComposerSubmissionValidationMessage,
@@ -248,7 +250,7 @@ import { observeResize } from "~/lib/observeResize";
 
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
-import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
+import { BuildingIcon, PlayIcon, ReplyIcon, XIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
@@ -383,6 +385,7 @@ export interface ChatComposerProps {
     React.SetStateAction<ReadonlyArray<ModelSelection> | null>
   >;
 
+  waitingCardsEnabled?: boolean;
   activeThreadId: ThreadId | null;
   activeThread: Thread | undefined;
   activeThreadRuns: ReadonlyArray<OrchestrationV2Run>;
@@ -601,6 +604,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
+  const answerDraft = useTrackedAnswerDraft(composerDraftTargetKey);
+  const showTrackAnswer = props.waitingCardsEnabled === true;
+  const toggleTrackAnswer = () =>
+    useTrackedAnswerDraftStore.getState().toggleTrack(composerDraftTargetKey);
   const {
     heldRequestIds,
     onDraftChange: onTypingGuardDraftChange,
@@ -3427,6 +3434,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     <form
       ref={composerFormRef}
       onSubmit={submitComposerStable}
+      onKeyDownCapture={(event) => {
+        const mod = isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey;
+        if (
+          showTrackAnswer &&
+          canOperateThread &&
+          mod &&
+          event.shiftKey &&
+          !event.altKey &&
+          !event.repeat &&
+          event.key.toLowerCase() === "y"
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTrackAnswer();
+        }
+      }}
       onFocusCapture={(event) => {
         const activeElement = event.target;
         if (
@@ -3688,6 +3711,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
               {composerAttachmentFileList}
 
+              {showTrackAnswer && answerDraft.discuss.length > 0 ? (
+                <div className="flex min-w-0 flex-wrap gap-1 px-2">
+                  {answerDraft.discuss.map((ask) => (
+                    <Button
+                      key={ask.id}
+                      type="button"
+                      size="xs"
+                      variant="contrast-outline"
+                      aria-label={`Remove follow-up on ${ask.id}`}
+                      onClick={() =>
+                        useTrackedAnswerDraftStore
+                          .getState()
+                          .toggleDiscuss(composerDraftTargetKey, ask)
+                      }
+                    >
+                      <span className="min-w-0 truncate">
+                        {ask.id} · discuss · {ask.question}
+                      </span>
+                      <XIcon aria-hidden="true" />
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
               <div className="relative">
                 {previewFile ? (
                   <ComposerFilePreviewDialog
@@ -3846,6 +3892,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       cost={threadCost}
                       compactDisabled={compactDisabled}
                       onCompact={compactThreadContextStable}
+                    />
+                  ) : null}
+                  {showTrackAnswer && !dictationTakesFooter ? (
+                    <TrackAnswerToggle
+                      pressed={answerDraft.track}
+                      compact={isComposerFooterCompact}
+                      disabled={!canOperateThread}
+                      onToggle={toggleTrackAnswer}
                     />
                   ) : null}
                   <ComposerFooterPrimaryActions

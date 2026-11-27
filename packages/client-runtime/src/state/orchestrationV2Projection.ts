@@ -322,13 +322,13 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.model-selection-updated":
     case "thread.provider-switched":
     case "thread.guest-share-updated":
-      return { ...base, thread: event.payload };
+      return { ...base, thread: preserveTrackedAsks(base.thread, event.payload) };
     // Visited tracking and tags are not activity: skip the updatedAt bump.
     case "thread.visited":
     case "thread.tags-updated":
     case "thread.sidebar-group-updated":
     case "thread.marked-unread":
-      return { ...projection, thread: event.payload };
+      return { ...projection, thread: preserveTrackedAsks(projection.thread, event.payload) };
     case "thread.visit-recorded":
       return {
         ...projection,
@@ -467,4 +467,13 @@ function withMergedTokenUsage(
     next.tokenUsage,
   );
   return tokenUsage === undefined ? rest : { ...rest, tokenUsage };
+}
+
+function preserveTrackedAsks<T extends { readonly trackedAsks?: unknown }>(
+  previous: T,
+  next: T,
+): T {
+  return next.trackedAsks === undefined && previous.trackedAsks !== undefined
+    ? { ...next, trackedAsks: previous.trackedAsks }
+    : next;
 }

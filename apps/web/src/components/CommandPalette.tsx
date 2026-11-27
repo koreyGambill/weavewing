@@ -199,6 +199,7 @@ import {
 } from "../commandPaletteStore";
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
+import { useTrackedAnswerDraftStore } from "./answers/trackedAnswerDraft";
 import { openInbox, openInboxView } from "./inbox/openInbox";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
 import { useWaitingOnYou } from "./waiting/threadList/waitingOnYou";
@@ -1894,6 +1895,18 @@ function OpenCommandPaletteDialog(props: {
           .getState()
           .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "notes");
       },
+    });
+  }
+
+  if (activeThread !== null && waitingCardsEnvironmentIds.includes(activeThread.environmentId)) {
+    const draftKey = scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id));
+    actionItems.push({
+      kind: "action",
+      value: "action:track-answer",
+      title: "Track the answer to this message",
+      searchTerms: ["track", "answer", "question"],
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      run: () => useTrackedAnswerDraftStore.getState().toggleTrack(draftKey),
     });
   }
 

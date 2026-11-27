@@ -1,3 +1,4 @@
+import { useTrackedAnswerDraftStore, withTrackedAnswerDraft } from "../answers/trackedAnswerDraft";
 import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
 import { consumeSideChatRefresh, readSideChatRefreshArm } from "./sideChatContextRefresh";
@@ -75,6 +76,7 @@ import {
   restoreFailedDraftThread,
   checkoutPullRequestUrlToLink,
   composerDraftHasUserContent,
+  composerTargetKey,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -215,6 +217,7 @@ interface ComposerSendInput {
   readonly panelAnimationDurationMs: number;
   /** `/clear` can arm a fresh session on this thread. */
   readonly freshSessionAvailable: boolean;
+  readonly waitingCardsEnabled?: boolean;
   readonly sideChatRefreshAvailable: boolean;
   readonly usageLimitsKey: string | null;
   readonly usageLimitsOffered: boolean;
@@ -391,6 +394,10 @@ export function useComposerSend(input: ComposerSendInput) {
     // What the user pressed send on; uploads below can take a while, and a redirect must not
     // decline approvals for a draft that changed meanwhile.
     const promptAtSend = promptRef.current;
+    const answerDraftKey = composerTargetKey(composerDraftTarget);
+    const answerDraft = input.waitingCardsEnabled
+      ? useTrackedAnswerDraftStore.getState().drafts[answerDraftKey]
+      : undefined;
     if (
       usageLimitsOffered &&
       usageLimitsKey !== null &&
@@ -921,20 +928,24 @@ export function useComposerSend(input: ComposerSendInput) {
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
     const buildOutgoingMessageContext = (attachmentIds: ReadonlyArray<string>) =>
-      buildMessageContext({
-        terminalContexts: composerTerminalContextsSnapshot,
-        reviewComments: composerReviewCommentsSnapshot,
-        previewAnnotations: composerPreviewAnnotationsSnapshot,
-        threadContexts: composerThreadContextsSnapshot,
-        environmentContexts: composerEnvironmentContextsSnapshot,
-        waitingItems: composerWaitingItemsSnapshot,
-        artifactAnswers: composerArtifactAnswersSnapshot,
-        replyTo,
-        attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
-          attachment,
-          attachmentId: attachmentIds[index] ?? attachment.id,
-        })),
-      });
+      withTrackedAnswerDraft(
+        buildMessageContext({
+          terminalContexts: composerTerminalContextsSnapshot,
+          reviewComments: composerReviewCommentsSnapshot,
+          previewAnnotations: composerPreviewAnnotationsSnapshot,
+          threadContexts: composerThreadContextsSnapshot,
+          environmentContexts: composerEnvironmentContextsSnapshot,
+          waitingItems: composerWaitingItemsSnapshot,
+          artifactAnswers: composerArtifactAnswersSnapshot,
+          replyTo,
+          attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
+            attachment,
+            attachmentId: attachmentIds[index] ?? attachment.id,
+          })),
+        }),
+        messageTextForSend,
+        answerDraft,
+      );
     const outgoingMessageContext = buildOutgoingMessageContext(
       composerAttachmentsSnapshot.map((attachment) => attachment.id),
     );
@@ -1478,6 +1489,8 @@ export function useComposerSend(input: ComposerSendInput) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (answerDraft)
+          useTrackedAnswerDraftStore.getState().clearSent(answerDraftKey, answerDraft);
         if (pendingTurn !== null) {
           // Wait for the receipt so Stop cannot overtake the send on the server.
           if (pendingTurn.stopRequested) {

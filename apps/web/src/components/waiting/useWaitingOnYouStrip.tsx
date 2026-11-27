@@ -5,9 +5,15 @@ import type {
   EnvironmentId,
   ScopedThreadRef,
   WaitingCounts,
+  TrackedAnswerWaitingRow,
   WaitingItemSummary,
 } from "@t3tools/contracts";
-import { ChevronDownIcon, ChevronUpIcon, UserRoundIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  MessageSquareReplyIcon,
+  UserRoundIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { useComposerArtifactAnswers } from "../../composerDraftStore";
@@ -43,10 +49,12 @@ export function useWaitingOnYouStrip(input: {
   readonly enabled: boolean;
   readonly waiting: ReadonlyArray<WaitingItemSummary> | undefined;
   readonly waitingCounts: WaitingCounts | undefined;
+  readonly waitingAnswers?: ReadonlyArray<TrackedAnswerWaitingRow> | undefined;
   readonly refreshKey: string;
 }): ComposerBannerStackItem | null {
   const { threadRef, enabled } = input;
-  const { workspace, refresh } = useThreadQuestionsWorkspace(threadRef, enabled);
+  const legacyWorkspaceEnabled = enabled && (input.waiting?.length ?? 0) > 0;
+  const { workspace, refresh } = useThreadQuestionsWorkspace(threadRef, legacyWorkspaceEnabled);
   const threadKey = threadRef === null ? "" : scopedThreadKey(threadRef);
   const [openForThread, setOpenForThread] = useState<string | null>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -55,7 +63,7 @@ export function useWaitingOnYouStrip(input: {
   const inComposer = useQuestionsInComposer(threadRef);
   const composerAnswers = useComposerArtifactAnswers(threadRef);
   useWorkspaceMutationRefresh({
-    enabled: enabled && threadRef !== null,
+    enabled: legacyWorkspaceEnabled && threadRef !== null,
     mutationId: input.refreshKey,
     refresh,
     resourceKey:
@@ -85,7 +93,11 @@ export function useWaitingOnYouStrip(input: {
     removeWaitingItemDiscusses(threadRef);
   }, [threadRef, cardsEnabled]);
   if (threadRef === null || !enabled) return null;
-  const summary = waitingStripSummary(input.waiting, input.waitingCounts);
+  const summary = waitingStripSummary(
+    input.waiting,
+    input.waitingCounts,
+    input.waitingAnswers?.length,
+  );
   if (summary === null) return null;
   const open = openForThread === threadKey;
   // Closing the list hands focus back to the strip, so the same key reopens it.
@@ -112,6 +124,8 @@ export function useWaitingOnYouStrip(input: {
       ({ kind, count }) =>
         `${count} ${count === 1 ? WAITING_KIND_LABEL[kind].one : WAITING_KIND_LABEL[kind].many}`,
     ),
+    ...(summary.answersToRead ? [`${summary.answersToRead} answers to read`] : []),
+    ...(summary.owedAnswers ? [`${summary.owedAnswers} answers owed`] : []),
     ...(summary.discussing > 0 ? [`${summary.discussing} discussing`] : []),
   ].join(", ");
   return {
@@ -140,6 +154,21 @@ export function useWaitingOnYouStrip(input: {
             </span>
           );
         })}
+        {summary.answersToRead ? (
+          <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums">
+            <MessageSquareReplyIcon aria-hidden="true" className="size-3.5" />
+            {summary.answersToRead}
+          </span>
+        ) : null}
+        {summary.owedAnswers ? (
+          <span className="truncate text-muted-foreground">
+            · {summary.owedAnswers}{" "}
+            <span className="hidden @min-[37.5rem]:inline">
+              {summary.owedAnswers === 1 ? "answer " : "answers "}
+            </span>
+            owed
+          </span>
+        ) : null}
         {summary.discussing > 0 ? (
           <span className="truncate text-muted-foreground">· {summary.discussing} discussing</span>
         ) : null}
@@ -184,6 +213,7 @@ export function useWaitingOnYouStrip(input: {
               workspace={workspace ?? null}
               unlisted={summary.unlisted}
               hasQuestions={summary.hasQuestions}
+              answerRows={input.waitingAnswers}
             />
           ),
           // Escape from a row or a header control closes the list and returns to the toggle.

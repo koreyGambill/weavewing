@@ -7,10 +7,12 @@ import {
 import type {
   ScopedThreadRef,
   ThreadWorkspace,
+  TrackedAnswerWaitingRow,
   WaitingItemKind,
   WaitingItemSummary,
 } from "@t3tools/contracts";
 import { useState } from "react";
+import { WaitingAnswerRows } from "../answers/WaitingAnswerRows";
 
 import { cn } from "~/lib/utils";
 import { evidenceSetQa } from "../../state/evidence";
@@ -69,6 +71,7 @@ export function WaitingItemsList({
   workspace,
   unlisted,
   hasQuestions,
+  answerRows,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly groups: ReadonlyArray<{
@@ -79,6 +82,7 @@ export function WaitingItemsList({
   /** Items still waiting that the capped rows leave out. */
   readonly unlisted: number;
   readonly hasQuestions: boolean;
+  readonly answerRows?: ReadonlyArray<TrackedAnswerWaitingRow> | undefined;
 }) {
   const sidebar = useThreadContextSidebarStore.getState;
   return (
@@ -106,6 +110,7 @@ export function WaitingItemsList({
           </ul>
         </section>
       ))}
+      {answerRows?.length ? <WaitingAnswerRows threadRef={threadRef} rows={answerRows} /> : null}
       {unlisted > 0 ? (
         <p className="flex flex-wrap items-center gap-x-1 px-2 pb-1 text-xs text-muted-foreground">
           <span>{unlisted} more not listed here. See them in</span>

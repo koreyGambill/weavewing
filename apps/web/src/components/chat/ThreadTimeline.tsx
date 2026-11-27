@@ -19,6 +19,8 @@ import { ThreadEvidenceContext } from "../evidence/ThreadEvidenceContext";
 import { placedLandingIds, timelineMayHoldQa, withLandingCards } from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { withUnplacedTaskCards } from "../tasks/taskPlacement.logic";
+import { useThreadTrackedAsks } from "../../state/threads";
+import { withUnplacedAnswerCards } from "../answers/answerPlacement.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
 /**
@@ -83,10 +85,15 @@ export function ThreadTimeline({
     entriesInput.waitingCards === true && waitingTaskRefs !== ""
       ? withUnplacedTaskCards(plainEntries, waitingTaskRefs.split(","), historyComplete)
       : plainEntries;
+  const trackedAsks = useThreadTrackedAsks(threadDetailRef);
+  const withAnswers =
+    entriesInput.waitingCards === true
+      ? withUnplacedAnswerCards(withTasks, trackedAsks)
+      : withTasks;
   const entries =
     evidence.data === null || threadDetailRef === null
-      ? withTasks
-      : withLandingCards(threadDetailRef.threadId, withTasks, evidence.data.landings);
+      ? withAnswers
+      : withLandingCards(threadDetailRef.threadId, withAnswers, evidence.data.landings);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({

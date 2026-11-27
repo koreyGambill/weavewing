@@ -33,7 +33,9 @@ export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
   threadFamilies.snapshotAtom,
 );
-const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime, {
+  acceptTrackedAnswers: true,
+});
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
 );
@@ -131,3 +133,21 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   threadsAtom: environmentThreadShells.environmentThreadsAtom,
   stateAtom: environmentThreads.stateAtom,
 });
+
+const noTrackedAsks: ReadonlyArray<import("@t3tools/contracts").TrackedAsk> = [];
+const trackedAsksAtom = Atom.family((ref: import("@t3tools/contracts").ScopedThreadRef) =>
+  Atom.map(
+    environmentThreads.stateAtom(ref.environmentId, ref.threadId),
+    (result) =>
+      Option.getOrUndefined(
+        AsyncResult.getOrElse(result, () => EMPTY_ENVIRONMENT_THREAD_STATE).data,
+      )?.thread.trackedAsks ?? noTrackedAsks,
+  ),
+);
+const noTrackedAsksAtom = Atom.make(noTrackedAsks);
+
+export function useThreadTrackedAsks(
+  threadRef: import("@t3tools/contracts").ScopedThreadRef | null,
+) {
+  return useAtomValue(threadRef === null ? noTrackedAsksAtom : trackedAsksAtom(threadRef));
+}

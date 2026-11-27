@@ -1421,6 +1421,7 @@ export default function ChatView(props: ChatViewProps) {
     enabled: settings.waitingCardsEnabled && activeThreadShell?.waitingCounts !== undefined,
     waiting: activeThreadShell?.waiting,
     waitingCounts: activeThreadShell?.waitingCounts,
+    waitingAnswers: activeThreadShell?.waitingAnswers,
     refreshKey: `${waitingRefreshKey(activeThreadShell?.waiting)}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
   });
   const systemComposerBannerItems = useSystemComposerBanners({
@@ -3073,6 +3074,7 @@ export default function ChatView(props: ChatViewProps) {
     setThreadError,
   });
   const { onSend } = useComposerSend({
+    waitingCardsEnabled: settings.waitingCardsEnabled,
     interruptSubmittedTurn,
     environmentId,
     routeThreadKey,
@@ -4191,6 +4193,7 @@ export default function ChatView(props: ChatViewProps) {
                               onPageScrollKeyUp={onComposerPageScrollKeyUpStable}
                               onPageScrollRelease={onComposerPageScrollReleaseStable}
                               onCompactContext={onComposerCompactContextStable}
+                              waitingCardsEnabled={settings.waitingCardsEnabled}
                               onSend={onComposerSendStable}
                               onResume={onComposerResumeStable}
                               onInterrupt={onInterruptStable}

@@ -187,6 +187,7 @@ export interface EnvironmentThreadShell {
   readonly waiting?: OrchestrationV2ThreadShell["waiting"];
   /** Items waiting on the user per kind; absent before the first. */
   readonly waitingCounts?: OrchestrationV2ThreadShell["waitingCounts"];
+  readonly waitingAnswers?: OrchestrationV2ThreadShell["waitingAnswers"];
   readonly hasActionableProposedPlan: boolean;
   readonly pendingBackgroundTasks: ReadonlyArray<
     NonNullable<OrchestrationV2ThreadShell["pendingBackgroundTasks"]>[number]
@@ -365,6 +366,7 @@ export function presentThreadShell(
     ...(thread.waiting === undefined || thread.waitingCounts === undefined
       ? {}
       : { waiting: thread.waiting, waitingCounts: thread.waitingCounts }),
+    ...(thread.waitingAnswers === undefined ? {} : { waitingAnswers: thread.waitingAnswers }),
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
     providerInstanceHistory: thread.providerInstanceHistory ?? [],

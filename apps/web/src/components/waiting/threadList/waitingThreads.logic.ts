@@ -28,6 +28,8 @@ export interface WaitingThread {
   readonly title: string;
   readonly counts: ReadonlyArray<{ readonly kind: WaitingItemKind; readonly count: number }>;
   readonly discussing: number;
+  readonly answersToRead?: number;
+  readonly owedAnswers?: number;
   readonly updatedAtMs: number;
 }
 
@@ -63,6 +65,8 @@ export function selectWaitingThreads(
       title: thread.title,
       counts: summary.counts,
       discussing: summary.discussing,
+      ...(summary.answersToRead ? { answersToRead: summary.answersToRead } : {}),
+      ...(summary.owedAnswers ? { owedAnswers: summary.owedAnswers } : {}),
       updatedAtMs: Date.parse(thread.updatedAt),
     };
     (summary.total > 0 ? waiting : onAgent).push(entry);
@@ -75,6 +79,8 @@ const sameThread = (a: WaitingThread, b: WaitingThread) =>
   a.key === b.key &&
   a.title === b.title &&
   a.discussing === b.discussing &&
+  a.answersToRead === b.answersToRead &&
+  a.owedAnswers === b.owedAnswers &&
   a.updatedAtMs === b.updatedAtMs &&
   a.counts.length === b.counts.length &&
   a.counts.every(

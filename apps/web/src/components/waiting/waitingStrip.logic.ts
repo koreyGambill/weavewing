@@ -26,6 +26,8 @@ export const WAITING_KIND_HEADING: Record<WaitingItemKind, string> = {
 export interface WaitingStripSummary {
   readonly counts: ReadonlyArray<{ readonly kind: WaitingItemKind; readonly count: number }>;
   readonly discussing: number;
+  readonly answersToRead?: number;
+  readonly owedAnswers?: number;
   readonly total: number;
   /** Items still waiting that the thread's capped rows do not list. */
   readonly unlisted: number;
@@ -40,6 +42,7 @@ export interface WaitingStripSummary {
 export function waitingStripSummary(
   rows: ReadonlyArray<WaitingItemSummary> | undefined,
   counts: WaitingCounts | undefined,
+  listedAnswers = 0,
 ): WaitingStripSummary | null {
   if (counts === undefined) return null;
   const live = (rows ?? []).filter((row) => isWaitingItemState(row.state));
@@ -47,14 +50,18 @@ export function waitingStripSummary(
   // then stand in, as they did before the numbers existed.
   const discussing = counts.discussing ?? live.filter((row) => row.state === "discussing").length;
   const total = waitingTotal(counts);
-  if (total === 0 && discussing === 0) return null;
+  const owedAnswers = counts.owed ?? 0;
+  if (total === 0 && discussing === 0 && owedAnswers === 0) return null;
   return {
     counts: WAITING_KINDS.flatMap((kind) =>
       counts[kind] > 0 ? [{ kind, count: counts[kind] }] : [],
     ),
     discussing,
+    ...(counts.answer ? { answersToRead: counts.answer } : {}),
+    ...(owedAnswers ? { owedAnswers } : {}),
     total,
-    unlisted: counts.live === undefined ? 0 : Math.max(0, counts.live - live.length),
+    unlisted:
+      counts.live === undefined ? 0 : Math.max(0, counts.live - live.length - listedAnswers),
     hasQuestions: hasLiveQuestions(rows, counts),
   };
 }
@@ -100,6 +107,7 @@ export function waitingChipLabel(counts: WaitingCounts): string {
         ]
       : [],
   );
+  if (counts.answer) parts.push(`${counts.answer} ${counts.answer === 1 ? "answer" : "answers"}`);
   return `${waitingTotal(counts)} waiting on you: ${parts.join(", ")}`;
 }
 

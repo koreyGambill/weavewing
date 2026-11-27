@@ -1,3 +1,4 @@
+import { TrackedAskMarker } from "../answers/TrackedAskMarker";
 import { MessageReactionChip } from "./MessageReactionChip";
 import { SenderCard } from "./SenderCard";
 import { InlineAudioPreview } from "../files/InlineAudioPreview";
@@ -1069,6 +1070,7 @@ function UserTimelineRow({
           ) : null}
         </div>
         <UserMessageProjectedStatus row={row} />
+        <TrackedAskMarker threadRef={ctx.threadRef} messageId={row.message.id} />
         {!folded || expanded ? (
           <div
             className={cn(

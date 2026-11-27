@@ -122,7 +122,19 @@ import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimeline
 import { ThreadEvidenceTimelineRow } from "../evidence/ThreadEvidenceTimelineRow";
 import { ThreadTasksTimelineRow } from "../tasks/ThreadTasksTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
-import { qaRevealLandingId, taskRevealRef } from "../questions/questionReveal";
+import {
+  parseAnswerReveal,
+  qaRevealLandingId,
+  revealQaInChat,
+  revealQuestionInChat,
+  revealTrackedMessageInChat,
+  taskRevealRef,
+} from "../questions/questionReveal";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { ThreadAnswerCard } from "../answers/ThreadAnswerCard";
+import { useTrackedAsks } from "../answers/trackedAnswers-web-state";
+import { useTrackedAnswerDraft, useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
+import { focusNearestComposer } from "../waiting/waitingItemComposer";
 import {
   revealInFlowRow,
   scrollQuestionReferenceIntoRow,
@@ -964,6 +976,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
     return true;
   };
   useQuestionReveal(routeThreadKey, rows.length, (target) => {
+    const answer = parseAnswerReveal(target);
+    if (answer?.kind === "answer")
+      return revealRow(
+        rows.findIndex(
+          (row) =>
+            row.kind === "thread-answer" &&
+            row.answerRef.id === answer.id &&
+            row.answerRef.n === answer.n,
+        ),
+      );
+    if (answer?.kind === "message")
+      return revealRow(
+        rows.findIndex((row) => row.kind === "message" && row.message.id === answer.id),
+      );
     const landingId = qaRevealLandingId(target);
     const taskRef = taskRevealRef(target);
     return revealRow(
@@ -1860,6 +1886,44 @@ function ThreadTasksRow({ taskRefs }: { taskRefs: ReadonlyArray<string> }) {
   ) : null;
 }
 
+function ThreadAnswerRow({ answerRef }: { answerRef: { id: string; n: number } }) {
+  const ctx = use(TimelineRowCtx);
+  const { threadRef } = ctx;
+  const key = threadRef ? scopedThreadKey(threadRef) : "";
+  const ask = useTrackedAsks(threadRef).find((entry) => entry.id === answerRef.id);
+  const draft = useTrackedAnswerDraft(key);
+  if (!threadRef) return null;
+  const answer = ask?.answers.find((entry) => entry.n === answerRef.n);
+  if (!ask || !answer)
+    return (
+      <p
+        className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground"
+        role="status"
+      >
+        {answerRef.id}'s answer is no longer available.
+      </p>
+    );
+  const discuss = draft.discuss.some((entry) => entry.id === ask.id);
+  return (
+    <ThreadAnswerCard
+      ask={ask}
+      answer={answer}
+      threadRef={threadRef}
+      {...(ctx.markdownCwd === undefined ? {} : { cwd: ctx.markdownCwd })}
+      discussInComposer={discuss}
+      onDiscuss={(from) => {
+        useTrackedAnswerDraftStore.getState().toggleDiscuss(key, ask);
+        if (!discuss) focusNearestComposer(from);
+      }}
+      onAsked={() => {
+        if (ask.about?.kind === "question") revealQuestionInChat(key, ask.about.ref);
+        else if (ask.about?.kind === "qa") revealQaInChat(key, ask.about);
+        else revealTrackedMessageInChat(key, ask.askedInMessageId);
+      }}
+    />
+  );
+}
+
 function ThreadEvidenceRow({ landingIds }: { landingIds: ReadonlyArray<string> }) {
   const ctx = use(TimelineRowCtx);
   return ctx.threadRef ? (
@@ -1969,6 +2033,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <ThreadQuestionsRow questionIds={row.questionIds} />
       ) : null}
       {row.kind === "thread-tasks" ? <ThreadTasksRow taskRefs={row.taskRefs} /> : null}
+      {row.kind === "thread-answer" ? <ThreadAnswerRow answerRef={row.answerRef} /> : null}
       {row.kind === "thread-evidence" ? <ThreadEvidenceRow landingIds={row.landingIds} /> : null}
       {row.kind === "question-dismissed" ? (
         <QuestionDismissedRow questionId={row.questionId} title={row.title} />

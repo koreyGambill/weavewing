@@ -49,7 +49,7 @@ export function useWaitingItemsInComposer(
 }
 
 /** Focuses the composer in the same pane as `from`, so the user writes where the chip went. */
-function focusNearestComposer(from: HTMLElement | null) {
+export function focusNearestComposer(from: HTMLElement | null) {
   requestAnimationFrame(() => {
     for (let node = from?.parentElement ?? null; node !== null; node = node.parentElement) {
       const editor = node.querySelector<HTMLElement>('[data-testid="composer-editor"]');

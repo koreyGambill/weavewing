@@ -94,6 +94,7 @@ export function timelineEntryRunId(entry: TimelineEntry): RunId | null {
     entry.kind === "sent-message" ||
     entry.kind === "thread-questions" ||
     entry.kind === "thread-tasks" ||
+    entry.kind === "thread-answer" ||
     entry.kind === "thread-evidence" ||
     entry.kind === "question-dismissed"
   ) {
@@ -683,6 +684,12 @@ type MessagesTimelineRowContent =
       taskRefs: ReadonlyArray<string>;
     }
   | {
+      kind: "thread-answer";
+      id: string;
+      createdAt: string;
+      answerRef: { readonly id: string; readonly n: number };
+    }
+  | {
       kind: "thread-evidence";
       id: string;
       createdAt: string;
@@ -896,6 +903,7 @@ function deriveSupersededAttemptFolds(
       entry.kind === "sent-message" ||
       entry.kind === "thread-questions" ||
       entry.kind === "thread-tasks" ||
+      entry.kind === "thread-answer" ||
       entry.kind === "thread-evidence" ||
       entry.kind === "question-dismissed" ||
       timelineEntryIsPersistentResourceCard(entry) ||
@@ -2310,6 +2318,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "thread-answer") {
+      nextRows.push({
+        kind: "thread-answer",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        answerRef: timelineEntry.answerRef,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "thread-evidence") {
       nextRows.push({
         kind: "thread-evidence",
@@ -2965,6 +2983,15 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "thread-tasks": {
       const bt = b as typeof a;
       return a.createdAt === bt.createdAt && a.taskRefs.join() === bt.taskRefs.join();
+    }
+
+    case "thread-answer": {
+      const other = b as typeof a;
+      return (
+        a.createdAt === other.createdAt &&
+        a.answerRef.id === other.answerRef.id &&
+        a.answerRef.n === other.answerRef.n
+      );
     }
 
     case "thread-evidence": {

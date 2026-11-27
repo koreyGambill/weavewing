@@ -34,6 +34,20 @@ const counts = (partial: Partial<WaitingCounts>): WaitingCounts => ({
   ...partial,
 });
 
+it("includes answered asks in the user total and keeps owed asks visible outside that total", () => {
+  expect(waitingStripSummary([], counts({ owed: 2, live: 2 }), 2)).toMatchObject({
+    total: 0,
+    owedAnswers: 2,
+    unlisted: 0,
+  });
+  expect(waitingStripSummary([], counts({ answer: 3, owed: 4, live: 7 }), 2)).toMatchObject({
+    total: 3,
+    owedAnswers: 4,
+    answersToRead: 3,
+    unlisted: 5,
+  });
+});
+
 describe("waitingStripSummary", () => {
   it("hides the strip when nothing waits on the user and nothing is discussed", () => {
     expect(waitingStripSummary(undefined, undefined)).toBeNull();

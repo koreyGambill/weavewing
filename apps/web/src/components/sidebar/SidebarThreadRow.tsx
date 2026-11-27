@@ -825,7 +825,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     });
   const waitingChip =
     waitingCounts !== undefined && waitingTotal(waitingCounts) > 0 ? (
-      <ThreadWaitingCountChip counts={waitingCounts} waiting={thread.waiting} />
+      <ThreadWaitingCountChip
+        counts={waitingCounts}
+        waiting={thread.waiting}
+        answers={thread.waitingAnswers}
+      />
     ) : null;
   const topStatus =
     status === "preparing" || status === "working"

@@ -96,3 +96,19 @@ export function revealTaskInChat(threadKey: string, ref: string, openChecklist: 
   if (pending.get(threadKey) === target) pending.delete(threadKey);
   openChecklist();
 }
+
+export function parseAnswerReveal(target: string) {
+  if (target.startsWith("tracked-message:"))
+    return { kind: "message", id: target.slice("tracked-message:".length) } as const;
+  const answer = /^answer:(A[1-9][0-9]*):([1-9][0-9]*)$/.exec(target);
+  return answer ? ({ kind: "answer", id: answer[1]!, n: Number(answer[2]) } as const) : null;
+}
+
+export function revealAnswerInChat(threadKey: string, id: string, revision: number) {
+  requestQuestionReveal(threadKey, `answer:${id}:${revision}`);
+}
+
+export function revealTrackedMessageInChat(threadKey: string, messageId: string) {
+  if (requestQuestionReveal(threadKey, `tracked-message:${messageId}`) === "missing")
+    toastManager.add({ type: "info", title: "This message is earlier in the chat." });
+}

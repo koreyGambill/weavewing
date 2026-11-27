@@ -358,6 +358,8 @@ function ThreadEntry({
         `${count} ${count === 1 ? WAITING_KIND_LABEL[kind].one : WAITING_KIND_LABEL[kind].many}`,
     ),
     ...(thread.discussing > 0 ? [`${thread.discussing} discussing`] : []),
+    ...(thread.answersToRead ? [`${thread.answersToRead} answers to read`] : []),
+    ...(thread.owedAnswers ? [`${thread.owedAnswers} answers owed`] : []),
   ].join(", ");
   return (
     <li>
@@ -394,6 +396,14 @@ function ThreadEntry({
           <span className="shrink-0 text-xs text-muted-foreground">
             {thread.discussing} discussing
           </span>
+        ) : null}
+        {thread.answersToRead ? (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {thread.answersToRead} to read
+          </span>
+        ) : null}
+        {thread.owedAnswers ? (
+          <span className="shrink-0 text-xs text-muted-foreground">{thread.owedAnswers} owed</span>
         ) : null}
       </button>
     </li>

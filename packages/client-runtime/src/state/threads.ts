@@ -223,6 +223,7 @@ function hasMissingPendingQuestionCard(projection: OrchestrationV2ThreadProjecti
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
+  acceptTrackedAnswers = false,
 ) {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const cache = yield* Persistence.EnvironmentCacheStore;
@@ -646,7 +647,18 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       yield* Ref.set(awaitingCompletion, false);
       yield* SubscriptionRef.update(state, (current) =>
         Option.isSome(current.data) && current.status !== "deleted" && Option.isNone(current.error)
-          ? { ...current, status: "live" as const, error: Option.none() }
+          ? {
+              ...current,
+              status: "live" as const,
+              error: Option.none(),
+              data:
+                item.trackedAsks === undefined
+                  ? current.data
+                  : Option.some({
+                      ...current.data.value,
+                      thread: { ...current.data.value.thread, trackedAsks: item.trackedAsks },
+                    }),
+            }
           : current,
       );
       return;
@@ -1104,6 +1116,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }
             : {}),
           acceptDedupedBodies: true as const,
+          ...(acceptTrackedAnswers ? { acceptTrackedAnswers: true } : {}),
         };
       }),
       {
@@ -1160,11 +1173,14 @@ function threadStateChanges(
   environmentId: EnvironmentIdType,
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
+  acceptTrackedAnswers = false,
 ) {
   return followStreamInEnvironment(
     environmentId,
     Stream.unwrap(
-      makeEnvironmentThreadState(threadId, resumeCache).pipe(Effect.map(SubscriptionRef.changes)),
+      makeEnvironmentThreadState(threadId, resumeCache, acceptTrackedAnswers).pipe(
+        Effect.map(SubscriptionRef.changes),
+      ),
     ),
   );
 }
@@ -1177,6 +1193,7 @@ export function createEnvironmentThreadStateAtoms<R, E>(
     | R,
     E
   >,
+  options?: { readonly acceptTrackedAnswers?: boolean },
 ) {
   // Cache definitions must outlive collectible live-atom definitions. The
   // registry retains these nodes without retaining environment or RPC scopes.
@@ -1197,7 +1214,12 @@ export function createEnvironmentThreadStateAtoms<R, E>(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
-          const live = threadStateChanges(environmentId, threadId, resume);
+          const live = threadStateChanges(
+            environmentId,
+            threadId,
+            resume,
+            options?.acceptTrackedAnswers,
+          );
           return resume.snapshot === undefined
             ? live
             : Stream.concat(Stream.succeed(cachedThreadState(resume.snapshot.state)), live);
