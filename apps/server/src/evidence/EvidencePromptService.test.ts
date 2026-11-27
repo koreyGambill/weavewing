@@ -421,6 +421,51 @@ it.effect("records per commit how the answering run answered, within the project
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("writes no claim when its delivery cannot be queued with it", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const sql = yield* SqlClient.SqlClient;
+    yield* landedRepo;
+    // Without the outbox table, queuing the delivery fails.
+    yield* sql`DROP TABLE orchestration_v2_effect_outbox`;
+    yield* service.handle(ranTurn("run-1", [{ input: "git merge feature" }]));
+    assert.deepStrictEqual(yield* prompts, []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a landing's target covers only the older commits of its own ref move", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const evidence = yield* EvidenceService.EvidenceService;
+    const { git, first, second } = yield* landedRepo;
+    yield* git(["checkout", "-q", "feature"]);
+    const third = yield* git(["commit", "-q", "--allow-empty", "-m", "third"]).pipe(
+      Effect.andThen(git(["rev-parse", "HEAD"])),
+    );
+    yield* git(["checkout", "-q", "main"]);
+    yield* git(["merge", "-q", "--ff-only", "feature"], "2026-02-01T00:00:10Z");
+    yield* evidence.record({
+      id: "third",
+      title: "Third",
+      target: { branch: "main", sha: third },
+      verifications: [],
+      exempt: { reason: "Nothing to check." },
+      threadId: lead,
+      projectId: project,
+    });
+    yield* service.handle(
+      ranTurn("run-1", [
+        { input: "git merge feature" },
+        { input: "git merge feature", startedAt: "2026-02-01T00:00:10Z" },
+      ]),
+    );
+    assert.deepStrictEqual(
+      (yield* prompts).map((row) => row.target_sha),
+      [second, first],
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("claims nothing when the run, its commands or the thread rule a prompt out", () =>
   Effect.gen(function* () {
     const service = yield* Service.EvidencePromptService;
