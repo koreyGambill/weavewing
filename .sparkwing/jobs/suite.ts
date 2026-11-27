@@ -17,6 +17,8 @@ import {
   testedTree,
 } from "../lib/suites.ts";
 
+const FULL_SUITE_CORES = Math.max(...Object.values(SUITES).map((suite) => suite.cores));
+
 async function suiteCheckout(ctx: Context): Promise<Checkout> {
   const root = suiteRoot(ctx.args, workDir());
   if (ctx.args.install !== "true") return checkoutAt(ctx, root);
@@ -41,14 +43,15 @@ definePipeline({
   short: "One full test suite (web, server or packages), or all three, admitted by its cores",
   help:
     "Runs the named suite as ci does and reports every failing file or package. Admission holds the suite's " +
-    "cores (web 6, server 6, packages 4) for the whole run. Without --worktree it installs and tests its own " +
-    "checkout. --full runs all three one after another as batch work, which is the full result main-health " +
+    `cores (${Object.entries(SUITES).map(([name, suite]) => `${name} ${suite.cores}`).join(", ")}) for the whole run. ` +
+    "Use --worktree to test an existing checkout or --install in a Sparkwing branch checkout. " +
+    `--full holds ${FULL_SUITE_CORES} cores and runs all three one after another as batch work, which is the full result main-health ` +
     "reads. Only a run in a checkout Sparkwing made for a branch, as confirm-main starts, records a receipt " +
     "that confirms main; a run on --worktree reports but confirms nothing.",
   args: [
     ...checkoutArgs.map((arg) =>
       arg.name === "worktree"
-        ? { ...arg, required: false, description: "Absolute path of the checkout to test (default: this run's own)" }
+        ? { ...arg, required: false, description: "Absolute path of an installed checkout to test" }
         : arg,
     ),
     { name: "suite", type: "string", description: "web, server or packages" },
@@ -94,6 +97,6 @@ definePipeline({
       return { commit, tree, results };
     })
       .inline()
-      .cores(full ? Math.max(...Object.values(SUITES).map((each) => each.cores)) : (suite?.cores ?? 0.25));
+      .cores(full ? FULL_SUITE_CORES : (suite?.cores ?? 0.25));
   },
 });

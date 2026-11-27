@@ -13,7 +13,7 @@ import {
   git,
   logged,
 } from "../lib/checkout.ts";
-import { eachPackage, PACKAGE_TEST, packagesWithTask, packageTestNames, SUITES } from "../lib/suites.ts";
+import { eachPackage, packagesWithTask, SUITES, testPackages } from "../lib/suites.ts";
 
 // Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
 // mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
@@ -94,7 +94,7 @@ definePipeline({
 
     p.job("typecheck", (ctx) => {
       const co = checkout(ctx);
-      return eachPackage(ctx, co, "typecheck", packagesWithTask(co, "typecheck"), ["--cache", "typecheck"]);
+      return eachPackage(ctx, co, "typecheck", packagesWithTask(co, "typecheck"), ["--cache", "typecheck"], 4);
     })
       .inline()
       .cores(4)
@@ -144,7 +144,7 @@ definePipeline({
     test.step("packages", async (ctx) => {
       const chosen = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
       const co = checkout(ctx);
-      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co), PACKAGE_TEST);
+      await testPackages(ctx, co, chosen.length > 0 ? chosen : undefined);
     });
 
     p.job("test-web", (ctx) => SUITES.web.run(ctx, checkout(ctx)))

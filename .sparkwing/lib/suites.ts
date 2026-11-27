@@ -43,7 +43,7 @@ export function packageTestNames(co: Checkout): string[] {
 export const packageLog = (label: string, name: string) => `${label}-${name.replace(/[^\w.-]+/g, "-")}`;
 
 /**
- * Runs `vp run --filter <name> <script...>` for each package, four at a time, then fails naming
+ * Runs `vp run --filter <name> <script...>` for each package, then fails naming
  * every package that failed. One recursive vp run would stop every remaining package after the
  * first failure. An empty selection, or a name vp does not know, fails instead of passing.
  */
@@ -53,6 +53,7 @@ export async function eachPackage(
   label: string,
   names: readonly string[],
   script: readonly string[],
+  parallelism: number,
 ): Promise<void> {
   if (names.length === 0) throw new Error(`${label}: no packages selected`);
   const queue = [...names];
@@ -63,12 +64,12 @@ export async function eachPackage(
       await logged(ctx, co, log, ["vp", "run", "--fail-if-no-match", "--filter", name, ...script]).catch(() => failed.push(name));
     }
   };
-  await Promise.all(Array.from({ length: PACKAGES_AT_ONCE }, worker));
+  await Promise.all(Array.from({ length: parallelism }, worker));
   if (failed.length > 0) throw new Error(`${label} failed in: ${failed.sort().join(", ")}`);
 }
 
 interface Suite {
-  /** Admission cores, derived from the worker counts each suite passes, so the two cannot drift. */
+  /** Admission cores for the whole workload, including runners and subprocesses. */
   readonly cores: number;
   readonly run: (ctx: Context, co: Checkout) => Promise<void>;
 }
@@ -76,18 +77,17 @@ interface Suite {
 // vp run passes tasks only its own short list of variables, so VITEST_MAX_WORKERS never reaches
 // vitest, which then starts a worker per core; the worker counts go on the command line instead.
 const WEB_WORKERS = 4;
-// Each package's vitest gets one worker and four packages run at once: 4 x 1 = 4 cores.
-const PACKAGE_WORKERS = 1;
-const PACKAGES_AT_ONCE = 4;
-/** The test command each package runs in the packages suite and in ci. */
-export const PACKAGE_TEST = ["test", `--maxWorkers=${PACKAGE_WORKERS}`];
+
+/** Runs the package tests selected by CI, or the full package suite when no selection is given. */
+export function testPackages(ctx: Context, co: Checkout, names = packageTestNames(co)): Promise<void> {
+  return eachPackage(ctx, co, "packages", names, ["test", "--maxWorkers=1"], 2);
+}
 
 /** The full suites ci runs, each reporting every failing file or package in one pass. */
 export const SUITES = {
-  // One vitest run over the unit and browser projects. Two cores beyond the workers cover Vite's
-  // dev server and Chromium's browser process, which run beside them.
+  // Vite and Chromium run beside Vitest in the browser project.
   web: {
-    cores: WEB_WORKERS + 2,
+    cores: 7,
     run: async (ctx, co) => {
       await logged(ctx, co, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test", `--maxWorkers=${WEB_WORKERS}`]);
     },
@@ -100,14 +100,14 @@ export const SUITES = {
     },
   },
   packages: {
-    cores: PACKAGES_AT_ONCE * PACKAGE_WORKERS,
-    run: (ctx, co) => eachPackage(ctx, co, "packages", packageTestNames(co), PACKAGE_TEST),
+    // Each package uses CPU in its launcher and runner as well as its Vitest worker.
+    cores: 7,
+    run: testPackages,
   },
 } satisfies Record<string, Suite>;
 
 export type SuiteName = keyof typeof SUITES;
 
-/** Runs web, server and packages one after another, then fails naming every suite that failed. */
 /** passed or failed once vitest reported its test files; not-run when it never got that far. */
 export type SuiteResult = "passed" | "failed" | "not-run";
 
@@ -130,6 +130,7 @@ export function suiteRan(dir: string, suite: SuiteName, packages: readonly strin
   );
 }
 
+/** Runs all three suites in sequence and collects their results. */
 export async function everySuite(ctx: Context, co: Checkout): Promise<Record<SuiteName, SuiteResult>> {
   const results = {} as Record<SuiteName, SuiteResult>;
   for (const [name, suite] of Object.entries(SUITES) as Array<[SuiteName, Suite]>) {
