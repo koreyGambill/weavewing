@@ -83,6 +83,11 @@ describe("compactDynamicToolOutput", () => {
     expect(filedTasksFromToolItem({ toolName: "list_rewrite", output: result })).toEqual(["T2"]);
     expect(compactDynamicToolOutput(output, "list_read")).toBeUndefined();
     expect(compactDynamicToolOutput({ filedTasks: ["Q1"] }, "list_update")).toBeUndefined();
+    // A result past the write's limit keeps the first cards instead of losing every one.
+    const many = Array.from({ length: 101 }, (_, index) => `T${index + 1}`);
+    expect(
+      filedTasksFromToolItem({ toolName: "list_update", output: { filedTasks: many } }),
+    ).toEqual(many.slice(0, 100));
   });
 
   it("keeps nested thread identity and scalar task IDs without result bodies", () => {

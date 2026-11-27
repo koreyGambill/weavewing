@@ -1880,6 +1880,30 @@ it.effect("reports from the write itself which items it changed and which tasks 
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("files at most the card limit of user tasks in one write, with a clear refusal", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const tasks = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        text: `Task ${index + 1}`,
+        owner: "you" as const,
+      }));
+    const agent = { by: "agent", threadId } as const;
+    expect(
+      (yield* h.service
+        .update({ threadId, expectedRevision: 0, changes: tasks(101) }, agent)
+        .pipe(Effect.flip)).message,
+    ).toBe(
+      "File at most 100 tasks for the user in one list write; split the rest into another call.",
+    );
+    const written = yield* h.writes.update(
+      { threadId, expectedRevision: 0, changes: tasks(100) },
+      agent,
+    );
+    expect(written.filedTasks).toHaveLength(100);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("names a task by its ref alone, and refuses an id that reads as another's ref", () =>
   Effect.gen(function* () {
     const h = yield* harness();
