@@ -1,4 +1,5 @@
 import { AnswersSection } from "../answers/AnswersSection";
+import { ViewSection, ViewSectionGroup } from "../../views/ViewSection";
 import { waitingCardsEnvironmentIdsAtom } from "../../state/threadQuestions";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -827,33 +828,42 @@ export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
   const { presentationById } = useEnvironments();
   const environmentLabel = presentationById.get(threadRef.environmentId)?.entry.target.label;
   return (
-    <div data-todos-view className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
-      <ToggleGroup
-        aria-label="Checklist scope"
-        size="segmented-compact"
-        className="w-full *:flex-1"
-        value={[scope]}
-        onValueChange={(value) => {
-          const next = value[0];
-          if (next === "thread" || next === "all")
-            useThreadContextSidebarStore.getState().setTodoScope(next);
-        }}
+    <ViewSectionGroup order={["checklist:answers"]}>
+      <div
+        data-todos-view
+        className="@container mx-auto w-full max-w-4xl space-y-2 px-2.5 py-2.5 text-xs"
       >
-        <GroupToggle value="thread">Thread</GroupToggle>
-        <GroupToggle value="all">All</GroupToggle>
-      </ToggleGroup>
-      {scope === "all" && connected.length > 1 && environmentLabel ? (
-        <p className="truncate px-0.5 text-muted-foreground">On {environmentLabel}</p>
-      ) : null}
-      {scope === "thread" ? (
-        <ThreadListView threadRef={threadRef} />
-      ) : (
-        <FollowUpSection environmentId={threadRef.environmentId} showDone={false} />
-      )}
+        <ToggleGroup
+          aria-label="Checklist scope"
+          size="segmented-compact"
+          className="w-full *:flex-1"
+          value={[scope]}
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === "thread" || next === "all")
+              useThreadContextSidebarStore.getState().setTodoScope(next);
+          }}
+        >
+          <GroupToggle value="thread">Thread</GroupToggle>
+          <GroupToggle value="all">All</GroupToggle>
+        </ToggleGroup>
+        {scope === "all" && connected.length > 1 && environmentLabel ? (
+          <p className="truncate px-0.5 text-muted-foreground">On {environmentLabel}</p>
+        ) : null}
+        {scope === "thread" ? (
+          <ThreadListView threadRef={threadRef} />
+        ) : (
+          <FollowUpSection environmentId={threadRef.environmentId} showDone={false} />
+        )}
+      </div>
       {waitingCardsEnabled ? (
-        <AnswersSection key={scope} threadRef={threadRef} scope={scope} />
+        <ViewSection id="checklist:answers" title="Answers">
+          {(actions) => (
+            <AnswersSection key={scope} threadRef={threadRef} scope={scope} actions={actions} />
+          )}
+        </ViewSection>
       ) : null}
-    </div>
+    </ViewSectionGroup>
   );
 }
 

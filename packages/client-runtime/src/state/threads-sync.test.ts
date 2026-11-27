@@ -13,8 +13,10 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
   type OrchestrationV2TurnItem,
+  type TrackedAsk,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -124,6 +126,11 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   /** The test sends the completion marker itself instead of the fake server sending it first. */
   readonly completionMarker?: boolean;
   readonly resumeCache?: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]>;
+  readonly trackedAnswers?: {
+    readonly registry: AtomRegistry.AtomRegistry;
+    readonly visible: Atom.Atom<boolean>;
+    readonly fixture: TrackedAsk;
+  };
   readonly loadCached?: ReturnType<Persistence.EnvironmentCacheStore["Service"]["loadThread"]>;
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
   readonly historyPaging?: "enabled" | "no-http" | "no-controller";
@@ -139,6 +146,12 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const latest = yield* Ref.make<EnvironmentThreadState>(EMPTY_ENVIRONMENT_THREAD_STATE);
   const retryCount = yield* Ref.make(0);
   const subscriptionCount = yield* SubscriptionRef.make(0);
+  const activeSubscriptions = yield* Ref.make(0);
+  const requestedTracking = yield* Queue.unbounded<{
+    readonly optIn: boolean;
+    readonly active: number;
+    readonly bodies: number;
+  }>();
   const loaderCalls = yield* Ref.make(0);
   const lastSubscribeAfterSequence = yield* Ref.make<number | undefined>(undefined);
   const lastRequestCompletionMarker = yield* Ref.make(false);
@@ -166,21 +179,30 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       readonly requestCompletionMarker?: true;
       readonly acceptBoundedSnapshot?: true;
       readonly acceptCompactTurnItems?: true;
+      readonly acceptTrackedAnswers?: boolean;
     }) =>
       Stream.unwrap(
-        Ref.set(lastSubscribeAfterSequence, input.afterSequence).pipe(
-          Effect.andThen(
-            Ref.set(lastRequestCompletionMarker, input.requestCompletionMarker === true),
-          ),
-          Effect.andThen(Ref.set(lastAcceptBoundedSnapshot, input.acceptBoundedSnapshot)),
-          Effect.andThen(Ref.set(lastAcceptCompactTurnItems, input.acceptCompactTurnItems)),
-          Effect.andThen(SubscriptionRef.update(subscriptionCount, (count) => count + 1)),
-          Effect.as(
+        Effect.gen(function* () {
+          yield* Ref.set(lastSubscribeAfterSequence, input.afterSequence);
+          yield* Ref.set(lastRequestCompletionMarker, input.requestCompletionMarker === true);
+          yield* Ref.set(lastAcceptBoundedSnapshot, input.acceptBoundedSnapshot);
+          yield* Ref.set(lastAcceptCompactTurnItems, input.acceptCompactTurnItems);
+          yield* SubscriptionRef.update(subscriptionCount, (count) => count + 1);
+          const active = yield* Ref.updateAndGet(activeSubscriptions, (count) => count + 1);
+          const optIn = input.acceptTrackedAnswers === true;
+          const trackedAsks =
+            optIn && options?.trackedAnswers ? [options.trackedAnswers.fixture] : [];
+          yield* Queue.offer(requestedTracking, { optIn, active, bodies: trackedAsks.length });
+          const completed: OrchestrationV2ThreadStreamItem =
+            trackedAsks.length === 0 ? synchronized() : { kind: "synchronized", trackedAsks };
+          const stream =
             options?.completionMarker === true
               ? streamFrom(inputs)
-              : Stream.concat(Stream.make(synchronized()), streamFrom(inputs)),
-          ),
-        ),
+              : Stream.concat(Stream.make(completed), streamFrom(inputs));
+          return stream.pipe(
+            Stream.ensuring(Ref.update(activeSubscriptions, (count) => count - 1)),
+          );
+        }),
       ),
     [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input: { readonly itemId: TurnItemId }) =>
       options?.getTurnItem?.(input) ?? Effect.die("Unexpected getTurnItem request"),
@@ -253,7 +275,11 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     clearVcsRefs: () => Effect.void,
     clear: () => Effect.void,
   });
-  let makeThreadState = makeEnvironmentThreadState(THREAD_ID, options?.resumeCache).pipe(
+  let makeThreadState = makeEnvironmentThreadState(
+    THREAD_ID,
+    options?.resumeCache,
+    options?.trackedAnswers?.visible,
+  ).pipe(
     Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
     Effect.provideService(Persistence.EnvironmentCacheStore, cache),
     Effect.provideService(ThreadSnapshotLoader.ThreadSnapshotLoader, snapshotLoader),
@@ -262,6 +288,11 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       ConnectionWakeups.ConnectionWakeups.of({ changes: Stream.fromQueue(wakeups) }),
     ),
   );
+  if (options?.trackedAnswers) {
+    makeThreadState = makeThreadState.pipe(
+      Effect.provideService(AtomRegistry.AtomRegistry, options.trackedAnswers.registry),
+    );
+  }
   if (options?.historyPaging !== "no-http") {
     makeThreadState = makeThreadState.pipe(
       Effect.provideService(
@@ -304,6 +335,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     lastRequestCompletionMarker,
     lastAcceptBoundedSnapshot,
     lastAcceptCompactTurnItems,
+    requestedTracking,
     supervisorState,
     supervisorSession,
     savedThreads,
@@ -408,6 +440,60 @@ const deleted = (sequence = 3): OrchestrationV2ThreadStreamItem => {
 };
 
 describe("EnvironmentThreads", () => {
+  it.effect(
+    "keeps ask bodies off a background stream and switches its one lease when the timeline mounts",
+    () =>
+      Effect.gen(function* () {
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (reg) =>
+          Effect.sync(() => reg.dispose()),
+        );
+        const visible = Atom.make(false);
+        const fixture: TrackedAsk = {
+          id: "A1",
+          state: "answered",
+          createdAt: "2026-10-31T12:00:00.000Z",
+          closedAt: null,
+          askedInMessageId: MessageId.make("synthetic-message"),
+          question: "What resets?",
+          answers: [
+            { n: 1, text: "The counter.", answeredAt: "2026-10-31T12:01:00.000Z", runId: null },
+          ],
+          followUps: [],
+        };
+        const h = yield* makeHarness({
+          cached: BASE_PROJECTION,
+          trackedAnswers: { registry, visible, fixture },
+        });
+        expect(yield* Queue.take(h.requestedTracking)).toEqual({
+          optIn: false,
+          active: 1,
+          bodies: 0,
+        });
+        const warm = yield* awaitThreadState(h.observed, (state) => state.status === "live");
+        expect(Option.getOrNull(warm.data)?.thread.trackedAsks).toBeUndefined();
+        registry.set(visible, true);
+        expect(yield* Queue.take(h.requestedTracking)).toEqual({
+          optIn: true,
+          active: 1,
+          bodies: 1,
+        });
+        const duringHandoff = yield* SubscriptionRef.get(h.threadState);
+        expect(duringHandoff.status).toBe("live");
+        expect(Option.getOrNull(duringHandoff.data)?.thread.title).toBe("Cached thread");
+        const hydrated = yield* awaitThreadState(
+          h.observed,
+          (state) => Option.getOrNull(state.data)?.thread.trackedAsks?.[0]?.id === "A1",
+        );
+        expect(Option.getOrNull(hydrated.data)?.thread.title).toBe("Cached thread");
+        registry.set(visible, false);
+        expect(yield* Queue.take(h.requestedTracking)).toEqual({
+          optIn: false,
+          active: 1,
+          bodies: 0,
+        });
+      }),
+  );
+
   it.effect.each([
     ["disk", false],
     ["retained", false],

@@ -469,11 +469,15 @@ function withMergedTokenUsage(
   return tokenUsage === undefined ? rest : { ...rest, tokenUsage };
 }
 
-function preserveTrackedAsks<T extends { readonly trackedAsks?: unknown }>(
-  previous: T,
-  next: T,
-): T {
-  return next.trackedAsks === undefined && previous.trackedAsks !== undefined
+function preserveTrackedAsks<
+  T extends {
+    readonly trackedAsks?: unknown;
+    readonly trackedAnswersRevision?: number | undefined;
+  },
+>(previous: T, next: T): T {
+  return next.trackedAsks === undefined &&
+    previous.trackedAsks !== undefined &&
+    next.trackedAnswersRevision === previous.trackedAnswersRevision
     ? { ...next, trackedAsks: previous.trackedAsks }
     : next;
 }

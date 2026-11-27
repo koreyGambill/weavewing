@@ -3,7 +3,7 @@ import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/sta
 import { WS_METHODS, type ScopedThreadRef, type TrackedAnswersPage } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { create } from "zustand";
+import { createPortal } from "react-dom";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -14,13 +14,15 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CardStatusBadge } from "../questions/QuestionStatusBadge";
 import { revealAnswerInChat, revealTrackedMessageInChat } from "../questions/questionReveal";
 import { Button } from "../ui/button";
-import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
+import { observeIntersection } from "../../lib/observeIntersection";
+import { useThreadTrackedAsks } from "../../state/threads";
+import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { focusNearestComposer } from "../waiting/waitingItemComposer";
 import { TrackedAnswerBody } from "./ThreadAnswerCard";
 import { TrackedAskActions } from "./TrackedAskActions";
 import { useTrackedAnswerDraftStore } from "./trackedAnswerDraft";
-import { useTrackedAsks, useUpdateTrackedAsk } from "./trackedAnswers-web-state";
+import { useUpdateTrackedAsk } from "./trackedAnswers-web-state";
 
 const asksRead = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "answers:history",
@@ -30,10 +32,10 @@ const asksRead = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
 });
 type Entry = TrackedAnswersPage["entries"][number];
 const empty: ReadonlyArray<Entry> = [];
-const useSectionOpen = create<Record<string, boolean>>(() => ({}));
-
 export function openTrackedAnswersSection(threadRef: ScopedThreadRef) {
-  useSectionOpen.setState({ [scopedThreadKey(threadRef)]: true });
+  useThreadContextSidebarStore
+    .getState()
+    .show("checklist", { thread: threadRef, section: "checklist:answers" });
 }
 
 const labels = {
@@ -50,27 +52,23 @@ const byPriority = (a: Entry, b: Entry) =>
 export function AnswersSection({
   threadRef,
   scope,
+  actions,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly scope: "thread" | "all";
+  readonly actions: HTMLDivElement | null;
 }) {
-  const key = scopedThreadKey(threadRef);
-  const open = useSectionOpen((state) => state[key] === true);
   const [visible, setVisible] = useState(false);
   const observeVisibility = useStableCallback((node: HTMLElement | null) => {
     if (node === null) return;
-    const observer = new IntersectionObserver(([entry]) =>
-      setVisible(entry?.isIntersecting === true),
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
+    return observeIntersection(node, (entry) => setVisible(entry.isIntersecting));
   });
   const [pages, setPages] = useState<{ previous: ReadonlyArray<Entry>; cursor?: string }>({
     previous: [],
   });
-  const asks = useTrackedAsks(threadRef);
+  const asks = useThreadTrackedAsks(threadRef);
   const query = useEnvironmentQuery(
-    open && visible && scope === "all"
+    visible && scope === "all"
       ? asksRead({
           environmentId: threadRef.environmentId,
           input: { all: true, ...(pages.cursor === undefined ? {} : { cursor: pages.cursor }) },
@@ -79,7 +77,12 @@ export function AnswersSection({
   );
   const entries =
     scope === "thread"
-      ? asks.map((ask) => ({ ask, threadId: threadRef.threadId, archived: false, threadTitle: "" }))
+      ? (asks ?? []).map((ask) => ({
+          ask,
+          threadId: threadRef.threadId,
+          archived: false,
+          threadTitle: "",
+        }))
       : [...pages.previous, ...(query.data?.entries ?? empty)];
   const sorted = scope === "thread" ? entries.toSorted(byPriority) : entries;
   const counts = query.data?.counts ?? {
@@ -97,51 +100,47 @@ export function AnswersSection({
     .join(" · ");
   const next = query.data?.cursor;
   return (
-    <section aria-label="Tracked answers" ref={observeVisibility}>
-      <CollapsibleSectionHeader
-        expanded={open}
-        variant="panel"
-        onClick={() => useSectionOpen.setState({ [key]: !open })}
-        accessory={
-          countLabel ? (
-            <span className="shrink-0 text-muted-foreground">{countLabel}</span>
-          ) : undefined
-        }
-      >
-        Answers
-      </CollapsibleSectionHeader>
-      {open ? (
-        <div className="space-y-1 px-1">
-          {scope === "all" && !query.isSuccess && entries.length === 0 ? (
-            <p role="status" className="text-muted-foreground">
-              {query.error ?? "Loading tracked answers…"}
-            </p>
-          ) : sorted.length === 0 ? (
-            <p className="px-1 text-muted-foreground">
-              {scope === "thread"
-                ? "No tracked answers in this thread. Turn on Track answer in the composer when you want one."
-                : "No tracked answers in this environment."}
-            </p>
-          ) : (
-            sorted.map((entry) => (
-              <AnswerListRow
-                key={`${entry.threadId}:${entry.ask.id}`}
-                entry={entry}
-                current={threadRef}
-                onSaved={scope === "all" ? query.refresh : undefined}
-              />
-            ))
-          )}
-          {next ? (
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              onClick={() => setPages({ previous: entries, cursor: next })}
-            >
-              Show more
-            </Button>
-          ) : null}
-        </div>
+    <section
+      aria-label="Tracked answers"
+      ref={observeVisibility}
+      className="space-y-1 px-1 text-xs"
+    >
+      {actions && countLabel
+        ? createPortal(
+            <span className="max-w-44 truncate text-muted-foreground">{countLabel}</span>,
+            actions,
+          )
+        : null}
+      {scope === "thread" && asks === undefined ? null : scope === "all" &&
+        !query.isSuccess &&
+        entries.length === 0 ? (
+        <p role="status" className="text-muted-foreground">
+          {query.error ?? "Loading tracked answers…"}
+        </p>
+      ) : sorted.length === 0 ? (
+        <p className="px-1 text-muted-foreground">
+          {scope === "thread"
+            ? "No tracked answers in this thread. Turn on Track answer in the composer when you want one."
+            : "No tracked answers in this environment."}
+        </p>
+      ) : (
+        sorted.map((entry) => (
+          <AnswerListRow
+            key={`${entry.threadId}:${entry.ask.id}`}
+            entry={entry}
+            current={threadRef}
+            onSaved={scope === "all" ? query.refresh : undefined}
+          />
+        ))
+      )}
+      {next ? (
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          onClick={() => setPages({ previous: entries, cursor: next })}
+        >
+          Show more
+        </Button>
       ) : null}
     </section>
   );

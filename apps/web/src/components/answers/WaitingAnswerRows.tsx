@@ -1,11 +1,11 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, TrackedAnswerWaitingRow } from "@t3tools/contracts";
-import { MessageSquareReplyIcon } from "lucide-react";
 import { useState } from "react";
 
 import { CardStatusBadge } from "../questions/QuestionStatusBadge";
 import { revealAnswerInChat, revealTrackedMessageInChat } from "../questions/questionReveal";
 import { Button } from "../ui/button";
+import { WaitingAnswerIcon } from "../waiting/waitingKindIcon";
 import { useTrackedAsks, useUpdateTrackedAsk } from "./trackedAnswers-web-state";
 
 export function WaitingAnswerRows({
@@ -46,7 +46,7 @@ export function WaitingAnswerRows({
                 onClick={() => open(row)}
                 title={row.title}
               >
-                <MessageSquareReplyIcon aria-hidden="true" />
+                <WaitingAnswerIcon aria-hidden="true" />
                 <strong>{row.ref}</strong>
                 <span className="min-w-0 truncate text-left">{row.title}</span>
               </Button>

@@ -6,6 +6,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
   type OrchestrationV2TurnItem,
+  type ScopedThreadRef,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
@@ -22,7 +23,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/http";
-import { Atom } from "effect/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
@@ -223,7 +224,7 @@ function hasMissingPendingQuestionCard(projection: OrchestrationV2ThreadProjecti
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
-  acceptTrackedAnswers = false,
+  trackedAnswersVisible?: Atom.Atom<boolean>,
 ) {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const cache = yield* Persistence.EnvironmentCacheStore;
@@ -988,6 +989,23 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   });
   // A stream defect parks the subscription until something resubscribes it.
   const resubscribes = yield* Queue.unbounded<void>();
+  const registry = yield* Effect.serviceOption(AtomRegistry.AtomRegistry);
+  const trackedAnswerScope =
+    trackedAnswersVisible !== undefined && Option.isSome(registry)
+      ? { atom: trackedAnswersVisible, registry: registry.value }
+      : null;
+  const wantsTrackedAnswers = () =>
+    trackedAnswerScope?.registry.get(trackedAnswerScope.atom) === true;
+  let requestedTrackedAnswers: boolean | undefined;
+  const trackedAnswerVisibilityChanges =
+    trackedAnswerScope === null
+      ? Stream.empty
+      : AtomRegistry.toStream(trackedAnswerScope.registry, trackedAnswerScope.atom).pipe(
+          Stream.filter(
+            (visible) =>
+              requestedTrackedAnswers !== undefined && visible !== requestedTrackedAnswers,
+          ),
+        );
   const markSynchronizing = Effect.gen(function* () {
     if (yield* Ref.get(resumingLive)) return;
     yield* SubscriptionRef.update(state, (current) =>
@@ -1024,7 +1042,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
         const config = yield* Effect.option(session.initialConfig);
         yield* Ref.set(awaitingCompletion, true);
-        yield* markSynchronizing;
+        const changesOnlyTracking =
+          requestedTrackedAnswers !== undefined &&
+          requestedTrackedAnswers !== wantsTrackedAnswers() &&
+          current.status === "live" &&
+          Option.isSome(current.data);
+        if (!changesOnlyTracking) yield* markSynchronizing;
         yield* Ref.set(resumingLive, false);
 
         // A server that pages snapshots sends the same bounded window over the
@@ -1102,6 +1125,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         const sequence = yield* SubscriptionRef.get(lastSequence);
         const canResume = Option.isSome(current.data);
         const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
+        requestedTrackedAnswers = wantsTrackedAnswers();
 
         return {
           threadId,
@@ -1116,7 +1140,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }
             : {}),
           acceptDedupedBodies: true as const,
-          ...(acceptTrackedAnswers ? { acceptTrackedAnswers: true } : {}),
+          ...(requestedTrackedAnswers ? { acceptTrackedAnswers: true } : {}),
         };
       }),
       {
@@ -1138,7 +1162,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           if (!retryOverHttp) yield* setStreamError(formatThreadError(cause));
         }),
         retryExpectedFailureAfter: THREAD_SUBSCRIPTION_RETRY_DELAY,
-        resubscribe: Stream.merge(foregroundResubscriptions, Stream.fromQueue(resubscribes)),
+        resubscribe: Stream.merge(
+          Stream.merge(foregroundResubscriptions, Stream.fromQueue(resubscribes)),
+          trackedAnswerVisibilityChanges,
+        ),
       },
     ).pipe(
       Stream.runForEachArray((items) =>
@@ -1173,12 +1200,12 @@ function threadStateChanges(
   environmentId: EnvironmentIdType,
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
-  acceptTrackedAnswers = false,
+  trackedAnswersVisible?: Atom.Atom<boolean>,
 ) {
   return followStreamInEnvironment(
     environmentId,
     Stream.unwrap(
-      makeEnvironmentThreadState(threadId, resumeCache, acceptTrackedAnswers).pipe(
+      makeEnvironmentThreadState(threadId, resumeCache, trackedAnswersVisible).pipe(
         Effect.map(SubscriptionRef.changes),
       ),
     ),
@@ -1193,7 +1220,7 @@ export function createEnvironmentThreadStateAtoms<R, E>(
     | R,
     E
   >,
-  options?: { readonly acceptTrackedAnswers?: boolean },
+  options?: { readonly trackedAnswersVisible: (threadRef: ScopedThreadRef) => Atom.Atom<boolean> },
 ) {
   // Cache definitions must outlive collectible live-atom definitions. The
   // registry retains these nodes without retaining environment or RPC scopes.
@@ -1218,7 +1245,7 @@ export function createEnvironmentThreadStateAtoms<R, E>(
             environmentId,
             threadId,
             resume,
-            options?.acceptTrackedAnswers,
+            options?.trackedAnswersVisible({ environmentId, threadId }),
           );
           return resume.snapshot === undefined
             ? live

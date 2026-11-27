@@ -8,12 +8,7 @@ import type {
   TrackedAnswerWaitingRow,
   WaitingItemSummary,
 } from "@t3tools/contracts";
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  MessageSquareReplyIcon,
-  UserRoundIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { useComposerArtifactAnswers } from "../../composerDraftStore";
@@ -33,7 +28,7 @@ import { questionDraftWriter } from "../questions/questionDraftWriter";
 import { reconcileQuestionNoteImages } from "../questions/questionNoteImages";
 import { Button } from "../ui/button";
 import { WaitingItemsList } from "./WaitingItemsList";
-import { WAITING_KIND_ICON } from "./waitingKindIcon";
+import { WaitingAnswerIcon, WAITING_KIND_ICON } from "./waitingKindIcon";
 import { WAITING_KIND_LABEL, groupWaitingItems, waitingStripSummary } from "./waitingStrip.logic";
 
 /**
@@ -156,7 +151,7 @@ export function useWaitingOnYouStrip(input: {
         })}
         {summary.answersToRead ? (
           <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums">
-            <MessageSquareReplyIcon aria-hidden="true" className="size-3.5" />
+            <WaitingAnswerIcon aria-hidden="true" className="size-3.5" />
             {summary.answersToRead}
           </span>
         ) : null}

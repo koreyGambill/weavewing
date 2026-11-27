@@ -570,6 +570,7 @@ export interface TimelineEntriesInput {
    * `evidence_record` call its QA cards.
    */
   readonly waitingCards?: boolean;
+  readonly trackedAnswerCards?: boolean;
 }
 
 export interface TimelineEntriesProjection {
@@ -769,7 +770,9 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     }
 
     const answerRef =
-      input.waitingCards === true && item.type === "dynamic_tool"
+      input.waitingCards === true &&
+      input.trackedAnswerCards === true &&
+      item.type === "dynamic_tool"
         ? trackedAnswerFromToolItem(item)
         : undefined;
     if (answerRef) {
@@ -1064,6 +1067,7 @@ function reuseTimelineEntries(
   if (
     input.visibleTurnItems.length < before.visibleTurnItems.length ||
     input.waitingCards !== before.waitingCards ||
+    input.trackedAnswerCards !== before.trackedAnswerCards ||
     !shallow(input.optimisticMessages, before.optimisticMessages) ||
     !shallow(input.anchoredMessages, before.anchoredMessages) ||
     !shallow(input.attachmentUrlById, before.attachmentUrlById) ||

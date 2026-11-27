@@ -1373,7 +1373,11 @@ describe("HTML renders in the timeline", () => {
     type: "command_execution",
     input: "vp test run",
   });
-  const turn = (render: OrchestrationV2TurnItem, waitingCards?: boolean) => {
+  const turn = (
+    render: OrchestrationV2TurnItem,
+    waitingCards?: boolean,
+    trackedAnswerCards?: boolean,
+  ) => {
     const items: OrchestrationV2TurnItem[] = [
       {
         ...base("prompt", 0),
@@ -1400,6 +1404,7 @@ describe("HTML renders in the timeline", () => {
       visibleTurnItems: items.map(visible),
       optimisticMessages: [],
       ...(waitingCards === undefined ? {} : { waitingCards }),
+      ...(trackedAnswerCards === undefined ? {} : { trackedAnswerCards }),
     });
   };
   const rowsFor = (entries: TimelineEntry[], expanded: boolean) =>
@@ -1482,6 +1487,26 @@ describe("HTML renders in the timeline", () => {
       "message",
     ]);
     expect(turn(ask, false).some((entry) => entry.kind === "thread-questions")).toBe(false);
+  });
+
+  it("keeps the held tool entry until the complete tracked answer can render", () => {
+    const answer: OrchestrationV2TurnItem = {
+      ...base("render", 2),
+      type: "dynamic_tool",
+      toolName: "mcp__t3-code__answer_give",
+      input: { id: "A3", answer: "The handler resets the counter." },
+      output: { trackedAnswer: { id: "A3", n: 2 } },
+    };
+    expect(turn(answer, true, false).find((entry) => entry.id === "render")?.kind).toBe("work");
+    expect(turn(answer, true, true).find((entry) => entry.id === "render")).toMatchObject({
+      kind: "thread-answer",
+      answerRef: { id: "A3", n: 2 },
+    });
+    expect(
+      turn({ ...answer, status: "failed", output: { isError: true } }, true, true).find(
+        (entry) => entry.id === "render",
+      )?.kind,
+    ).toBe("work");
   });
 
   it("shows a landing's QA cards in place of its record call, only while waiting cards are on", () => {

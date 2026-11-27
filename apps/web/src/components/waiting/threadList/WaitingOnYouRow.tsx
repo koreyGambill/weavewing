@@ -21,7 +21,7 @@ import { Sheet, SheetHeader, SheetPopup, SheetTitle } from "../../ui/sheet";
 import { SidebarMenuButton, useSidebar } from "../../ui/sidebar";
 import { toastManager } from "../../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
-import { WAITING_KIND_ICON } from "../waitingKindIcon";
+import { WaitingAnswerIcon, WAITING_KIND_ICON } from "../waitingKindIcon";
 import { WAITING_KIND_LABEL } from "../waitingStrip.logic";
 import { registerWaitingListOpener } from "./waitingListCommand";
 import { useWaitingOnYou } from "./waitingOnYou";
@@ -398,8 +398,9 @@ function ThreadEntry({
           </span>
         ) : null}
         {thread.answersToRead ? (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {thread.answersToRead} to read
+          <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums">
+            <WaitingAnswerIcon aria-hidden="true" className="size-3.5" />
+            {thread.answersToRead}
           </span>
         ) : null}
         {thread.owedAnswers ? (

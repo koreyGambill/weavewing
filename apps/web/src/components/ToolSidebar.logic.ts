@@ -218,6 +218,7 @@ const RETIRED_VIEWS: Partial<
 
 /** A section of a merged view, named `<view>:<section>`. */
 export type ViewSectionId =
+  | "checklist:answers"
   | "links:links"
   | "links:threads"
   | "activity:runs"

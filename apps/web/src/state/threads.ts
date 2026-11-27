@@ -1,5 +1,8 @@
 import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useLayoutEffect } from "react";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
@@ -33,8 +36,12 @@ export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
   threadFamilies.snapshotAtom,
 );
+const trackedAnswerTimelineCount = Atom.family((_key: string) => Atom.make(0));
+const trackedAnswerTimelineVisible = Atom.family((key: string) =>
+  Atom.map(trackedAnswerTimelineCount(key), (count) => count > 0),
+);
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime, {
-  acceptTrackedAnswers: true,
+  trackedAnswersVisible: (ref) => trackedAnswerTimelineVisible(scopedThreadKey(ref)),
 });
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
@@ -134,17 +141,29 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   stateAtom: environmentThreads.stateAtom,
 });
 
-const noTrackedAsks: ReadonlyArray<import("@t3tools/contracts").TrackedAsk> = [];
 const trackedAsksAtom = Atom.family((ref: import("@t3tools/contracts").ScopedThreadRef) =>
   Atom.map(
     environmentThreads.stateAtom(ref.environmentId, ref.threadId),
     (result) =>
       Option.getOrUndefined(
         AsyncResult.getOrElse(result, () => EMPTY_ENVIRONMENT_THREAD_STATE).data,
-      )?.thread.trackedAsks ?? noTrackedAsks,
+      )?.thread.trackedAsks,
   ),
 );
-const noTrackedAsksAtom = Atom.make(noTrackedAsks);
+const noTrackedAsksAtom = Atom.make(undefined);
+
+export function useMountedTrackedAnswerTimeline(
+  threadRef: import("@t3tools/contracts").ScopedThreadRef | null,
+) {
+  const key = threadRef === null ? null : scopedThreadKey(threadRef);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The shared connection follows the lifetime of mounted timelines, including split views.
+  useLayoutEffect(() => {
+    if (key === null) return;
+    const count = trackedAnswerTimelineCount(key);
+    appAtomRegistry.set(count, appAtomRegistry.get(count) + 1);
+    return () => appAtomRegistry.set(count, appAtomRegistry.get(count) - 1);
+  }, [key]);
+}
 
 export function useThreadTrackedAsks(
   threadRef: import("@t3tools/contracts").ScopedThreadRef | null,

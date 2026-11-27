@@ -3,7 +3,12 @@ import { WS_METHODS, type ScopedThreadRef, type ThreadUpdateAskInput } from "@t3
 import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
-export { useThreadTrackedAsks as useTrackedAsks } from "../../state/threads";
+import { useThreadTrackedAsks } from "../../state/threads";
+
+const noTrackedAsks: ReadonlyArray<import("@t3tools/contracts").TrackedAsk> = [];
+export function useTrackedAsks(threadRef: ScopedThreadRef | null) {
+  return useThreadTrackedAsks(threadRef) ?? noTrackedAsks;
+}
 import { useAtomCommand } from "../../state/use-atom-command";
 
 const threadUpdateAsk = createEnvironmentRpcCommand(connectionAtomRuntime, {

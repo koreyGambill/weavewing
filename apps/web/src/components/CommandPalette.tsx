@@ -1917,7 +1917,6 @@ function OpenCommandPaletteDialog(props: {
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         const ref = scopeThreadRef(activeThread.environmentId, activeThread.id);
-        useThreadContextSidebarStore.getState().show("todos", { thread: ref });
         openTrackedAnswersSection(ref);
       },
     });

@@ -69,11 +69,7 @@ function ThreadViewContent({
 }) {
   switch (view) {
     case "checklist":
-      return (
-        <div className="px-2.5 py-2.5">
-          <ThreadTodosView threadRef={threadRef} />
-        </div>
-      );
+      return <ThreadTodosView threadRef={threadRef} />;
     case "artifacts":
       return (
         <div className="px-2.5 py-2.5">

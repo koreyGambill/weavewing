@@ -1626,7 +1626,7 @@ const make = Effect.gen(function* () {
         let revision: number | undefined;
         const readAsks = load(threadId).pipe(
           lock.withPermit,
-          Effect.map((workspace) => workspace.asks),
+          Effect.map((workspace) => workspace.asks ?? []),
           Effect.catch((error) =>
             Effect.logWarning("Could not read tracked answers.", { threadId, error }).pipe(
               Effect.as(undefined),

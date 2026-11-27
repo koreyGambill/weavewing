@@ -1922,7 +1922,7 @@ function ThreadAnswerRow({ answerRef }: { answerRef: { id: string; n: number } }
         else if (ask.about?.kind === "qa") revealQaInChat(key, ask.about);
         else if (ask.about?.kind === "task")
           revealTaskInChat(key, ask.about.ref, () =>
-            useThreadContextSidebarStore.getState().show("todos", { thread: threadRef }),
+            useThreadContextSidebarStore.getState().show("checklist", { thread: threadRef }),
           );
         else revealTrackedMessageInChat(key, ask.askedInMessageId);
       }}

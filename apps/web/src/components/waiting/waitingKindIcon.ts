@@ -3,6 +3,7 @@ import {
   ClipboardCheckIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
+  MessageSquareReplyIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -15,3 +16,5 @@ export const WAITING_KIND_ICON: Record<WaitingItemKind, LucideIcon> = {
   qa: ClipboardCheckIcon,
   task: ListChecksIcon,
 };
+
+export const WaitingAnswerIcon = MessageSquareReplyIcon;
