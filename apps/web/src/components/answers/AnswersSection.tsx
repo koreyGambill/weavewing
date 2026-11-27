@@ -110,7 +110,11 @@ export function AnswersSection({
     if (node === null) return;
     return observeIntersection(node, (entry) => setVisible(entry.isIntersecting));
   });
-  const [pages, setPages] = useState<{ previous: ReadonlyArray<Entry>; cursor?: string }>({
+  const [pages, setPages] = useState<{
+    previous: ReadonlyArray<Entry>;
+    cursor?: string;
+    counts?: TrackedAnswersPage["counts"];
+  }>({
     previous: [],
   });
   const asks = useThreadTrackedAsks(threadRef);
@@ -125,12 +129,13 @@ export function AnswersSection({
         }))
       : [...pages.previous, ...(query.data?.entries ?? empty)];
   const sorted = scope === "thread" ? entries.toSorted(byPriority) : entries;
-  const counts = query.data?.counts ?? {
-    owed: entries.filter((entry) => entry.ask.state === "owed" || entry.ask.state === "queued")
-      .length,
-    toRead: entries.filter((entry) => entry.ask.state === "answered").length,
-    closed: entries.filter((entry) => entry.ask.state === "closed").length,
-  };
+  const counts = query.data?.counts ??
+    pages.counts ?? {
+      owed: entries.filter((entry) => entry.ask.state === "owed" || entry.ask.state === "queued")
+        .length,
+      toRead: entries.filter((entry) => entry.ask.state === "answered").length,
+      closed: entries.filter((entry) => entry.ask.state === "closed").length,
+    };
   const countLabel = [
     counts.owed > 0 ? `${counts.owed} owed` : "",
     counts.toRead > 0 ? `${counts.toRead} to read` : "",
@@ -139,6 +144,7 @@ export function AnswersSection({
     .filter(Boolean)
     .join(" · ");
   const next = query.data?.cursor;
+  const loadingMore = pages.cursor !== undefined && !query.isSuccess;
   const refreshAll = () => {
     setPages({ previous: [] });
     query.refresh();
@@ -177,11 +183,20 @@ export function AnswersSection({
           />
         ))
       )}
-      {next ? (
+      {loadingMore && query.error ? (
+        <p role="alert" className="text-muted-foreground">
+          {query.error}
+        </p>
+      ) : null}
+      {next || loadingMore ? (
         <Button
           size="xs"
           variant="ghost-muted"
-          onClick={() => setPages({ previous: entries, cursor: next })}
+          disabled={loadingMore && query.error === null}
+          onClick={() => {
+            if (loadingMore) query.refresh();
+            else if (next) setPages({ previous: entries, cursor: next, counts });
+          }}
         >
           Show more
         </Button>

@@ -2,6 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, ThreadId, type TrackedAnswersPage } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
+import * as Cause from "effect/Cause";
 import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../../test/render";
@@ -47,4 +48,28 @@ it("keeps an archived answer readable without sending the user to an unavailable
   await expect
     .element(screen.getByRole("menuitem", { name: "Show answer" }))
     .not.toBeInTheDocument();
+});
+
+it("keeps Show more available after a page request fails and retries that page", async () => {
+  vi.mocked(executeAtomQuery).mockReset();
+  vi.mocked(executeAtomQuery)
+    .mockResolvedValueOnce(AsyncResult.success({ entries: [archive], cursor: "next" }))
+    .mockResolvedValueOnce(AsyncResult.failure(Cause.fail(new Error("Could not load this page."))))
+    .mockResolvedValueOnce(
+      AsyncResult.success({
+        entries: [{ ...archive, ask: { ...archive.ask, id: "A2", question: "When is it saved?" } }],
+      }),
+    );
+  await using screen = await render(
+    <AnswersSection threadRef={threadRef} scope="all" actions={null} />,
+  );
+  const more = screen.getByRole("button", { name: "Show more" });
+  await more.click();
+  await expect.element(screen.getByRole("alert")).toHaveTextContent("Could not load this page.");
+  await expect
+    .element(screen.getByRole("button", { name: /What resets the counter/ }))
+    .toBeVisible();
+  await more.click();
+  await expect.element(screen.getByRole("button", { name: /When is it saved/ })).toBeVisible();
+  await expect.element(screen.getByRole("alert")).not.toBeInTheDocument();
 });
