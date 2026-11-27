@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  COMPOSER_ROW_LABEL_MIN_PX,
   COMPOSER_ROW_PRIORITY,
+  type ComposerRowItemMeasurement,
   type ComposerRowItemWidth,
+  composerRowItemWidth,
   resolveComposerRowHiddenIds,
   summarizeComposerRowAgents,
 } from "./composerRowItems";
@@ -107,6 +110,75 @@ describe("resolveComposerRowHiddenIds", () => {
         previousHiddenIds: ["computer"],
       }),
     ).toEqual([]);
+  });
+});
+
+describe("composerRowItemWidth", () => {
+  // A shrinking item the row squeezed to 0 px: its icon and padding overflow the box, and its
+  // label renders at 0 px.
+  const squeezed = (
+    id: string,
+    priority: number | null,
+    labelText: number,
+  ): ComposerRowItemMeasurement => ({
+    id,
+    priority,
+    shrinks: true,
+    rendered: 0,
+    content: 26,
+    labels: [{ text: labelText, rendered: 0 }],
+  });
+  const fixed = (id: string, priority: number | null, width: number) =>
+    ({
+      id,
+      priority,
+      shrinks: false,
+      rendered: width,
+      content: Math.floor(width),
+      labels: [],
+    }) satisfies ComposerRowItemMeasurement;
+
+  it("counts an item squeezed to 0 px at its content and shortened labels", () => {
+    expect(composerRowItemWidth(squeezed("branch", COMPOSER_ROW_PRIORITY.branch, 150))).toEqual({
+      id: "branch",
+      priority: COMPOSER_ROW_PRIORITY.branch,
+      natural: 26 + 150,
+      minimum: 26 + COMPOSER_ROW_LABEL_MIN_PX,
+    });
+  });
+
+  it("leaves out an item with nothing to show", () => {
+    expect(
+      composerRowItemWidth({
+        id: "computer",
+        priority: COMPOSER_ROW_PRIORITY.computer,
+        shrinks: false,
+        rendered: 0,
+        content: 0,
+        labels: [],
+      }),
+    ).toBeNull();
+  });
+
+  it("moves the chips and the branch to the menu when the shrinking items were squeezed to 0 px", () => {
+    // The thread row at 320 px: the chips, details and the menu filled the row, so flex layout
+    // gave location and branch nothing.
+    const measured = [
+      squeezed("location", null, 160),
+      squeezed("branch", COMPOSER_ROW_PRIORITY.branch, 150),
+      fixed("pull-request", COMPOSER_ROW_PRIORITY.pullRequest, 57.3),
+      fixed("automation", COMPOSER_ROW_PRIORITY.automation, 135.1),
+      fixed("details", null, 32),
+    ].flatMap((measurement) => composerRowItemWidth(measurement) ?? []);
+    expect(
+      resolveComposerRowHiddenIds({
+        items: measured,
+        availableWidth: 276,
+        gap: 4,
+        menuWidth: 32,
+        previousHiddenIds: [],
+      }),
+    ).toEqual(["automation", "pull-request", "branch"]);
   });
 });
 

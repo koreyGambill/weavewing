@@ -11,10 +11,10 @@ import { ComposerControl } from "./ComposerControl";
 import { ComposerSurface } from "./ComposerSurface";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
-  COMPOSER_ROW_LABEL_MIN_PX,
   COMPOSER_ROW_OPEN_EVENT,
   type ComposerRowItem,
   type ComposerRowItemWidth,
+  composerRowItemWidth,
   resolveComposerRowHiddenIds,
 } from "./composerRowItems";
 import { elementOuterWidth } from "./restingComposerControlsMeasurement";
@@ -77,26 +77,22 @@ function labelTextWidth(label: HTMLElement, range: Range): number {
 }
 
 function measureItem(element: HTMLElement, range: Range): ComposerRowItemWidth | null {
-  // An end-aligned item's auto margin is the row's free space, not part of the item.
-  const rendered =
-    element.dataset.composerRowEnd === undefined
-      ? elementOuterWidth(element)
-      : element.getBoundingClientRect().width;
-  if (rendered <= 1) return null;
-  let natural = rendered;
-  let slack = 0;
-  for (const label of element.querySelectorAll<HTMLElement>(LABEL_SELECTOR)) {
-    const text = labelTextWidth(label, range);
-    natural += Math.max(0, text - label.getBoundingClientRect().width);
-    slack += Math.max(0, text - COMPOSER_ROW_LABEL_MIN_PX);
-  }
   const priority = element.dataset.composerRowPriority;
-  return {
+  return composerRowItemWidth({
     id: element.dataset.composerRowItem!,
     priority: priority === undefined ? null : Number(priority),
-    natural,
-    minimum: element.dataset.composerRowShrinks === undefined ? natural : natural - slack,
-  };
+    shrinks: element.dataset.composerRowShrinks !== undefined,
+    // An end-aligned item's auto margin is the row's free space, not part of the item.
+    rendered:
+      element.dataset.composerRowEnd === undefined
+        ? elementOuterWidth(element)
+        : element.getBoundingClientRect().width,
+    content: element.scrollWidth,
+    labels: Array.from(element.querySelectorAll<HTMLElement>(LABEL_SELECTOR), (label) => ({
+      text: labelTextWidth(label, range),
+      rendered: label.getBoundingClientRect().width,
+    })),
+  });
 }
 
 /**

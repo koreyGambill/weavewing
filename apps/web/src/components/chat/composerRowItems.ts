@@ -116,6 +116,42 @@ export interface ComposerRowItemWidth {
   readonly minimum: number;
 }
 
+/** What the row reads from one item's element to work out its widths. */
+export interface ComposerRowItemMeasurement {
+  readonly id: string;
+  readonly priority: number | null;
+  readonly shrinks: boolean;
+  /** The item's border box, with its margins unless it is end-aligned. */
+  readonly rendered: number;
+  /** The item's laid-out content, which overflows the box once the row squeezes it. */
+  readonly content: number;
+  /** Each label's text width and the width it renders at now. */
+  readonly labels: ReadonlyArray<{ readonly text: number; readonly rendered: number }>;
+}
+
+/**
+ * An item's widths from what it renders. A squeezed item can render at 0 px while it still holds
+ * an icon and a label, so its widths come from its content; only an item with nothing to show is
+ * left out of the sum.
+ */
+export function composerRowItemWidth(
+  measurement: ComposerRowItemMeasurement,
+): ComposerRowItemWidth | null {
+  let natural = Math.max(measurement.rendered, measurement.content);
+  let slack = 0;
+  for (const label of measurement.labels) {
+    natural += Math.max(0, label.text - label.rendered);
+    slack += Math.max(0, label.text - COMPOSER_ROW_LABEL_MIN_PX);
+  }
+  if (natural <= 1) return null;
+  return {
+    id: measurement.id,
+    priority: measurement.priority,
+    natural,
+    minimum: measurement.shrinks ? natural - slack : natural,
+  };
+}
+
 /** The ids of the items that leave into ⋯ at this width, in leave order. */
 export function resolveComposerRowHiddenIds(input: {
   readonly items: ReadonlyArray<ComposerRowItemWidth>;
