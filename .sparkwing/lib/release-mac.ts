@@ -29,13 +29,20 @@ trap 'rm -R "$root/source"' EXIT
 trap 'exit 1' HUP INT TERM
 tar -x -C "$root/source"
 trap - EXIT`], { stdio: ["pipe", "inherit", "inherit"] });
-  extract.stdin.on("error", () => archive.stdout.destroy());
+  const stopArchive = () => {
+    archive.stdout.destroy();
+    archive.kill();
+  };
+  extract.stdin.on("error", stopArchive);
+  extract.once("close", (code) => {
+    if (code !== 0) stopArchive();
+  });
   archive.stdout.pipe(extract.stdin);
   const exited = (child: CP.ChildProcess) => new Promise<void>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`Source transfer exited ${code}`)));
   });
-  const transfer = await Promise.allSettled([exited(archive), exited(extract)]);
+  const transfer = await Promise.allSettled([exited(extract), exited(archive)]);
   for (const result of transfer) if (result.status === "rejected") throw result.reason;
   // The remote helper reads the JSON payload on stdin; secrets never become ssh arguments.
   const nodeVersion = JSON.parse(CP.execFileSync("git", ["-C", worktree, "show", `${commit}:package.json`], { encoding: "utf8" })).engines.node;

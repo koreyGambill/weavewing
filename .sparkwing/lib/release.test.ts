@@ -239,6 +239,47 @@ test("Mac job cleanup removes only its own inactive workspace", () => {
   }
 });
 
+test("a failed Mac source transfer stops an idle archive and removes the remote workspace", () => {
+  const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-transfer-"));
+  try {
+    const archiveState = Path.join(home, "archive-state");
+    FS.writeFileSync(Path.join(home, "git"), String.raw`#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.once("SIGTERM", () => {
+  writeFileSync(process.env.ARCHIVE_STATE, "stopped");
+  process.exit(0);
+});
+process.stdout.write("archive\n");
+setTimeout(() => writeFileSync(process.env.ARCHIVE_STATE, "stalled"), 2500);
+`, { mode: 0o755 });
+    FS.writeFileSync(Path.join(home, "ssh"), `#!/bin/sh
+for remote do :; done
+case "$remote" in
+  "sh -s") exec /bin/sh -s ;;
+  *"tar -x"*) IFS= read -r header; test "$header" = archive || exit 24; exit 23 ;;
+  *) exec /bin/sh -c "$remote" ;;
+esac
+`, { mode: 0o755 });
+    FS.writeFileSync(Path.join(home, "scp"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const result = CP.spawnSync(process.execPath, [
+      Path.join(import.meta.dirname, "release-mac.ts"),
+      "--worktree", home, "--commit", "a".repeat(40), "--version", "0.1.0", "--run", "run-transfer",
+      "--evidence", Path.join(home, "evidence"), "--host", "probe-host",
+    ], {
+      env: { HOME: home, PATH: `${home}:${Path.dirname(process.execPath)}:/usr/bin:/bin`, ARCHIVE_STATE: archiveState },
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Source transfer exited 23/);
+    assert.equal(FS.readFileSync(archiveState, "utf8"), "stopped");
+    assert.equal(FS.existsSync(Path.join(home, "weavewing-release/run-transfer")), false);
+  } finally {
+    FS.rmSync(home, { recursive: true });
+  }
+});
+
 test("the remote Mac helper discards source and scratch after a broken payload", () => {
   const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-payload-"));
   try {

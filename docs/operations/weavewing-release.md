@@ -13,8 +13,10 @@ Windows also embeds the Linux CLI archive as its WSL runtime.
 
 Use a clean release worktree with no `.env` or `.env.local`. For draft and
 promote, its commit must already be pushed to `origin/main`. Version alignment
-happens in an archive of the preflight commit. Sparkwing owns the temporary local
-build workspace and removes it when the build run ends.
+happens in an archive of the preflight commit. Sparkwing removes the temporary
+local workspace after success, failure or graceful cancellation. A forced runner
+shutdown can leave an orphan outside the release evidence directory. Verify the
+owning run and any processes using its workspace have stopped before removing it.
 The Rust version is pinned in `rust-toolchain.toml`. Install rustup user-locally
 on both hosts. Linux also needs a C toolchain, pkg-config, libsecret development
 headers, ImageMagick, patchelf and zip. Windows also needs Clang, LLD and LLVM.
@@ -126,9 +128,13 @@ signing builds on the Mac cannot interleave, and adds the keychain to the user
 keychain search list for the build. Afterwards, also on failure or on SIGINT,
 SIGTERM or SIGHUP, the process restores the previous search list and deletes the
 keychain and the App Store Connect key file. If the SSH connection drops during
-the build, the controller leaves the run directory alone and says so. The next
-run's startup removes a run directory only when its `build.pid` names a process
-that has exited, and reports one without a valid marker for you to remove by hand.
+the build, the controller reports that the remote build may still be running.
+The remote build removes its source and temporary files on exit. The job's
+cleanup removes the remaining run directory if it can reconnect and the build
+has stopped. After a hard kill or a reboot, the next release can reclaim an old
+run directory when its `build.pid` process has exited and the signing lock is
+clear. If the process marker is missing or ambiguous, verify that no release
+process uses the directory before removing it by hand.
 
 If a build reports that the signing lock is held, it names the owner's PID and
 start time. Confirm with `ps -p <pid>` on the Mac that no Weavewing build is
