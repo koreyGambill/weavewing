@@ -4,6 +4,7 @@ import { NEEDS_USER_MESSAGE } from "../orchestration-v2/currentUserMessage.ts";
 import {
   changeUserTask,
   removedOpenTasks,
+  resolveListItemId,
   SETTLED_FROM_USER_CLOSES,
   TASK_DONE_NEEDS_USER,
   TASK_DROP_NEEDS_NOTE,
@@ -221,5 +222,27 @@ describe("changeUserTask", () => {
         now,
       ),
     ).toBe(NEEDS_USER_MESSAGE);
+  });
+});
+
+describe("resolveListItemId", () => {
+  const agentItem: ListItem = {
+    ...task,
+    id: "checklist",
+    owner: "agent",
+    ref: undefined,
+  } as ListItem;
+  it("resolves a ref to its task, keeps other ids, and refuses a ref that names nothing", () => {
+    expect(resolveListItemId([task], "T1")).toEqual({ id: "task-1" });
+    expect(resolveListItemId([task], "task-1")).toEqual({ id: "task-1" });
+    expect(resolveListItemId([task], "new-item")).toEqual({ id: "new-item" });
+    expect(resolveListItemId([task], undefined)).toEqual({ id: undefined });
+    expect(resolveListItemId([task], "T9")).toContain("T9 is not a task in this list");
+  });
+
+  it("refuses a ref that a task carries while another item has it as its id", () => {
+    expect(resolveListItemId([task, { ...agentItem, id: "T1" }], "T1")).toContain(
+      "T1 names a task and another item's id",
+    );
   });
 });

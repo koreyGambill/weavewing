@@ -1833,6 +1833,81 @@ it.effect("never gives a dropped task's number to a new one", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("names a task by its ref alone, and refuses an id that reads as another's ref", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const agent = { by: "agent", userMessageId: null } as const;
+    const created = yield* h.service.update(
+      {
+        threadId,
+        expectedRevision: 0,
+        changes: [
+          { id: "checklist", text: "Write the migration", owner: "agent" },
+          { id: "rotate", text: "Rotate the staging webhook secret", owner: "you" },
+        ],
+      },
+      agent,
+    );
+    const refusal = (write: Effect.Effect<unknown, { readonly message: string }>) =>
+      write.pipe(
+        Effect.flip,
+        Effect.map((error) => error.message),
+      );
+    // A new item never takes an id that reads as a task ref, so a ref names one row.
+    expect(
+      yield* refusal(
+        h.service.update(
+          {
+            threadId,
+            expectedRevision: created.revision,
+            changes: [{ id: "T7", text: "Looks like a task", owner: "agent" }],
+          },
+          agent,
+        ),
+      ),
+    ).toContain("T7 is not a task in this list");
+    // A list saved before the rule can still hold such an id beside the task that has the ref.
+    const file = h.path.join(
+      h.config.stateDir,
+      "thread-workspaces",
+      `${NodeCrypto.createHash("sha256").update(threadId).digest("hex")}.json`,
+    );
+    const stored = JSON.parse(yield* h.fs.readFileString(file));
+    stored.workspace.items[0].id = "T1";
+    yield* h.fs.writeFileString(file, JSON.stringify(stored));
+    expect(
+      yield* refusal(
+        h.service.update(
+          {
+            threadId,
+            expectedRevision: created.revision,
+            changes: [{ id: "T1", text: "Rotate it today" }],
+          },
+          agent,
+        ),
+      ),
+    ).toContain("T1 names a task and another item's id; use the task's id rotate.");
+    // Before one resolver, this rewrite counted T1 as the kept task but wrote the literal row,
+    // removing the open task.
+    expect(
+      yield* refusal(
+        h.service.rewrite(
+          {
+            threadId,
+            expectedRevision: created.revision,
+            items: [{ id: "T1", text: "Write the migration", owner: "agent" }],
+          },
+          agent,
+        ),
+      ),
+    ).toContain("T1 names a task and another item's id");
+    expect((yield* h.service.get({ threadId })).items.map((item) => item.id)).toEqual([
+      "T1",
+      "rotate",
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("numbers tasks saved before task numbers existed when their thread is next read", () =>
   Effect.gen(function* () {
     const h = yield* harness();
