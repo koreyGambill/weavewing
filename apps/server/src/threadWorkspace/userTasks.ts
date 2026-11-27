@@ -14,7 +14,18 @@ export const TASK_LEAVES_ONLY_CLOSED =
 export const TASK_NOT_HANDED_OFF =
   "A user task is open, done or dropped; handed_off is for linked work.";
 export const SETTLED_FROM_USER_CLOSES =
-  "settledFromUser closes a user task: set state done or dropped on an owner you item.";
+  "settledFromUser closes or reopens a user task: set state done, dropped or open on an owner you item.";
+export const USER_OUTCOME_NEEDS_USER =
+  "The user recorded this task's outcome; change it only from their message in this turn, with settledFromUser.";
+
+/**
+ * Whether the user recorded the task's current outcome themselves: closed it, with any note, or
+ * reopened it. Only the user, or an agent relaying the user's message, may change that.
+ */
+const userOutcome = (item: ListItem | undefined) =>
+  item !== undefined &&
+  item.owner === "you" &&
+  (item.settledBy === "user" || (item.state === "open" && item.userChangedAt !== undefined));
 
 type Change = ThreadListUpdateInput["changes"][number];
 type TaskFields = Pick<
@@ -70,10 +81,13 @@ export function changeUserTask(
       ? { ...base, settledBy: "user", userChangedAt: now, ...(note ? { note } : {}) }
       : { ...base, userChangedAt: now };
   }
-  if (change.settledFromUser === true) {
-    if (!isTask || !closed(next.state)) return SETTLED_FROM_USER_CLOSES;
+  const relayed = change.settledFromUser === true;
+  if (relayed) {
+    const reopening = old !== undefined && closed(old.state) && next.state === "open";
+    if (!isTask || !(closed(next.state) || reopening)) return SETTLED_FROM_USER_CLOSES;
     if (actor.userMessageId === null) return NEEDS_USER_MESSAGE;
   }
+  if (userOutcome(old) && (stateChanged || !isTask) && !relayed) return USER_OUTCOME_NEEDS_USER;
   if (old?.owner === "you" && old.state === "open" && !isTask) return TASK_LEAVES_ONLY_CLOSED;
   if (!isTask) return base;
   if (!stateChanged) return { ...base, ...(old === undefined ? {} : taskFields(old)) };

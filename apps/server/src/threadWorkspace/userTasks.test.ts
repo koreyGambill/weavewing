@@ -9,6 +9,7 @@ import {
   TASK_DROP_NEEDS_NOTE,
   TASK_LEAVES_ONLY_CLOSED,
   TASK_NOT_HANDED_OFF,
+  USER_OUTCOME_NEEDS_USER,
 } from "./userTasks.ts";
 
 const now = "2026-02-01T00:00:00.000Z";
@@ -141,5 +142,84 @@ describe("changeUserTask", () => {
       ...mine,
       state: "done",
     });
+  });
+
+  it("keeps an outcome the user recorded from an agent without the user's message", () => {
+    const userDone = {
+      ...task,
+      state: "done" as const,
+      settledBy: "user" as const,
+      userChangedAt: now,
+    };
+    const userDismissed = {
+      ...task,
+      state: "dropped" as const,
+      settledBy: "user" as const,
+      userChangedAt: now,
+      note: "My reason",
+    };
+    const userReopened = { ...task, userChangedAt: now };
+    expect(
+      changeUserTask(
+        userDone,
+        { ...userDone, state: "dropped" },
+        { id: task.id, note: "moot" },
+        agent,
+        now,
+      ),
+    ).toBe(USER_OUTCOME_NEEDS_USER);
+    expect(changeUserTask(userDismissed, { ...task }, { id: task.id }, agent, now)).toBe(
+      USER_OUTCOME_NEEDS_USER,
+    );
+    expect(
+      changeUserTask(
+        userReopened,
+        { ...task, state: "dropped" },
+        { id: task.id, note: "moot" },
+        agent,
+        now,
+      ),
+    ).toBe(USER_OUTCOME_NEEDS_USER);
+    expect(
+      changeUserTask(userDone, { ...userDone, owner: "agent" }, { id: task.id }, agent, now),
+    ).toBe(USER_OUTCOME_NEEDS_USER);
+    // Editing the text leaves the outcome and its note alone.
+    expect(
+      changeUserTask(
+        userDismissed,
+        { ...userDismissed, text: "Rotate both secrets" },
+        { id: task.id },
+        agent,
+        now,
+      ),
+    ).toEqual({ ...userDismissed, text: "Rotate both secrets" });
+  });
+
+  it("lets an agent change a user-recorded outcome by relaying the user's message", () => {
+    const userDismissed = {
+      ...task,
+      state: "dropped" as const,
+      settledBy: "user" as const,
+      userChangedAt: now,
+      note: "My reason",
+    };
+    expect(
+      changeUserTask(
+        userDismissed,
+        { ...task },
+        { id: task.id, settledFromUser: true },
+        agentWithMessage,
+        now,
+      ),
+    ).toEqual(task);
+    expect(
+      changeUserTask(
+        userDismissed,
+        { ...task },
+        { id: task.id, settledFromUser: true },
+        agent,
+        now,
+      ),
+    ).toBe(NEEDS_USER_MESSAGE);
   });
 });
