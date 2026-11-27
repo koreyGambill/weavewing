@@ -595,7 +595,10 @@ it.layer(
       }),
   );
 
-  it.effect("tells a terminal opening in a lost Xwing checkout which branch survives", () =>
+  it.effect.each([
+    { case: "names it", branch: "feature" },
+    { case: "stays a typed error for a very long branch", branch: "f".repeat(2_100) },
+  ])("tells a terminal opening in a lost Xwing checkout which branch survives: $case", ({ branch }) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const { manager, ptyAdapter, baseDir } = yield* createManager();
@@ -605,7 +608,7 @@ it.layer(
           id: ThreadId.make("thread-1"),
           projectId: ProjectId.make("project-1"),
           worktreePath: cwd,
-          branch: "feature",
+          branch,
           developmentEnvironment: { xwingEnvironmentId: "0123abcd", repositorySource: baseDir },
         }),
       ).pipe(
@@ -624,7 +627,7 @@ it.layer(
                 Effect.fail(
                   new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError({
                     xwingEnvironmentId: "0123abcd",
-                    branch: "feature",
+                    branch,
                     reason: "environment-missing",
                   }),
                 ),
@@ -642,10 +645,13 @@ it.layer(
       );
       assert.equal(error._tag, "TerminalCwdNotFoundError");
       assert.include(error.message, `Terminal folder does not exist: ${cwd}.`);
-      assert.include(
-        error.message,
-        "Its branch 'feature' remains in the project repository; the thread was not moved",
-      );
+      assert.include(error.message, `Its branch '${branch.slice(0, 40)}`);
+      if (branch === "feature") {
+        assert.include(
+          error.message,
+          "Its branch 'feature' remains in the project repository; the thread was not moved",
+        );
+      }
       assert.equal(ptyAdapter.spawnInputs.length, 0);
     }),
   );

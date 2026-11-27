@@ -309,10 +309,14 @@ export const makePrepareTerminalLaunch = Effect.fn(
             worktreePath,
             cause,
           }).pipe(
-            // Restore errors carry fixed, client-safe messages, such as the branch that survives.
+            // Restore errors carry fixed, client-safe messages, such as the branch that survives;
+            // a long path or branch is cut to the wire limit rather than failing the error itself.
             Effect.andThen(
               Effect.fail(
-                new TerminalCwdNotFoundError({ cwd: error.cwd, restoreFailure: cause.message }),
+                new TerminalCwdNotFoundError({
+                  cwd: error.cwd,
+                  restoreFailure: cause.message.slice(0, 2_000),
+                }),
               ),
             ),
           ),
