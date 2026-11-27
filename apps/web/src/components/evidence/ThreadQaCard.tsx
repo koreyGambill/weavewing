@@ -30,6 +30,7 @@ import { CaptureTile } from "./CaptureTile";
 import { CHECKS, checkLabel, reviewDisplay } from "./evidence.logic";
 import { qaDiscussRecord } from "./qaComposer";
 import {
+  removeWaitingItemDiscuss,
   toggleWaitingItemDiscuss,
   useWaitingItemsInComposer,
 } from "../waiting/waitingItemComposer";
@@ -154,8 +155,10 @@ export function ThreadQaCard({
   };
   const settle = async (state: "confirmed" | "waived") => {
     focusNext.current = "line";
-    if (inComposer) toggleWaitingItemDiscuss(threadRef, qaDiscussRecord(landing, change), null);
-    if (!(await answer(state))) focusNext.current = null;
+    // Only once the server took it: a refused write leaves the change open with its chip.
+    if (await answer(state))
+      removeWaitingItemDiscuss(threadRef, "qa", qaKey(landing.id, change.id));
+    else focusNext.current = null;
     setExpanded(false);
   };
   const reopen = async () => {

@@ -180,14 +180,16 @@ export function ThreadQuestionCard({
     changeNotes(withoutThreadQuestionImageMarkers(question.id, notes, new Set([number])));
   };
   const changeState = async (state: "open" | "deferred" | "withdrawn") => {
-    if (state === "withdrawn") removeWaitingItemDiscuss(threadRef, "question", question.id);
     setBusy(true);
     await writer.flush(question.id, saveDraft);
-    await update({
+    const result = await update({
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, id: question.id, state },
     });
     setBusy(false);
+    // Only once the server took it: a refused dismissal leaves the question and its chip alone.
+    if (state === "withdrawn" && result._tag === "Success")
+      removeWaitingItemDiscuss(threadRef, "question", question.id);
   };
   const toComposer = async () => {
     setBusy(true);
