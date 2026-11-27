@@ -1,11 +1,12 @@
 import { ChevronRightIcon } from "lucide-react";
-import { createContext, use, useState, type ReactNode } from "react";
+import { createContext, use, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { observeIntersection } from "../lib/observeIntersection";
 import { cn } from "../lib/utils";
 import type { ViewSectionId } from "../components/ToolSidebar.logic";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 
 interface SectionGroup {
+  readonly order: ReadonlyArray<ViewSectionId>;
   readonly mounted: ReadonlySet<ViewSectionId>;
   readonly markMounted: (id: ViewSectionId) => void;
 }
@@ -13,61 +14,75 @@ interface SectionGroup {
 const SectionGroupContext = createContext<SectionGroup | null>(null);
 
 /** The sections of one merged view, which mount in order from the top. */
-export function ViewSectionGroup({ children }: { children: ReactNode }) {
+export function ViewSectionGroup({
+  order,
+  children,
+}: {
+  order: ReadonlyArray<ViewSectionId>;
+  children: ReactNode;
+}) {
   const [mounted, setMounted] = useState<ReadonlySet<ViewSectionId>>(() => new Set());
   const [markMounted] = useState(
     () => (id: ViewSectionId) =>
       setMounted((current) => (current.has(id) ? current : new Set([...current, id]))),
   );
-  return <SectionGroupContext value={{ mounted, markMounted }}>{children}</SectionGroupContext>;
+  return (
+    <SectionGroupContext value={{ order, mounted, markMounted }}>{children}</SectionGroupContext>
+  );
 }
 
 /**
- * One collapsible part of a merged view, under its own heading with its own button row. Its body
- * mounts only while expanded, once it has come into view and once the section named by `after`
- * has mounted or is collapsed: before the first body renders, every heading of a short view is
- * on screen, so without that order all of a view's sections would start their requests at once.
+ * Keeps expanded sections lazy in reading order. An explicit reveal mounts the sections above
+ * its destination first so their bodies take up space before scrolling.
  */
 export function ViewSection({
   id,
   title,
-  after,
   children,
 }: {
   id: ViewSectionId;
   title: string;
-  /** The section above this one in its view. */
-  after?: ViewSectionId;
   /** The section's content, given the element its buttons portal into. */
   children: (actions: HTMLDivElement | null) => ReactNode;
 }) {
   const group = use(SectionGroupContext);
-  const collapsed = useThreadContextSidebarStore((state) => state.collapsedSections.includes(id));
-  const aboveCollapsed = useThreadContextSidebarStore(
-    (state) => after !== undefined && state.collapsedSections.includes(after),
-  );
-  const aboveDone =
-    after === undefined || aboveCollapsed || group === null || group.mounted.has(after);
-  const reveal = useThreadContextSidebarStore((state) => state.revealSection === id);
+  const collapsedSections = useThreadContextSidebarStore((state) => state.collapsedSections);
+  const collapsed = collapsedSections.includes(id);
+  const requestedSection = useThreadContextSidebarStore((state) => state.revealSection);
+  const reveal = requestedSection === id;
+  const order = group?.order ?? [];
+  const index = order.indexOf(id);
+  const revealIndex = requestedSection === null ? -1 : order.indexOf(requestedSection);
+  const aboveDone = order
+    .slice(0, index)
+    .every((above) => collapsedSections.includes(above) || group?.mounted.has(above));
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [seen, setSeen] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const forceMount = group !== null && aboveDone && (reveal || index < revealIndex);
+  const bodyMounted = !collapsed && (seen || forceMount || group?.mounted.has(id));
   const [placeholderRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
     return observeIntersection(node, (entry) => {
-      if (!entry.isIntersecting) return;
-      setSeen(true);
-      group?.markMounted(id);
+      if (entry.isIntersecting) setSeen(true);
     });
   });
-  const [sectionRef] = useState(() => (node: HTMLElement | null) => {
-    if (!node || useThreadContextSidebarStore.getState().revealSection !== id) return;
-    node.scrollIntoView({ block: "start" });
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Record committed bodies before a reveal measures the sections below them.
+  useLayoutEffect(() => {
+    if (bodyMounted && group && !group.mounted.has(id)) group.markMounted(id);
+  }, [bodyMounted, group, id]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The destination can only be measured after the preceding section bodies have committed.
+  useLayoutEffect(() => {
+    if (!reveal || !aboveDone || !section.current) return;
+    section.current.scrollIntoView({ block: "start" });
     useThreadContextSidebarStore.getState().consumeRevealSection(id);
-  });
+  }, [reveal, aboveDone, id]);
   const headingId = `view-section-${id}`;
   return (
     <section
-      ref={reveal ? sectionRef : undefined}
+      ref={section}
       aria-labelledby={headingId}
       data-view-section={id}
       className="flex min-w-0 flex-col"
@@ -90,7 +105,7 @@ export function ViewSection({
         </h3>
         <div ref={setActions} className="flex shrink-0 items-center" />
       </div>
-      {collapsed ? null : seen ? (
+      {collapsed ? null : bodyMounted ? (
         children(actions)
       ) : aboveDone ? (
         <div ref={placeholderRef} className="h-16" />

@@ -8,11 +8,11 @@ import { ViewSection, ViewSectionGroup } from "./ViewSection";
 function Panel() {
   return (
     <div data-testid="scroller" style={{ height: 160, overflow: "auto" }}>
-      <ViewSectionGroup>
+      <ViewSectionGroup order={["activity:runs", "activity:landings"]}>
         <ViewSection id="activity:runs" title="Runs">
           {() => <div style={{ height: 600 }}>Runs body</div>}
         </ViewSection>
-        <ViewSection id="activity:landings" title="Landings" after="activity:runs">
+        <ViewSection id="activity:landings" title="Landings">
           {() => <p>Landings body</p>}
         </ViewSection>
       </ViewSectionGroup>
@@ -44,4 +44,13 @@ it("mounts nothing for a collapsed section and mounts it when expanded", async (
   await userEvent.click(runs);
   await expect.element(screen.getByText("Runs body")).toBeVisible();
   expect(useThreadContextSidebarStore.getState().collapsedSections).toEqual([]);
+});
+
+it("reveals a section after a cold panel lays out the body above it", async () => {
+  setup();
+  useThreadContextSidebarStore.getState().show("activity", { section: "activity:landings" });
+  await using screen = await render(<Panel />);
+  await expect.element(screen.getByRole("button", { name: "Landings" })).toBeInViewport();
+  await expect.element(screen.getByText("Landings body")).toBeInViewport();
+  expect(screen.getByTestId("scroller").element().scrollTop).toBeGreaterThan(0);
 });

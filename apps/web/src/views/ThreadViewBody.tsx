@@ -78,7 +78,7 @@ function ThreadViewContent({
       );
     case "links":
       return (
-        <ViewSectionGroup>
+        <ViewSectionGroup order={["links:links", "links:threads"]}>
           <ViewSection id="links:links" title="Pull requests, tickets, links and files">
             {(actions) => (
               <Padded>
@@ -86,11 +86,7 @@ function ThreadViewContent({
               </Padded>
             )}
           </ViewSection>
-          <ViewSection
-            id="links:threads"
-            title="Delegated, forked and messaged threads"
-            after="links:links"
-          >
+          <ViewSection id="links:threads" title="Delegated, forked and messaged threads">
             {() => (
               <Padded>
                 <ThreadRelated threadRef={threadRef} />
@@ -101,7 +97,7 @@ function ThreadViewContent({
       );
     case "activity":
       return (
-        <ViewSectionGroup>
+        <ViewSectionGroup order={["activity:runs", "activity:landings"]}>
           <ViewSection id="activity:runs" title="Runs">
             {(actions) => (
               <Padded>
@@ -109,7 +105,7 @@ function ThreadViewContent({
               </Padded>
             )}
           </ViewSection>
-          <ViewSection id="activity:landings" title="Landings" after="activity:runs">
+          <ViewSection id="activity:landings" title="Landings">
             {() => (
               <Padded>
                 <ThreadLandings threadRef={threadRef} />
@@ -120,18 +116,18 @@ function ThreadViewContent({
       );
     case "details":
       return (
-        <ViewSectionGroup>
+        <ViewSectionGroup order={["details:thread", "details:environments", "details:inspect"]}>
           <ViewSection id="details:thread" title="Thread">
             {() => <ThreadDetailsSlot threadRef={threadRef} detailsRef={slots.setDetails} />}
           </ViewSection>
-          <ViewSection id="details:environments" title="Environments" after="details:thread">
+          <ViewSection id="details:environments" title="Environments">
             {() => (
               <Padded>
                 <ThreadEnvironments threadRef={threadRef} />
               </Padded>
             )}
           </ViewSection>
-          <ViewSection id="details:inspect" title="Context and usage" after="details:environments">
+          <ViewSection id="details:inspect" title="Context and usage">
             {() => <ThreadInspect threadRef={threadRef} />}
           </ViewSection>
         </ViewSectionGroup>
