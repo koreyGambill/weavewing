@@ -31,6 +31,7 @@ import * as Layer from "effect/Layer";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import { withTurnStartReservation, withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
@@ -175,6 +176,8 @@ it.effect.each([
   { order: "rollback-first", restoreFiles: true },
   { order: "cleanup-first", restoreFiles: false, unmanaged: true },
   { order: "cleanup-first", restoreFiles: false, xwing: true },
+  { order: "cleanup-first", restoreFiles: true, xwing: true, recovers: true },
+  { order: "cleanup-first", restoreFiles: false, xwing: true, recovers: false },
   { order: "cleanup-first", restoreFiles: true, leavesFolder: true },
   { order: "cleanup-first", restoreFiles: false, leavesFolder: true },
   { order: "cleanup-first", restoreFiles: true, leavesFolder: true, shared: true },
@@ -189,6 +192,7 @@ it.effect.each([
     const shared = "shared" in row && row.shared;
     const createFails = "createFails" in row && row.createFails;
     const xwing = "xwing" in row && row.xwing;
+    const recovers = "recovers" in row ? row.recovers : undefined;
     const worktreeProvider = "worktreeProvider" in row ? row.worktreeProvider : undefined;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -339,6 +343,29 @@ it.effect.each([
               return Effect.succeed({ cwd: thread.worktreePath } as never);
             },
           }),
+          recovers === undefined
+            ? Layer.empty
+            : Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
+                recover: (input) =>
+                  Effect.gen(function* () {
+                    assert.deepEqual(input, {
+                      xwingEnvironmentId: "0123abcd",
+                      repositorySource: workspaceRoot,
+                      workspaceRoot,
+                      checkoutPath: worktreePath,
+                      branch,
+                    });
+                    calls.push("recover");
+                    if (!recovers) {
+                      return yield* new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError(
+                        { xwingEnvironmentId: "0123abcd", branch, reason: "checkout-moved" },
+                      );
+                    }
+                    yield* fileSystem
+                      .makeDirectory(path.join(worktreePath, ".git"), { recursive: true })
+                      .pipe(Effect.orDie);
+                  }),
+              }),
         ),
       ),
     );
@@ -374,19 +401,24 @@ it.effect.each([
       if (order === "rollback-first") assert.isFalse(cleanupEntered);
       yield* Deferred.succeed(release, undefined);
       if (cleanup !== undefined) yield* Fiber.join(cleanup);
-      if (unmanaged || xwing || shared || worktreeProvider !== undefined) {
+      if (unmanaged || (xwing && recovers !== true) || shared || worktreeProvider !== undefined) {
         const error = yield* Fiber.join(rollback).pipe(Effect.flip);
         assert.equal(error._tag, "CheckpointRollbackExecutionError");
-        assert.deepEqual(calls, ["cleanup"]);
+        assert.deepEqual(calls, recovers === false ? ["cleanup", "recover"] : ["cleanup"]);
+        if (recovers === false) {
+          assert.include(
+            CheckpointRollbackService.rollbackFailureClientMessage(error),
+            `Its branch '${branch}' remains in the project repository; the thread was not moved`,
+          );
+        }
         if (worktreeProvider !== undefined) {
           assert.equal(
             (error.cause as { readonly _tag?: string } | undefined)?._tag,
             "WorktreeProviderDisabledError",
           );
-          assert.include(
-            CheckpointRollbackService.rollbackFailureClientMessage(error),
-            `\`worktreeProvider\` server setting (${worktreeProvider})`,
-          );
+          const message = CheckpointRollbackService.rollbackFailureClientMessage(error);
+          assert.include(message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+          assert.equal(message.includes(`branch: '${branch}'`), worktreeProvider === "xwing");
           if (leavesFolder) {
             assert.isTrue(yield* fileSystem.exists(path.join(worktreePath, "unsaved.txt")));
             assert.deepEqual(yield* fileSystem.readDirectory(path.dirname(worktreePath)), [
@@ -419,7 +451,11 @@ it.effect.each([
       assert.deepEqual(
         calls,
         order === "cleanup-first"
-          ? ["cleanup", ...(recreates ? ["prune", "create"] : []), ...rollbackCalls]
+          ? [
+              "cleanup",
+              ...(xwing ? ["recover"] : recreates ? ["prune", "create"] : []),
+              ...rollbackCalls,
+            ]
           : [...rollbackCalls, "cleanup"],
       );
       if (!recreates) {

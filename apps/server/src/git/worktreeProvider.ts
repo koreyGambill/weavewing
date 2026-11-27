@@ -35,17 +35,25 @@ export class WorktreeProviderDisabledError extends Schema.TaggedError<WorktreePr
   {
     operation: Schema.String,
     worktreeProvider: Schema.Literals(["xwing", "off"]),
+    /** The missing worktree's branch, which survives in the project repository. */
+    branch: Schema.String,
   },
 ) {
   override get message(): string {
-    return worktreeProviderRefusal(this.worktreeProvider);
+    if (this.worktreeProvider === "off") return worktreeProviderRefusal("off");
+    // `git worktree add` refuses a branch still registered to the deleted worktree.
+    return `This thread's T3 worktree is missing, and the \`worktreeProvider\` server setting (xwing) disables T3 worktrees, so it was not recreated. Its branch '${this.branch}' remains in the project repository. To continue it in a new Xwing environment, run \`git worktree prune\` in the project, then launch a thread with \`workspaceStrategy: {type: 'worktree', baseRef: <default branch>, branch: '${this.branch}'}\`.`;
   }
 }
 
 export const refuseUnlessT3Worktrees = Effect.fn("worktreeProvider.refuseUnlessT3Worktrees")(
-  function* (settings: ServerSettings.ServerSettingsService["Service"], operation: string) {
+  function* (
+    settings: ServerSettings.ServerSettingsService["Service"],
+    operation: string,
+    branch: string,
+  ) {
     const worktreeProvider = yield* readWorktreeProvider(settings);
     if (worktreeProvider === "t3") return;
-    return yield* new WorktreeProviderDisabledError({ operation, worktreeProvider });
+    return yield* new WorktreeProviderDisabledError({ operation, worktreeProvider, branch });
   },
 );

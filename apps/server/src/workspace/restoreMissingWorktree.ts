@@ -8,6 +8,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
+import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/DevelopmentEnvironmentCheckouts.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import { scratchFolderRoot } from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -51,7 +52,13 @@ interface WorktreeThread {
   readonly projectId: ProjectId;
   readonly worktreePath: string | null;
   readonly branch: string | null;
-  readonly developmentEnvironment?: unknown;
+  readonly developmentEnvironment?:
+    | {
+        readonly xwingEnvironmentId: string;
+        readonly repositorySource: string;
+      }
+    | null
+    | undefined;
 }
 
 export const makeRestoreMissingWorktree = Effect.gen(function* () {
@@ -62,6 +69,9 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const checkouts = yield* Effect.serviceOption(
+    DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts,
+  );
 
   // Storage cleanup prunes idle No project folders, which have no branch to restore from.
   // An empty folder, only directly inside the No project's own root, lets the thread run again.
@@ -172,11 +182,41 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     });
   });
 
+  // Xwing owns a bound thread's checkout, so only Xwing brings it back, under every provider setting.
+  const recoverEnvironmentCheckout = Effect.fn("restoreMissingWorktree.recoverEnvironmentCheckout")(
+    function* (
+      thread: WorktreeThread,
+      worktreePath: string,
+      environment: NonNullable<WorktreeThread["developmentEnvironment"]>,
+    ) {
+      if (Option.isNone(checkouts)) return;
+      if (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => true))) return;
+      const project = yield* projects.getById(thread.projectId).pipe(
+        Effect.map(Option.getOrUndefined),
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (project === undefined) return;
+      yield* Effect.logWarning("recovering a missing Xwing checkout", {
+        threadId: thread.id,
+        worktreePath,
+        xwingEnvironmentId: environment.xwingEnvironmentId,
+      });
+      yield* checkouts.value.recover({
+        xwingEnvironmentId: environment.xwingEnvironmentId,
+        repositorySource: environment.repositorySource,
+        workspaceRoot: project.workspaceRoot,
+        checkoutPath: worktreePath,
+        branch: thread.branch,
+      });
+    },
+  );
+
   return Effect.fn("restoreMissingWorktree")(function* (thread: WorktreeThread) {
     const { worktreePath, branch } = thread;
     if (worktreePath === null) return;
-    // Xwing owns its checkouts; a missing one fails instead of being recreated here.
-    if (thread.developmentEnvironment != null) return;
+    if (thread.developmentEnvironment != null) {
+      return yield* recoverEnvironmentCheckout(thread, worktreePath, thread.developmentEnvironment);
+    }
     if (branch === null) return yield* recreateScratchFolder(thread, worktreePath);
     const exists = yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => true));
     const leftover = exists && (yield* isLeftoverFolder(worktreePath));
@@ -186,7 +226,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
       Effect.orElseSucceed(() => undefined),
     );
     if (project === undefined) return;
-    yield* refuseUnlessT3Worktrees(serverSettings, "restoreMissingWorktree");
+    yield* refuseUnlessT3Worktrees(serverSettings, "restoreMissingWorktree", branch);
     yield* Effect.logWarning("recreating missing worktree", {
       threadId: thread.id,
       worktreePath,
@@ -211,7 +251,10 @@ export class ThreadWorktreeRestore extends Context.Service<
       thread: WorktreeThread,
     ) => Effect.Effect<
       void,
-      WorktreeRecreateError | WorktreeRecreateNoBaseError | WorktreeProviderDisabledError
+      | WorktreeRecreateError
+      | WorktreeRecreateNoBaseError
+      | WorktreeProviderDisabledError
+      | DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutRecoveryError
     >;
   }
 >()("t3/workspace/restoreMissingWorktree/ThreadWorktreeRestore") {}

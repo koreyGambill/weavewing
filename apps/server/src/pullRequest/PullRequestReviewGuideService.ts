@@ -303,9 +303,11 @@ const make = Effect.gen(function* () {
       },
       { concurrency: 4 },
     );
+    // Under Xwing the T3 worktrees folder stays empty; the system temp folder holds the checkout.
+    const t3Worktrees = (yield* readWorktreeProvider(serverSettings)) === "t3";
     const directory = yield* fileSystem.makeTempDirectoryScoped({
-      directory: config.worktreesDir,
-      prefix: "review-guide-",
+      ...(t3Worktrees ? { directory: config.worktreesDir } : {}),
+      prefix: t3Worktrees ? "review-guide-" : "t3-review-guide-",
     });
     const path = `${directory}/checkout`;
     yield* git.execute({
@@ -464,12 +466,11 @@ const make = Effect.gen(function* () {
         detail: "Review guides are off. Turn them on in Settings → Source Control.",
       });
     }
-    // The guide's agent reads a scratch T3 worktree of the head.
-    const worktreeProvider = yield* readWorktreeProvider(serverSettings);
-    if (worktreeProvider !== "t3") {
+    // The guide's agent reads a scratch worktree of the head.
+    if ((yield* readWorktreeProvider(serverSettings)) === "off") {
       return yield* new PullRequestOperationError({
         operation: "generateReviewGuide",
-        detail: `Review guides need a T3 worktree of the pull request. ${worktreeProviderRefusal(worktreeProvider)}`,
+        detail: `Review guides need a T3 worktree of the pull request. ${worktreeProviderRefusal("off")}`,
       });
     }
     // A supplied thread that cannot be read fails the request: guessing a model could send the

@@ -533,31 +533,63 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
     }),
   );
 
-  it.effect.each(["xwing", "off"] as const)(
-    "refuses a guide before checking anything out when worktreeProvider is %s",
-    (worktreeProvider) =>
+  it.effect("refuses a guide before checking anything out when worktreeProvider is off", () =>
+    Effect.gen(function* () {
+      const worktreeProvider = "off";
+      const repositories = yield* makeRepositories;
+      const generated = yield* Ref.make(0);
+      const context = yield* Layer.build(
+        makeLayer({
+          ...repositories,
+          stored: yield* Deferred.make<void>(),
+          serverSettings: { worktreeProvider },
+          generate: () =>
+            Ref.update(generated, (count) => count + 1).pipe(Effect.as({ stops: [] })),
+        }),
+      );
+      const service = Context.get(
+        context,
+        PullRequestReviewGuideService.PullRequestReviewGuideService,
+      );
+      const failure = yield* Effect.flip(service.generate(reference));
+      assert.include(failure.message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+      assert.strictEqual(yield* Ref.get(generated), 0);
+      const worktrees = yield* git(repositories.workspace, ["worktree", "list", "--porcelain"]);
+      assert.strictEqual(worktrees.match(/^worktree /gm)?.length, 1);
+    }),
+  );
+
+  it.effect.each([
+    { worktreeProvider: "t3", inWorktreesDir: true },
+    { worktreeProvider: "xwing", inWorktreesDir: false },
+  ] as const)(
+    "reads the change from a scratch checkout removed afterwards under worktreeProvider $worktreeProvider",
+    ({ worktreeProvider, inWorktreesDir }) =>
       Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const repositories = yield* makeRepositories;
-        const generated = yield* Ref.make(0);
+        const checkout = yield* Deferred.make<string>();
+        const stored = yield* Deferred.make<void>();
         const context = yield* Layer.build(
           makeLayer({
             ...repositories,
-            stored: yield* Deferred.make<void>(),
+            stored,
             serverSettings: { worktreeProvider },
-            generate: () =>
-              Ref.update(generated, (count) => count + 1).pipe(Effect.as({ stops: [] })),
+            generate: (input) =>
+              Deferred.succeed(checkout, input.cwd).pipe(Effect.as({ stops: [] })),
           }),
         );
-        const service = Context.get(
+        yield* Context.get(
           context,
           PullRequestReviewGuideService.PullRequestReviewGuideService,
-        );
-        const failure = yield* Effect.flip(service.generate(reference));
-        assert.include(
-          failure.message,
-          `\`worktreeProvider\` server setting (${worktreeProvider})`,
-        );
-        assert.strictEqual(yield* Ref.get(generated), 0);
+        ).generate(reference);
+        const cwd = yield* Deferred.await(checkout);
+        yield* Deferred.await(stored);
+        // T3 worktrees live in `<base>/worktrees`; Xwing machines keep that folder free of them.
+        const scratch = cwd.slice(0, cwd.lastIndexOf("/"));
+        const parent = scratch.slice(0, scratch.lastIndexOf("/"));
+        assert.strictEqual(parent.endsWith("/worktrees"), inWorktreesDir);
+        assert.isFalse(yield* fs.exists(scratch));
         const worktrees = yield* git(repositories.workspace, ["worktree", "list", "--porcelain"]);
         assert.strictEqual(worktrees.match(/^worktree /gm)?.length, 1);
       }),
