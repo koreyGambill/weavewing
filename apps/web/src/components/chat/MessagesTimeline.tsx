@@ -127,10 +127,12 @@ import {
   qaRevealLandingId,
   revealQaInChat,
   revealQuestionInChat,
+  revealTaskInChat,
   revealTrackedMessageInChat,
   taskRevealRef,
 } from "../questions/questionReveal";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { ThreadAnswerCard } from "../answers/ThreadAnswerCard";
 import { useTrackedAsks } from "../answers/trackedAnswers-web-state";
 import { useTrackedAnswerDraft, useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
@@ -1918,6 +1920,10 @@ function ThreadAnswerRow({ answerRef }: { answerRef: { id: string; n: number } }
       onAsked={() => {
         if (ask.about?.kind === "question") revealQuestionInChat(key, ask.about.ref);
         else if (ask.about?.kind === "qa") revealQaInChat(key, ask.about);
+        else if (ask.about?.kind === "task")
+          revealTaskInChat(key, ask.about.ref, () =>
+            useThreadContextSidebarStore.getState().show("todos", { thread: threadRef }),
+          );
         else revealTrackedMessageInChat(key, ask.askedInMessageId);
       }}
     />

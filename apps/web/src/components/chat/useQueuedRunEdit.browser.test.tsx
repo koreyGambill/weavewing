@@ -113,7 +113,7 @@ const RUN = RunId.make("run-1");
 type HookResult = ReturnType<typeof useQueuedRunEdit>;
 
 function projection(runs: ReadonlyArray<RunStatus>, messages: ReadonlyArray<unknown>) {
-  return { runs, messages, contextTransfers: [] } as unknown as ThreadStructure;
+  return { thread: {}, runs, messages, contextTransfers: [] } as unknown as ThreadStructure;
 }
 
 function setRuns(ref: ScopedThreadRef, status: string) {

@@ -3443,6 +3443,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           event.shiftKey &&
           !event.altKey &&
           !event.repeat &&
+          !event.nativeEvent.isComposing &&
           event.key.toLowerCase() === "y"
         ) {
           event.preventDefault();

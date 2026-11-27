@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import ChatMarkdown from "../ChatMarkdown";
 import { findRevealRef } from "../chat/markdownFindContext";
+import { useTallEnoughToFold } from "../chat/useTallEnoughToFold";
 import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
   HelpButton,
@@ -27,7 +28,8 @@ export function TrackedAnswerBody({
   readonly cwd?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const clamped = !expanded && (answer.text.length > 800 || answer.text.split("\n").length > 16);
+  const { ref: contentRef, tallEnough } = useTallEnoughToFold(true, 20);
+  const clamped = tallEnough && !expanded;
   const reveal = findRevealRef(() => setExpanded(true));
   return (
     <div className="min-w-0 space-y-1.5">
@@ -41,9 +43,11 @@ export function TrackedAnswerBody({
             "max-h-80 overflow-hidden [mask-image:linear-gradient(to_bottom,black_80%,transparent)]",
         )}
       >
-        <ChatMarkdown text={answer.text} cwd={cwd} threadRef={threadRef} parseRawHtml={false} />
+        <div ref={contentRef}>
+          <ChatMarkdown text={answer.text} cwd={cwd} threadRef={threadRef} parseRawHtml={false} />
+        </div>
       </div>
-      {clamped || expanded ? (
+      {tallEnough ? (
         <Button
           size="xs"
           variant="ghost-muted"

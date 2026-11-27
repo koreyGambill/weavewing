@@ -105,7 +105,8 @@ export function parseAnswerReveal(target: string) {
 }
 
 export function revealAnswerInChat(threadKey: string, id: string, revision: number) {
-  requestQuestionReveal(threadKey, `answer:${id}:${revision}`);
+  if (requestQuestionReveal(threadKey, `answer:${id}:${revision}`) === "missing")
+    toastManager.add({ type: "info", title: `${id}'s answer is earlier in the chat.` });
 }
 
 export function revealTrackedMessageInChat(threadKey: string, messageId: string) {

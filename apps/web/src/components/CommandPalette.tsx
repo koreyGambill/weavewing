@@ -1907,7 +1907,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Track the answer to this message",
       searchTerms: ["track", "answer", "question"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-      run: () => useTrackedAnswerDraftStore.getState().toggleTrack(draftKey),
+      run: async () => useTrackedAnswerDraftStore.getState().toggleTrack(draftKey),
     });
     actionItems.push({
       kind: "action",
@@ -1915,7 +1915,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Show tracked answers",
       searchTerms: ["history", "checklist", "answers"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-      run: () => {
+      run: async () => {
         const ref = scopeThreadRef(activeThread.environmentId, activeThread.id);
         useThreadContextSidebarStore.getState().show("todos", { thread: ref });
         openTrackedAnswersSection(ref);

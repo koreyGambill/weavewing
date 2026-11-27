@@ -81,7 +81,7 @@ it("returns focus to the collapsed answer after Got it and to Got it after Reope
   const gotIt = screen.getByRole("button", { name: "Got it" });
   await gotIt.click();
   await expect
-    .element(screen.getByRole("button", { name: /A1 What resets the counter/ }))
+    .element(screen.getByRole("button", { name: /What resets the counter/ }))
     .toHaveFocus();
   await screen.getByRole("button", { name: "Reopen" }).click();
   await expect.element(gotIt).toHaveFocus();
