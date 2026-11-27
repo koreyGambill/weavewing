@@ -171,9 +171,9 @@ records changes.
 When an agent's turn ends after a landing command moved the project's target branch,
 and no landing or exemption covers the commits it added, Weavewing sends that agent one
 message asking it to record evidence or an exemption. The landing commands are
-`git merge`, `git push` to the project's remote and target branch, `xwing env land`, and
-`gh pr merge` when it updates your local copy of the branch; a merge made only on the
-forge is not seen. Each commit is asked about once, in one thread. Work landed during
+`git merge`, `git push` to the project's remote and target branch, and `xwing env land`;
+a merge made on the forge, such as with `gh pr merge`, is not seen. When it is unclear
+which thread's command moved the branch, no thread is asked. Each commit is asked about once, in one thread. Work landed during
 the turn that answers that message is not asked about again, so an answer can never
 start another round. Turn this off with **Ask agents to record landed work** in
 **Settings → Threads**.

@@ -33,6 +33,8 @@ export const deliverEvidencePrompt = Effect.fn("EvidencePromptDelivery.deliver")
   const settle = (outcome: "cancelled" | "failed") =>
     sql`UPDATE evidence_prompts SET outcome = ${outcome}
       WHERE message_id = ${messageId} AND outcome = 'sent'`;
+  // A replay after the message committed has nothing to send and must keep the claim delivered.
+  if (yield* threads.hasReceipt(CommandId.make(effect.commandId))) return;
   if (!(yield* settings.getSettings).evidencePromptEnabled) return yield* settle("cancelled");
   const sent = yield* threads
     .sendToThread({

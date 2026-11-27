@@ -105,9 +105,11 @@ export function shellScript(input: string): string {
       ).join("");
 }
 
-/** A script split at command separators that sit outside quotes. */
-export function shellSegments(script: string): ReadonlyArray<string> {
-  const segments: Array<string> = [];
+/** A script's commands with the separator that follows each, split outside quotes. */
+export function shellSteps(
+  script: string,
+): ReadonlyArray<{ readonly segment: string; readonly separator: string | null }> {
+  const steps: Array<{ readonly segment: string; readonly separator: string | null }> = [];
   let current = "";
   let quote: string | null = null;
   for (let index = 0; index < script.length; index++) {
@@ -125,16 +127,21 @@ export function shellSegments(script: string): ReadonlyArray<string> {
     }
     const pair = script.slice(index, index + 2);
     if (pair === "&&" || pair === "||" || char === ";" || char === "|" || char === "\n") {
-      segments.push(current);
+      const separator = pair === "&&" || pair === "||" ? pair : char;
+      steps.push({ segment: current, separator });
       current = "";
       if (pair === "&&" || pair === "||") index++;
       continue;
     }
     current += char;
   }
-  segments.push(current);
-  return segments;
+  steps.push({ segment: current, separator: null });
+  return steps;
 }
+
+/** A script split at command separators that sit outside quotes. */
+const shellSegments = (script: string): ReadonlyArray<string> =>
+  shellSteps(script).map((step) => step.segment);
 
 /** A script without its heredoc bodies, which are text a command reads, not commands it runs. */
 export const withoutHeredocBodies = (script: string) => script.replace(HEREDOC_BODY, "<<");

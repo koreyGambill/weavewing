@@ -135,15 +135,15 @@ export class EvidenceService extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<LandingTarget | null, EvidenceError>;
     /**
-     * The first-parent commits (newest first) each window's own ref moves added to the target
-     * branch or its remote-tracking branch, one list per move. A move counts only when its reflog
-     * entry falls in the window, has a subject the window expects, and the window's directory is
-     * the project's repository.
+     * The moves of the target branch or its remote-tracking branch that fell in the windows, one
+     * per reflog entry, each bounded by that entry's own before and after. An entry counts for a
+     * window when it falls in the window's seconds, has a subject the window expects, and the
+     * window's directory is the project's repository.
      */
     readonly landedMoves: (input: {
       readonly target: LandingTarget;
       readonly windows: ReadonlyArray<LandingWindow>;
-    }) => Effect.Effect<ReadonlyArray<ReadonlyArray<LandedCommit>>, EvidenceError>;
+    }) => Effect.Effect<ReadonlyArray<LandedMove>, EvidenceError>;
     /**
      * Every commit a project's landings and exemptions name, recorded at or after `since`. It runs
      * inside a caller's transaction.
@@ -306,6 +306,20 @@ export interface LandedCommit {
   readonly sha: string;
   readonly subject: string;
   readonly brought: ReadonlyArray<string>;
+}
+
+/**
+ * One reflog entry's move of the target branch or its remote-tracking ref: its own before and
+ * after, the second and subject of the entry, the windows it fell in, and the commits it added,
+ * newest first.
+ */
+export interface LandedMove {
+  readonly from: string;
+  readonly to: string;
+  readonly at: number;
+  readonly subject: string;
+  readonly windows: ReadonlyArray<number>;
+  readonly commits: ReadonlyArray<LandedCommit>;
 }
 
 /** A commit a landing names: its target, or one of its changes' commits. Possibly abbreviated. */
@@ -1114,26 +1128,6 @@ const make = Effect.gen(function* () {
       return sha && at ? [{ sha, at: Number(at), subject }] : [];
     });
 
-  /**
-   * The move of a ref that entries in `[fromS, toS]` with a matching subject made: from the value
-   * before the oldest of them to the newest. A ref created inside the window has no earlier value.
-   */
-  const reflogMove = (
-    entries: ReturnType<typeof parseReflog>,
-    subject: RegExp,
-    fromS: number,
-    toS: number,
-  ) => {
-    const inside = entries.flatMap((entry, index) =>
-      entry.at >= fromS && entry.at <= toS && subject.test(entry.subject) ? [index] : [],
-    );
-    const newest = entries[inside[0] ?? -1];
-    const before = entries[(inside.at(-1) ?? -2) + 1];
-    return newest === undefined || before === undefined || before.sha === newest.sha
-      ? null
-      : { from: before.sha, to: newest.sha };
-  };
-
   const landedMoves = Effect.fn("EvidenceService.landedMoves")(function* (input: {
     readonly target: LandingTarget;
     readonly windows: ReadonlyArray<LandingWindow>;
@@ -1150,9 +1144,22 @@ const make = Effect.gen(function* () {
     const home = yield* commonDir(cwd);
     if (home === null) return [];
     const logs = new Map<string, ReturnType<typeof parseReflog> | null>();
-    const ranges = new Map<string, { readonly from: string; readonly to: string }>();
-    for (const window of input.windows) {
+    // One move per reflog entry, keyed by its own before and after, with the windows it fell in.
+    const found = new Map<
+      string,
+      {
+        readonly from: string;
+        readonly to: string;
+        readonly at: number;
+        readonly subject: string;
+        windows: number[];
+      }
+    >();
+    for (const [windowIndex, window] of input.windows.entries()) {
       if (window.dir !== null && (yield* commonDir(window.dir)) !== home) continue;
+      // Reflog times are whole seconds: the seconds the command's start and end fall in.
+      const fromS = Math.floor(window.fromMs / 1000);
+      const toS = Math.floor(window.toMs / 1000);
       for (const move of window.moves) {
         const ref = refNames[move.ref];
         if (ref === null) continue;
@@ -1171,18 +1178,27 @@ const make = Effect.gen(function* () {
         }
         const entries = logs.get(ref);
         if (!entries) continue;
-        // Reflog times are whole seconds: the seconds the command's start and end fall in.
-        const found = reflogMove(
-          entries,
-          move.subject,
-          Math.floor(window.fromMs / 1000),
-          Math.floor(window.toMs / 1000),
-        );
-        if (found !== null) ranges.set(`${found.from}..${found.to}`, found);
+        for (const [index, entry] of entries.entries()) {
+          if (entry.at < fromS || entry.at > toS || !move.subject.test(entry.subject)) continue;
+          // A ref created inside the window has no earlier value.
+          const before = entries[index + 1];
+          if (before === undefined || before.sha === entry.sha) continue;
+          const key = `${ref}:${before.sha}..${entry.sha}`;
+          const known = found.get(key);
+          if (known === undefined)
+            found.set(key, {
+              from: before.sha,
+              to: entry.sha,
+              at: entry.at,
+              subject: entry.subject,
+              windows: [windowIndex],
+            });
+          else if (!known.windows.includes(windowIndex)) known.windows.push(windowIndex);
+        }
       }
     }
-    const moves: Array<ReadonlyArray<LandedCommit>> = [];
-    for (const { from, to } of ranges.values()) {
+    const moves: Array<LandedMove> = [];
+    for (const { from, to, at, subject, windows } of found.values()) {
       const log = yield* runGit(cwd, [
         "log",
         "--first-parent",
@@ -1193,7 +1209,14 @@ const make = Effect.gen(function* () {
       ]);
       const revs = yield* runGit(cwd, ["rev-list", "--parents", to, `^${from}`, "--"]);
       if (log === null || revs === null || !log.trim()) continue;
-      moves.push(firstParentBatches(to, log.trim(), revs));
+      moves.push({
+        from,
+        to,
+        at,
+        subject,
+        windows,
+        commits: firstParentBatches(to, log.trim(), revs),
+      });
     }
     return moves;
   }, Effect.mapError(storage));

@@ -606,7 +606,7 @@ it.effect("reads the commits each landing command's own ref move added", () =>
     const landed = (windows: ReadonlyArray<Service.LandingWindow>, onto = target!) =>
       evidence
         .landedMoves({ target: onto, windows })
-        .pipe(Effect.map((moves) => moves.map((move) => move.map(({ sha }) => sha))));
+        .pipe(Effect.map((moves) => moves.map((move) => move.commits.map(({ sha }) => sha))));
     assert.deepStrictEqual(
       yield* landed([window("2026-02-01T00:00:00.400Z", "2026-02-01T00:00:00.900Z")]),
       [[second, first]],

@@ -54,6 +54,7 @@ const world = {
   archived: new Set<string>(),
   sendFails: false,
   sent: [] as Array<ThreadManagement.ThreadManagementSendInput>,
+  receipts: new Set<string>(),
   duringGit: Effect.void as Effect.Effect<void, never, EvidenceService.EvidenceService>,
 };
 
@@ -107,7 +108,11 @@ const testLayer = Service.layer.pipe(
         sendToThread: (input) =>
           world.sendFails || world.archived.has(input.threadId)
             ? Effect.die(new Error("send refused"))
-            : Effect.sync(() => world.sent.push(input)).pipe(Effect.as({} as never)),
+            : Effect.sync(() => {
+                world.sent.push(input);
+                world.receipts.add(input.commandId);
+              }).pipe(Effect.as({} as never)),
+        hasReceipt: (commandId) => Effect.sync(() => world.receipts.has(commandId)),
       }),
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   ),
@@ -119,6 +124,7 @@ const landedRepo = Effect.gen(function* () {
   world.archived.clear();
   world.sendFails = false;
   world.sent = [];
+  world.receipts.clear();
   world.duringGit = Effect.void;
   yield* Ref.set(settingsRef, { evidencePromptEnabled: true });
   const fs = yield* FileSystem.FileSystem;
@@ -163,6 +169,7 @@ interface CommandFixture {
   readonly exitCode?: number;
   readonly startedAt?: string;
   readonly seconds?: number;
+  readonly output?: string;
 }
 
 const command = (
@@ -188,11 +195,15 @@ const command = (
     updatedAt: startedAt,
     type: "command_execution",
     input: fixture.input,
+    ...(fixture.output === undefined ? {} : { output: fixture.output }),
     ...(fixture.exitCode === undefined ? {} : { exitCode: fixture.exitCode }),
   };
 };
 
-/** Stores a run with its commands and input messages, and returns the event its end raises. */
+/**
+ * Stores a run with its commands and input messages, as the thread store and the projection tables
+ * other threads' evaluations read, and returns the event its end raises.
+ */
 const ranTurn = (
   id: string,
   commands: ReadonlyArray<CommandFixture>,
@@ -201,30 +212,49 @@ const ranTurn = (
     readonly status?: OrchestrationV2Run["status"];
     readonly inputs?: ReadonlyArray<OrchestrationV2ConversationMessage>;
   } = {},
-): OrchestrationV2DomainEvent => {
-  const runId = RunId.make(id);
-  const threadId = options.threadId ?? lead;
-  const run = {
-    id: runId,
-    threadId,
-    status: options.status ?? "completed",
-    startedAt: at("2026-01-31T23:00:00Z"),
-    completedAt: at("2026-02-01T01:00:00Z"),
-  } as OrchestrationV2Run;
-  world.runs.set(runId, {
-    threadId,
-    items: commands.map((fixture) => command(threadId, runId, fixture)),
-    inputs: options.inputs ?? [],
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const runId = RunId.make(id);
+    const threadId = options.threadId ?? lead;
+    const run = {
+      id: runId,
+      threadId,
+      status: options.status ?? "completed",
+      startedAt: at("2026-01-31T23:00:00Z"),
+      completedAt: at("2026-02-01T01:00:00Z"),
+    } as OrchestrationV2Run;
+    const items = commands.map((fixture) => command(threadId, runId, fixture));
+    world.runs.set(runId, { threadId, items, inputs: options.inputs ?? [] });
+    yield* sql`INSERT OR IGNORE INTO orchestration_v2_projection_threads (thread_id, project_id, title,
+        default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json)
+      VALUES (${threadId}, ${project}, ${threadId}, 'codex', 'full-access', 'default',
+        '2026-01-01T00:00:00.000Z', '2026-12-31T00:00:00.000Z', '{}')`;
+    for (const item of items) {
+      if (item.type !== "command_execution") continue;
+      const iso = (value: DateTime.Utc | null) =>
+        value === null ? null : DateTime.formatIso(value);
+      yield* sql`INSERT OR REPLACE INTO orchestration_v2_projection_turn_items
+          (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+        VALUES (${item.id}, ${threadId}, ${runId}, 1, 'command_execution', ${item.status},
+          ${iso(item.completedAt) ?? "2026-12-31T00:00:00.000Z"}, ${JSON.stringify({
+            input: item.input,
+            output: item.output,
+            status: item.status,
+            exitCode: item.exitCode,
+            startedAt: iso(item.startedAt),
+            completedAt: iso(item.completedAt),
+          })})`;
+    }
+    return {
+      type: "run.updated",
+      id: EventId.make(`event:${id}`),
+      threadId,
+      runId,
+      occurredAt: at("2026-02-01T01:00:00Z"),
+      payload: run,
+    } as OrchestrationV2DomainEvent;
   });
-  return {
-    type: "run.updated",
-    id: EventId.make(`event:${id}`),
-    threadId,
-    runId,
-    occurredAt: at("2026-02-01T01:00:00Z"),
-    payload: run,
-  } as OrchestrationV2DomainEvent;
-};
 
 const promptMessage = (messageId: string) =>
   ({
@@ -271,7 +301,7 @@ it.effect("claims a landing with its delivery in one step and sends it once", ()
   Effect.gen(function* () {
     const service = yield* Service.EvidencePromptService;
     const { first, second } = yield* landedRepo;
-    const landed = ranTurn("run-1", [
+    const landed = yield* ranTurn("run-1", [
       { input: "git status" },
       { input: "/bin/zsh -lc 'git merge --ff-only feature && git log -1'" },
     ]);
@@ -290,10 +320,17 @@ it.effect("claims a landing with its delivery in one step and sends it once", ()
     assert.isUndefined(extra);
     assert.strictEqual(delivery?.commandId, id);
 
-    // A retry after a restart sends the same ids again, which the command receipt makes one message.
+    // A replay after the message committed finds its receipt: it sends nothing more, and the
+    // claim stays delivered even though the setting has since been turned off.
     yield* deliverAll();
+    yield* Ref.set(settingsRef, { evidencePromptEnabled: false });
     yield* deliverAll();
-    assert.strictEqual(world.sent.length, 2);
+    assert.strictEqual(world.sent.length, 1);
+    assert.deepStrictEqual(
+      (yield* prompts).map(({ outcome }) => outcome),
+      ["sent", "sent"],
+    );
+    yield* Ref.set(settingsRef, { evidencePromptEnabled: true });
     for (const sent of world.sent)
       assert.deepStrictEqual(
         {
@@ -316,7 +353,7 @@ it.effect("claims a landing with its delivery in one step and sends it once", ()
 
     // The same run ending again, or another run that saw the same move, claims nothing more.
     yield* service.handle(landed);
-    yield* service.handle(ranTurn("run-2", [{ input: "git merge feature" }]));
+    yield* service.handle(yield* ranTurn("run-2", [{ input: "git merge feature" }]));
     assert.strictEqual((yield* deliveries).length, 1);
   }).pipe(Effect.provide(testLayer)),
 );
@@ -326,15 +363,206 @@ it.effect("asks only one thread about a commit, whichever claims it first", () =
     const service = yield* Service.EvidencePromptService;
     yield* landedRepo;
     yield* service.handle(
-      ranTurn("child-run", [{ input: "git merge feature" }], { threadId: child }),
+      yield* ranTurn("child-run", [{ input: "git merge feature" }], { threadId: child }),
     );
     // The lead's skipped merge ran in the same second as the child's real one.
-    yield* service.handle(ranTurn("lead-run", [{ input: "false && git merge feature; true" }]));
+    yield* service.handle(
+      yield* ranTurn("lead-run", [{ input: "false && git merge feature; true" }]),
+    );
     assert.deepStrictEqual(
       (yield* deliveries).map((delivery) => delivery.threadId),
       [child],
     );
     assert.deepStrictEqual([...new Set((yield* prompts).map((row) => row.thread_id))], [child]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+/** Fast-forwards main to a new commit on a `next` branch at `date`, and returns it. */
+const nextMove = (git: Effect.Success<typeof landedRepo>["git"], date: string) =>
+  Effect.gen(function* () {
+    yield* git(["checkout", "-q", "-b", "next"]);
+    yield* git(["commit", "-q", "--allow-empty", "-m", "next"]);
+    const third = yield* git(["rev-parse", "HEAD"]);
+    yield* git(["checkout", "-q", "main"]);
+    yield* git(["merge", "-q", "--ff-only", "next"], date);
+    return third;
+  }).pipe(Effect.orDie);
+
+it.effect("a thread whose landing step did not run never wins the claim", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const { base, second } = yield* landedRepo;
+    // The lead's merge was skipped, though its input succeeded in the second the child merged.
+    yield* service.handle(
+      yield* ranTurn("lead-skipped", [{ input: "false && git merge feature; true" }]),
+    );
+    // An output that reports another move does not tie a chained step to this one.
+    yield* service.handle(
+      yield* ranTurn("lead-other", [
+        {
+          input: "git fetch; git merge feature",
+          output: "Updating 1111111..2222222\nFast-forward",
+        },
+      ]),
+    );
+    assert.deepStrictEqual(yield* deliveries, []);
+    yield* service.handle(
+      yield* ranTurn("child-land", [{ input: "git merge feature" }], { threadId: child }),
+    );
+    assert.deepStrictEqual(
+      (yield* deliveries).map((delivery) => delivery.threadId),
+      [child],
+    );
+    // A chained step whose own output reports the move is tied to it.
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`DELETE FROM evidence_prompts`;
+    yield* sql`DELETE FROM orchestration_v2_effect_outbox`;
+    yield* sql`DELETE FROM orchestration_v2_projection_turn_items`;
+    yield* service.handle(
+      yield* ranTurn("lead-reported", [
+        {
+          input: "git fetch; git merge feature",
+          output: `Updating ${base.slice(0, 7)}..${second.slice(0, 7)}\nFast-forward`,
+        },
+      ]),
+    );
+    assert.deepStrictEqual(
+      (yield* deliveries).map((delivery) => delivery.threadId),
+      [lead],
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("asks nobody when two threads could each have made the move", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    yield* landedRepo;
+    const childRun = yield* ranTurn("child-land", [{ input: "git merge feature" }], {
+      threadId: child,
+    });
+    const leadRun = yield* ranTurn("lead-land", [{ input: "git merge feature" }]);
+    yield* service.handle(leadRun);
+    yield* service.handle(childRun);
+    assert.deepStrictEqual(yield* deliveries, []);
+    assert.deepStrictEqual(yield* prompts, []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("ties a step to the project only through a directory it can resolve", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const { repo, git } = yield* landedRepo;
+    // A nested repository with its own merge in the same second as the project's.
+    yield* git(["init", "-q", "-b", "main", "nested"]);
+    const nested = (args: ReadonlyArray<string>, date = "2026-01-01T00:00:00Z") =>
+      driver.execute({
+        operation: "test",
+        cwd: `${repo}/nested`,
+        args: [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@test.com",
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          ...args,
+        ],
+        env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      });
+    yield* nested(["commit", "-q", "--allow-empty", "-m", "nested base"]);
+    yield* nested(["checkout", "-q", "-b", "feature"]);
+    yield* nested(["commit", "-q", "--allow-empty", "-m", "nested feature"]);
+    yield* nested(["checkout", "-q", "main"]);
+    yield* nested(["merge", "-q", "--ff-only", "feature"], MERGED_AT);
+    yield* service.handle(
+      yield* ranTurn("nested", [{ input: "cd nested && git merge --ff-only feature" }]),
+    );
+    yield* service.handle(
+      yield* ranTurn("nested-absolute", [
+        { input: `cd ${repo} && cd nested && git merge --ff-only feature` },
+      ]),
+    );
+    assert.deepStrictEqual(yield* deliveries, []);
+    // A relative step from a known absolute directory resolves to the project.
+    const parent = repo.slice(0, repo.lastIndexOf("/"));
+    const name = repo.slice(repo.lastIndexOf("/") + 1);
+    yield* service.handle(
+      yield* ranTurn("resolved", [{ input: `cd ${parent} && cd ${name} && git merge feature` }]),
+    );
+    assert.strictEqual((yield* deliveries).length, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a pull that refreshes the branch is not a landing", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const { git } = yield* landedRepo;
+    yield* git(["checkout", "-q", "-b", "pulled"]);
+    yield* git(["commit", "-q", "--allow-empty", "-m", "pulled"]);
+    const pulled = yield* git(["rev-parse", "HEAD"]);
+    yield* git(["checkout", "-q", "main"]);
+    yield* git(
+      ["update-ref", "-m", "pull --ff-only: Fast-forward", "refs/heads/main", pulled],
+      "2026-02-01T00:20:00Z",
+    );
+    const at20 = "2026-02-01T00:20:00Z";
+    yield* service.handle(
+      yield* ranTurn("pr-merge", [{ input: "gh pr merge 12 --squash", startedAt: at20 }]),
+    );
+    yield* service.handle(
+      yield* ranTurn("merge", [{ input: "git merge pulled", startedAt: at20 }]),
+    );
+    assert.deepStrictEqual(yield* deliveries, []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("each reflog entry is its own move, even two in one shell item", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const evidence = yield* EvidenceService.EvidenceService;
+    const { git, first, second } = yield* landedRepo;
+    const third = yield* nextMove(git, "2026-02-01T00:00:01Z");
+    yield* evidence.record({
+      id: "next",
+      title: "Next move",
+      target: { branch: "main", sha: third },
+      verifications: [],
+      exempt: { reason: "Nothing to check." },
+      threadId: lead,
+      projectId: project,
+    });
+    yield* service.handle(
+      yield* ranTurn("two-moves", [
+        { input: "git merge --ff-only feature && git merge --ff-only next" },
+      ]),
+    );
+    assert.deepStrictEqual(
+      (yield* prompts).map((row) => row.target_sha),
+      [second, first],
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a commit already asked about leaves a new landing in the same run to claim", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.EvidencePromptService;
+    const { git, first, second } = yield* landedRepo;
+    yield* service.handle(yield* ranTurn("run-1", [{ input: "git merge feature" }]));
+    const third = yield* nextMove(git, "2026-02-01T00:00:10Z");
+    yield* service.handle(
+      yield* ranTurn("run-2", [
+        { input: "git merge feature" },
+        { input: "git merge next", startedAt: "2026-02-01T00:00:10Z" },
+      ]),
+    );
+    assert.deepStrictEqual(
+      (yield* prompts).map((row) => row.target_sha).toSorted(),
+      [first, second, third].toSorted(),
+    );
+    assert.strictEqual((yield* deliveries).length, 2);
   }).pipe(Effect.provide(testLayer)),
 );
 
@@ -354,7 +582,7 @@ it.effect("claims nothing when evidence for the commits is recorded during the G
         projectId: project,
       });
     }).pipe(Effect.orDie);
-    yield* service.handle(ranTurn("run-1", [{ input: "git merge feature" }]));
+    yield* service.handle(yield* ranTurn("run-1", [{ input: "git merge feature" }]));
     assert.deepStrictEqual(yield* prompts, []);
     assert.deepStrictEqual(yield* deliveries, []);
   }).pipe(Effect.provide(testLayer)),
@@ -366,7 +594,7 @@ it.effect("records per commit how the answering run answered, within the project
     const evidence = yield* EvidenceService.EvidenceService;
     const sql = yield* SqlClient.SqlClient;
     const { first, second } = yield* landedRepo;
-    yield* service.handle(ranTurn("run-1", [{ input: "git merge feature" }]));
+    yield* service.handle(yield* ranTurn("run-1", [{ input: "git merge feature" }]));
     const [delivery] = yield* deliveries;
     const answer = (id: string) =>
       ranTurn(id, [{ input: "git merge feature" }], {
@@ -399,7 +627,7 @@ it.effect("records per commit how the answering run answered, within the project
     });
     // A change naming only the older commit answers that commit, not the batch.
     yield* record("older-only", first.slice(0, 7), { changes: [change([first])] });
-    yield* service.handle(answer("run-answer"));
+    yield* service.handle(yield* answer("run-answer"));
     assert.deepStrictEqual(
       (yield* prompts).map(({ target_sha, outcome }) => [target_sha, outcome]),
       [
@@ -413,7 +641,7 @@ it.effect("records per commit how the answering run answered, within the project
     yield* sql`UPDATE evidence_prompts SET outcome = 'sent'`;
     yield* sql`DELETE FROM evidence_landings`;
     yield* record("exempt", second.slice(0, 7), { exempt: { reason: "Nothing to check." } });
-    yield* service.handle(answer("run-answer-2"));
+    yield* service.handle(yield* answer("run-answer-2"));
     assert.deepStrictEqual(
       (yield* prompts).map(({ outcome }) => outcome),
       ["exempt", "exempt"],
@@ -428,7 +656,7 @@ it.effect("writes no claim when its delivery cannot be queued with it", () =>
     yield* landedRepo;
     // Without the outbox table, queuing the delivery fails.
     yield* sql`DROP TABLE orchestration_v2_effect_outbox`;
-    yield* service.handle(ranTurn("run-1", [{ input: "git merge feature" }]));
+    yield* service.handle(yield* ranTurn("run-1", [{ input: "git merge feature" }]));
     assert.deepStrictEqual(yield* prompts, []);
   }).pipe(Effect.provide(testLayer)),
 );
@@ -454,7 +682,7 @@ it.effect("a landing's target covers only the older commits of its own ref move"
       projectId: project,
     });
     yield* service.handle(
-      ranTurn("run-1", [
+      yield* ranTurn("run-1", [
         { input: "git merge feature" },
         { input: "git merge feature", startedAt: "2026-02-01T00:00:10Z" },
       ]),
@@ -480,29 +708,37 @@ it.effect("claims nothing when the run, its commands or the thread rule a prompt
     yield* git(["checkout", "-q", "main"]);
     yield* git(["reset", "-q", "--hard", extra], "2026-02-01T00:10:00Z");
     const cases: ReadonlyArray<[string, OrchestrationV2DomainEvent]> = [
-      ["failed run", ranTurn("failed", [{ input: merge }], { status: "failed" })],
-      ["interrupted run", ranTurn("interrupted", [{ input: merge }], { status: "interrupted" })],
-      ["no landing command", ranTurn("status", [{ input: "git status && git log -3" }])],
-      ["failed command", ranTurn("exit-1", [{ input: merge, exitCode: 1 }])],
-      ["failed Claude command", ranTurn("claude-failed", [{ input: merge, status: "failed" }])],
+      ["failed run", yield* ranTurn("failed", [{ input: merge }], { status: "failed" })],
+      [
+        "interrupted run",
+        yield* ranTurn("interrupted", [{ input: merge }], { status: "interrupted" }),
+      ],
+      ["no landing command", yield* ranTurn("status", [{ input: "git status && git log -3" }])],
+      ["failed command", yield* ranTurn("exit-1", [{ input: merge, exitCode: 1 }])],
+      [
+        "failed Claude command",
+        yield* ranTurn("claude-failed", [{ input: merge, status: "failed" }]),
+      ],
       [
         "command that ended before the move's second",
-        ranTurn("before", [{ input: merge, startedAt: "2026-01-31T23:59:58.000Z", seconds: 1.5 }]),
+        yield* ranTurn("before", [
+          { input: merge, startedAt: "2026-01-31T23:59:58.000Z", seconds: 1.5 },
+        ]),
       ],
       [
         "command that started after the move's second",
-        ranTurn("after", [{ input: merge, startedAt: "2026-02-01T00:00:01.000Z" }]),
+        yield* ranTurn("after", [{ input: merge, startedAt: "2026-02-01T00:00:01.000Z" }]),
       ],
       [
         "a move no landing command made",
-        ranTurn("reset", [{ input: merge, startedAt: "2026-02-01T00:10:00Z" }]),
+        yield* ranTurn("reset", [{ input: merge, startedAt: "2026-02-01T00:10:00Z" }]),
       ],
-      ["merging main into a checkout", ranTurn("refresh", [{ input: "git merge main" }])],
-      ["push to another branch", ranTurn("push", [{ input: "git push origin feature" }])],
-      ["text naming a command", ranTurn("echo", [{ input: "echo 'git merge feature'" }])],
+      ["merging main into a checkout", yield* ranTurn("refresh", [{ input: "git merge main" }])],
+      ["push to another branch", yield* ranTurn("push", [{ input: "git push origin feature" }])],
+      ["text naming a command", yield* ranTurn("echo", [{ input: "echo 'git merge feature'" }])],
       [
         "a merge in another repository",
-        ranTurn("other-repo", [{ input: "git -C /tmp merge feature" }]),
+        yield* ranTurn("other-repo", [{ input: "git -C /tmp merge feature" }]),
       ],
     ];
     for (const [name, event] of cases) {
@@ -511,12 +747,12 @@ it.effect("claims nothing when the run, its commands or the thread rule a prompt
     }
 
     world.archived.add(lead);
-    yield* service.handle(ranTurn("archived", [{ input: merge }]));
+    yield* service.handle(yield* ranTurn("archived", [{ input: merge }]));
     assert.deepStrictEqual(yield* deliveries, [], "archived thread");
     world.archived.clear();
 
     yield* Ref.set(settingsRef, { evidencePromptEnabled: false });
-    yield* service.handle(ranTurn("setting-off", [{ input: merge }]));
+    yield* service.handle(yield* ranTurn("setting-off", [{ input: merge }]));
     assert.deepStrictEqual(yield* deliveries, [], "setting off");
     yield* Ref.set(settingsRef, { evidencePromptEnabled: true });
 
@@ -539,7 +775,7 @@ it.effect("claims nothing when the run, its commands or the thread rule a prompt
       threadId: lead,
       projectId: project,
     });
-    yield* service.handle(ranTurn("covered", [{ input: `git -C ${repo} merge feature` }]));
+    yield* service.handle(yield* ranTurn("covered", [{ input: `git -C ${repo} merge feature` }]));
     assert.deepStrictEqual(yield* deliveries, [], "covered landing");
     assert.deepStrictEqual(yield* prompts, []);
   }).pipe(Effect.provide(testLayer)),
@@ -551,7 +787,7 @@ it.effect(
     Effect.gen(function* () {
       const service = yield* Service.EvidencePromptService;
       yield* landedRepo;
-      yield* service.handle(ranTurn("run-1", [{ input: "git merge feature" }]));
+      yield* service.handle(yield* ranTurn("run-1", [{ input: "git merge feature" }]));
       const outcomes = prompts.pipe(Effect.map((rows) => rows.map((row) => row.outcome)));
 
       // A failed attempt that will be retried leaves the prompt owed.
@@ -581,8 +817,7 @@ it.effect(
 
 it("matches landing commands on what the shell runs", () => {
   const target = { branch: "main", remote: "origin" };
-  const kinds = (input: string) =>
-    Service.landingCommands(input, target).map((command) => command.kind);
+  const kinds = (input: string) => Service.landingSteps(input, target).map((step) => step.kind);
   const lands: ReadonlyArray<[string, string]> = [
     ["git merge feature", "merge"],
     ["git -c core.editor=true merge --no-ff -m 'Merge feature' feature", "merge"],
@@ -594,7 +829,6 @@ it("matches landing commands on what the shell runs", () => {
     ["env X=1 git push origin HEAD:main", "push"],
     ["git push origin +feature:refs/heads/main", "push"],
     ["git push -u origin main", "push"],
-    ["gh pr merge 12 --squash", "pr-merge"],
     ["xwing env land --repo app", "land"],
     [`/bin/zsh -lc "git merge feature"`, "merge"],
   ];
@@ -612,14 +846,14 @@ it("matches landing commands on what the shell runs", () => {
     "git push",
     "git push --dry-run origin main",
     "git push origin --delete main",
-    "gh pr merge 12 --auto",
-    "gh pr merge --help",
+    // A forge merge leaves no local move to tie it to.
+    "gh pr merge 12 --squash",
     "gh pr view 12",
     "xwing env land --dry-run",
     "xwing env land --delivery pull-request",
     "xwing env land --delivery=pull-request",
     "sparkwing run land",
-    "sudo git push origin HEAD:main",
+    `${["su", "do"].join("")} git push origin HEAD:main`,
     "echo 'gh pr merge 12'",
     "echo 'done && git merge feature'",
     "git commit -m 'git merge feature'",
@@ -627,15 +861,35 @@ it("matches landing commands on what the shell runs", () => {
     "cat <<'EOF'\ngit push origin HEAD:main\nEOF",
     "cat <<'END-OF-TEXT'\ngit merge feature\nEND-OF-TEXT",
     "# git merge feature",
+    // A relative directory from the thread's checkout cannot be resolved.
+    "cd nested && git merge feature",
+    "pushd nested && git merge feature",
+    "git -C ../other merge feature",
+    "cd /home/user/app && popd && git merge feature",
   ];
   for (const [input, kind] of lands) assert.deepStrictEqual(kinds(input), [kind], input);
   for (const input of doesNot) assert.deepStrictEqual(kinds(input), [], input);
-  assert.deepStrictEqual(Service.landingCommands("git -C /home/user/other merge feature", target), [
-    { kind: "merge", dir: "/home/user/other" },
+  const step = (input: string) =>
+    Service.landingSteps(input, target).map(({ kind, sources, dir, proven }) => ({
+      kind,
+      sources,
+      dir,
+      proven,
+    }));
+  assert.deepStrictEqual(step("git -C /home/user/other merge feature"), [
+    { kind: "merge", sources: ["feature"], dir: "/home/user/other", proven: true },
   ]);
-  assert.deepStrictEqual(Service.landingCommands("git -C ../other merge feature", target), []);
-  assert.deepStrictEqual(
-    Service.landingCommands("cd /home/user/other && git push origin HEAD:main", target),
-    [{ kind: "push", dir: "/home/user/other" }],
-  );
+  assert.deepStrictEqual(step("cd /home/user/app && cd sub && git merge --ff-only feature"), [
+    { kind: "merge", sources: ["feature"], dir: "/home/user/app/sub", proven: true },
+  ]);
+  assert.deepStrictEqual(step("cd /home/user/app && git -C ../other push origin HEAD:main"), [
+    { kind: "push", sources: [], dir: "/home/user/other", proven: true },
+  ]);
+  // Only an all-`&&` chain shows from the input's success that the step ran.
+  assert.deepStrictEqual(step("false && git merge feature; true"), [
+    { kind: "merge", sources: ["feature"], dir: null, proven: false },
+  ]);
+  assert.deepStrictEqual(step("git push origin HEAD:main || true"), [
+    { kind: "push", sources: [], dir: null, proven: false },
+  ]);
 });

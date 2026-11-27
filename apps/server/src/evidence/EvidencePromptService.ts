@@ -24,7 +24,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import {
   shellScript,
-  shellSegments,
+  shellSteps,
   withoutHeredocBodies,
 } from "../orchestration-v2/PullRequestSyncReactor.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -33,19 +33,43 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as EvidenceService from "./EvidenceService.ts";
 
 type Target = Pick<EvidenceService.LandingTarget, "branch" | "remote">;
-type LandingKind = "merge" | "push" | "pr-merge" | "land";
+type LandingKind = "merge" | "push" | "land";
 
-/** The reflog subjects each kind of landing command leaves on the refs it moves. */
-const LANDING_MOVES: Record<LandingKind, EvidenceService.LandingWindow["moves"]> = {
-  merge: [{ ref: "branch", subject: /^(?:merge |commit \(merge\))/u }],
-  push: [{ ref: "remote", subject: /^update by push/u }],
-  // `gh pr merge` merges on the forge; only its local sync of the default branch is visible here.
-  "pr-merge": [{ ref: "branch", subject: /^(?:pull|merge )/u }],
-  land: [
-    { ref: "branch", subject: /^merge /u },
-    { ref: "remote", subject: /^update by push/u },
-  ],
-};
+/** One landing step a shell input runs. */
+interface LandingStep {
+  readonly kind: LandingKind;
+  /** The merge's source refs, as its reflog subject names them. */
+  readonly sources: ReadonlyArray<string>;
+  /** The absolute directory the step runs in, or null for the thread's own checkout. */
+  readonly dir: string | null;
+  /** Every step of the input is joined by `&&`, so the input's success shows this step ran. */
+  readonly proven: boolean;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/** The reflog subjects a landing step leaves on the refs it moves. */
+function stepMoves(step: LandingStep): EvidenceService.LandingWindow["moves"] {
+  switch (step.kind) {
+    case "merge":
+      return [
+        {
+          ref: "branch",
+          subject:
+            step.sources.length === 0
+              ? /^commit \(merge\)/u
+              : new RegExp(`^merge ${escapeRegExp(step.sources.join(" "))}: `, "u"),
+        },
+      ];
+    case "push":
+      return [{ ref: "remote", subject: /^update by push$/u }];
+    case "land":
+      return [
+        { ref: "branch", subject: /^merge /u },
+        { ref: "remote", subject: /^update by push$/u },
+      ];
+  }
+}
 
 const MERGE_VALUE_OPTIONS = new Set(["-m", "-s", "-X", "-F", "--file", "--strategy"]);
 const WRAPPERS = new Set(["env", "time", "nohup", "command"]);
@@ -104,6 +128,20 @@ function gitDirectory(command: ReadonlyArray<string>) {
   return dir;
 }
 
+/**
+ * `dir` resolved against `cwd`: null is the thread's checkout and undefined is unknown. A
+ * relative path from the thread's checkout is unknown, since an agent's shell may have moved.
+ */
+const resolveDir = (cwd: string | null | undefined, dir: string | undefined) => {
+  if (dir === undefined || dir === "" || dir === "-" || dir.startsWith("~")) return undefined;
+  if (!dir.startsWith("/") && typeof cwd !== "string") return undefined;
+  const parts: string[] = [];
+  for (const part of `${dir.startsWith("/") ? "" : cwd}/${dir}`.split("/"))
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  return `/${parts.join("/")}`;
+};
+
 /** The arguments of an option that takes one, as `--delivery x` or `--delivery=x`. */
 const optionValue = (args: ReadonlyArray<string>, name: string) => {
   const index = args.indexOf(name);
@@ -113,24 +151,21 @@ const optionValue = (args: ReadonlyArray<string>, name: string) => {
 };
 
 /**
- * The landing kind a command's words run, given the project's target, or null. Without a target,
- * any command that could land on some branch. A miss costs nothing, while a false match costs the
- * agent a turn, so each rule is narrow.
+ * The landing a command's words run, given the project's target, or null. Without a target, any
+ * command that could land on some branch. A miss costs nothing, while a false match costs the
+ * agent a turn, so each rule is narrow. A forge merge (`gh pr merge`) leaves no local ref move a
+ * command can be tied to, so it is not one.
  */
-function landingKind(words: ReadonlyArray<string>, target: Target | null): LandingKind | null {
+function landingKind(
+  words: ReadonlyArray<string>,
+  target: Target | null,
+): Pick<LandingStep, "kind" | "sources"> | null {
   const [program, ...rest] = words;
-  if (program === "gh" && rest[0] === "pr" && rest[1] === "merge") {
-    const args = rest.slice(2);
-    // `--auto` only queues the merge for later.
-    return ["--auto", "--help", "-h", "--disable-auto"].some((flag) => args.includes(flag))
-      ? null
-      : "pr-merge";
-  }
   if (program === "xwing" && rest[0] === "env" && rest[1] === "land") {
     const args = rest.slice(2);
     return args.includes("--dry-run") || optionValue(args, "--delivery") === "pull-request"
       ? null
-      : "land";
+      : { kind: "land", sources: [] };
   }
   if (program !== "git") return null;
   let index = 0;
@@ -142,36 +177,40 @@ function landingKind(words: ReadonlyArray<string>, target: Target | null): Landi
     const refs = args.filter(
       (arg, at) => !arg.startsWith("-") && !MERGE_VALUE_OPTIONS.has(args[at - 1] ?? ""),
     );
-    if (refs.length === 0) return args.includes("--continue") ? "merge" : null;
-    return target === null || refs.some((ref) => !namesTargetSource(ref, target)) ? "merge" : null;
+    if (refs.length === 0)
+      return args.includes("--continue") ? { kind: "merge", sources: [] } : null;
+    return target === null || refs.some((ref) => !namesTargetSource(ref, target))
+      ? { kind: "merge", sources: refs }
+      : null;
   }
   if (subcommand === "push") {
     if (args.some((arg) => ["-d", "--delete", "-n", "--dry-run"].includes(arg))) return null;
     const [remote, ...refspecs] = args.filter((arg) => !arg.startsWith("-"));
-    if (target === null) return refspecs.length > 0 ? "push" : null;
+    if (target === null) return refspecs.length > 0 ? { kind: "push", sources: [] } : null;
     // Only a push to the project's own remote moves the remote-tracking branch read here.
     if (target.remote === null || remote !== target.remote) return null;
     return refspecs.some((refspec) => {
       const destination = (refspec.split(":").at(-1) ?? "").replace(/^\+/u, "");
       return destination === target.branch || destination === `refs/heads/${target.branch}`;
     })
-      ? "push"
+      ? { kind: "push", sources: [] }
       : null;
   }
   return null;
 }
 
 /**
- * The landing commands a shell input runs, with the absolute directory each names through
- * `git -C` or an earlier `cd`, or null for the thread's own checkout. Text a command carries, in
- * quotes, comments or heredocs, is not a command; a relative `-C` is skipped as unknown.
+ * The landing steps a shell input runs. Text a command carries, in quotes, comments or heredocs,
+ * is not a command. A step's directory comes from `git -C` or an earlier `cd` or `pushd`; one
+ * that cannot be resolved to an absolute path drops the step.
  */
-export function landingCommands(
-  input: string,
-  target: Target | null,
-): ReadonlyArray<{ readonly kind: LandingKind; readonly dir: string | null }> {
-  let cwd: string | null = null;
-  return shellSegments(withoutHeredocBodies(shellScript(input))).flatMap((segment) => {
+export function landingSteps(input: string, target: Target | null): ReadonlyArray<LandingStep> {
+  const steps = shellSteps(withoutHeredocBodies(shellScript(input))).filter(
+    (step) => step.segment.trim() !== "",
+  );
+  const proven = steps.slice(0, -1).every((step) => step.separator === "&&");
+  let cwd: string | null | undefined = null;
+  return steps.flatMap(({ segment }) => {
     const words = shellWords(
       segment
         .trim()
@@ -186,17 +225,40 @@ export function landingCommands(
       start++;
     if (words[start] === "timeout") start += 2;
     const command = words.slice(start);
-    if (command[0] === "cd") {
-      const dir = command[1];
-      if (dir?.startsWith("/")) cwd = dir;
+    if (command[0] === "cd" || command[0] === "pushd") {
+      cwd = resolveDir(cwd, command[1]);
       return [];
     }
-    const kind = landingKind(command, target);
-    if (kind === null) return [];
+    if (command[0] === "popd") {
+      cwd = undefined;
+      return [];
+    }
+    const landing = landingKind(command, target);
+    if (landing === null) return [];
     const named = gitDirectory(command);
-    if (named === undefined) return [{ kind, dir: cwd }];
-    return named.startsWith("/") ? [{ kind, dir: named }] : [];
+    const dir = named === undefined ? cwd : resolveDir(cwd, named);
+    return dir === undefined ? [] : [{ ...landing, dir, proven }];
   });
+}
+
+// `Updating a..b` from a merge and `a..b  HEAD -> main` from a push: the moves an output reports.
+const REPORTED_MOVE = /^(?:Updating |\s*[+*]?\s*)([0-9a-f]{7,40})\.{2,3}([0-9a-f]{7,40})\b/gmu;
+
+/**
+ * Whether a step's own output ties it to a ref move. An output that reports moves must report
+ * this one. Without one, a proven step counts, and so does a merge whose output says it merged.
+ */
+function stepMadeMove(
+  step: LandingStep,
+  output: string,
+  move: Pick<EvidenceService.LandedMove, "from" | "to">,
+) {
+  const reported = [...output.matchAll(REPORTED_MOVE)];
+  if (reported.length > 0)
+    return reported.some(
+      ([, from = "", to = ""]) => move.from.startsWith(from) && move.to.startsWith(to),
+    );
+  return step.proven || (step.kind === "merge" && /^Merge made by /mu.test(output));
 }
 
 type CommandExecution = Extract<OrchestrationV2TurnItem, { readonly type: "command_execution" }>;
@@ -274,6 +336,45 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /**
+   * Whether another thread of the project ran a command in the move's second that could have made
+   * it: one still running, or one done whose own output ties it to the move. Then the move is
+   * ambiguous and nobody is asked about it.
+   */
+  const anotherThreadMayHaveMade = Effect.fnUntraced(function* (
+    move: EvidenceService.LandedMove,
+    context: {
+      readonly projectId: ProjectId;
+      readonly threadId: ThreadId;
+      readonly target: Target;
+    },
+  ) {
+    const from = DateTime.formatIso(DateTime.makeUnsafe(move.at * 1000));
+    const to = DateTime.formatIso(DateTime.makeUnsafe(move.at * 1000 + 999));
+    const rows = yield* sql<{ readonly payload_json: string }>`SELECT i.payload_json
+        FROM orchestration_v2_projection_threads t
+        JOIN orchestration_v2_projection_turn_items i ON i.thread_id = t.thread_id
+        WHERE t.project_id = ${context.projectId} AND t.thread_id != ${context.threadId}
+          AND t.updated_at >= ${from} AND i.type = 'command_execution' AND i.updated_at >= ${from}`;
+    return rows.some((row) => {
+      const item = JSON.parse(row.payload_json) as Partial<
+        Record<"input" | "output" | "status" | "startedAt" | "completedAt", string | null>
+      > & { readonly exitCode?: number; readonly outputIndicatesFailure?: boolean };
+      if (!item.input || !item.startedAt || item.startedAt > to) return false;
+      if (item.completedAt && item.completedAt < from) return false;
+      const steps = landingSteps(item.input, context.target).filter((step) =>
+        stepMoves(step).some(({ subject }) => subject.test(move.subject)),
+      );
+      if (steps.length === 0) return false;
+      if (item.status !== "completed" && item.status !== "failed") return true;
+      const ok =
+        item.status === "completed" &&
+        (item.exitCode === undefined || item.exitCode === 0) &&
+        item.outputIndicatesFailure !== true;
+      return ok && steps.some((step) => stepMadeMove(step, item.output ?? "", move));
+    });
+  });
+
   const evaluate = Effect.fn("EvidencePromptService.evaluate")(function* (run: OrchestrationV2Run) {
     const threadId = run.threadId;
     const inputs = yield* projections.getRunInputMessages(threadId, run.id);
@@ -299,41 +400,68 @@ const make = Effect.gen(function* () {
         item.startedAt !== null &&
         item.completedAt !== null &&
         succeeded(item) &&
-        landingCommands(item.input, null).length > 0,
+        landingSteps(item.input, null).length > 0,
     );
     if (ran.length === 0) return;
     const target = yield* evidence.landingTarget(thread.projectId);
     if (target === null) return;
-    const windows = ran.flatMap((item) =>
-      landingCommands(item.input, target).map((command) => ({
+    const projectId = thread.projectId;
+    const steps = ran.flatMap((item) =>
+      landingSteps(item.input, target).map((step) => ({ item, step })),
+    );
+    if (steps.length === 0) return;
+    const found = yield* evidence.landedMoves({
+      target,
+      windows: steps.map(({ item, step }) => ({
         fromMs: DateTime.toEpochMillis(item.startedAt!),
         toMs: DateTime.toEpochMillis(item.completedAt!),
-        dir: command.dir,
-        moves: LANDING_MOVES[command.kind],
+        dir: step.dir,
+        moves: stepMoves(step),
       })),
-    );
-    if (windows.length === 0) return;
-    const moves = yield* evidence.landedMoves({ target, windows });
+    });
+    const moves: Array<EvidenceService.LandedMove> = [];
+    for (const move of found) {
+      const tied = move.windows.some((index) => {
+        const candidate = steps[index];
+        return (
+          candidate !== undefined && stepMadeMove(candidate.step, candidate.item.output ?? "", move)
+        );
+      });
+      if (tied && !(yield* anotherThreadMayHaveMade(move, { projectId, threadId, target })))
+        moves.push(move);
+    }
     if (moves.length === 0) return;
-    const projectId = thread.projectId;
     const promptedAt = DateTime.formatIso(yield* DateTime.now);
     const claimed = yield* sql.withTransaction(
       Effect.gen(function* () {
+        const [runClaimed] = yield* sql`SELECT 1 FROM evidence_prompts
+          WHERE thread_id = ${threadId} AND run_id = ${run.id} LIMIT 1`;
+        if (runClaimed !== undefined) return false;
         // Coverage is read again here, so evidence recorded during the Git work stops the prompt.
         const recorded = yield* evidence.recordedRefs({ projectId });
+        const candidates = moves.flatMap((move) => move.commits.map((commit) => commit.sha));
+        // A commit another prompt already asked about is left out; the rest are still asked about.
+        const seen = new Set(
+          candidates.length === 0
+            ? []
+            : (yield* sql<{ readonly target_sha: string }>`SELECT target_sha FROM evidence_prompts
+                WHERE project_id = ${projectId} AND target_sha IN ${sql.in(candidates)}`).map(
+                (row) => row.target_sha,
+              ),
+        );
         const uncovered = new Map<string, { readonly move: number; readonly position: number }>();
         for (const [moveIndex, move] of moves.entries()) {
-          const covers = EvidenceService.coveringLandings(move, recorded);
-          for (const [position, commit] of move.entries())
-            if (covers[position] === undefined && !uncovered.has(commit.sha))
+          const covers = EvidenceService.coveringLandings(move.commits, recorded);
+          for (const [position, commit] of move.commits.entries())
+            if (
+              covers[position] === undefined &&
+              !seen.has(commit.sha) &&
+              !uncovered.has(commit.sha)
+            )
               uncovered.set(commit.sha, { move: moveIndex, position });
         }
         if (uncovered.size === 0) return false;
         const shas = [...uncovered.keys()];
-        const [seen] = yield* sql`SELECT 1 FROM evidence_prompts
-          WHERE (project_id = ${projectId} AND target_sha IN ${sql.in(shas)})
-            OR (thread_id = ${threadId} AND run_id = ${run.id}) LIMIT 1`;
-        if (seen !== undefined) return false;
         const deliveryId = `evidence-prompt:${threadId}:${shas[0]}`;
         const messageId = MessageId.make(deliveryId);
         // The primary key on (project, commit) keeps a second thread's claim from committing.
