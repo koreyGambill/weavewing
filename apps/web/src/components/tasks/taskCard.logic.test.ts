@@ -20,13 +20,10 @@ describe("taskCardStatus", () => {
 });
 
 describe("taskCardOutcome", () => {
-  it("quotes a recorded note, else says how the task closed", () => {
+  it("quotes a recorded note and otherwise leaves the outcome to the badge", () => {
     expect(taskCardOutcome({ state: "open" })).toBeNull();
     expect(taskCardOutcome({ state: "done", note: " rotated it " })).toBe("“rotated it”");
-    expect(taskCardOutcome({ state: "done" })).toBe("Done");
-    expect(taskCardOutcome({ state: "dropped" })).toBe("Cancelled");
-    expect(taskCardOutcome({ state: "dropped", settledBy: "agent" })).toBe(
-      "Cancelled by the agent",
-    );
+    expect(taskCardOutcome({ state: "done" })).toBe("");
+    expect(taskCardOutcome({ state: "dropped" })).toBe("");
   });
 });
