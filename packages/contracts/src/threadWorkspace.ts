@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ArtifactQuestion, ArtifactAnswer } from "./artifactQuestions.ts";
 import { IsoDateTime, MessageId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { TrackedAsk } from "./trackedAnswers.ts";
 
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const TicketData = Schema.Struct({
@@ -136,6 +137,9 @@ export const ThreadWorkspace = Schema.Struct({
   updatedAt: Schema.NullOr(IsoDateTime),
   /** The highest task number given out, so a task removed from the list never lends its number. */
   lastTaskRef: Schema.optional(Revision),
+  asks: Schema.optional(Schema.Array(TrackedAsk)),
+  lastAskRef: Schema.optional(Revision),
+  asksRevision: Schema.optional(Revision),
 });
 export type ThreadWorkspace = typeof ThreadWorkspace.Type;
 export const ThreadWorkspaceGetInput = Schema.Struct({ threadId: ThreadId });

@@ -41,6 +41,24 @@ import fixture from "./testdata/legacy-workspace.json" with { type: "json" };
 
 const threadId = ThreadId.make("thread-test");
 const at = DateTime.makeUnsafe("2026-11-05T12:00:00.000Z");
+function trackedMessage(id: string): OrchestrationV2ConversationMessage {
+  return {
+    id: MessageId.make(id),
+    threadId,
+    runId: null,
+    nodeId: null,
+    role: "user",
+    createdBy: "user",
+    creationSource: "web",
+    origin: { kind: "user" },
+    text: "What resets the counter?",
+    attachments: [],
+    context: { version: 1, records: [], trackedAsk: { question: "What resets the counter?" } },
+    streaming: false,
+    createdAt: at,
+    updatedAt: at,
+  };
+}
 const harness = Effect.fn("test.workspaceHarness")(function* () {
   // The user message of the thread's current turn, as the orchestrator reads it. `sole` says
   // whether it is the one user message since the anchor a caller passes, which `anchors` records.
@@ -89,6 +107,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   const sends: ThreadManagement.ThreadManagementSendInput[] = [];
   const mirror = { waiting: [] as ReadonlyArray<WaitingItemSummary> };
   const threadState = { archivedAt: null as DateTime.Utc | null };
+  const delegatedChildren = new Set<ThreadId>();
   // Like the orchestrator's command receipts: a repeated command id delivers nothing new.
   const delivered: ThreadManagement.ThreadManagementSendInput[] = [];
   const hooks = { onSend: (): void => undefined };
@@ -147,6 +166,15 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
             id,
             waiting: mirror.waiting,
             archivedAt: threadState.archivedAt,
+            ...(delegatedChildren.has(id)
+              ? {
+                  lineage: {
+                    parentThreadId: threadId,
+                    rootThreadId: threadId,
+                    relationshipToParent: "subagent" as const,
+                  },
+                }
+              : {}),
           },
           runs: id === threadId ? threadRuns : [run()],
           attempts: id === threadId ? threadAttempts : [],
@@ -195,7 +223,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   /** The thread's questions as the waiting-items mirror shows them, kept for the follower's check. */
   const mirrored = () =>
     service.waitingItems(threadId).pipe(
-      Effect.map((items) => {
+      Effect.map(({ items }) => {
         mirror.waiting = items;
         return items.filter((item) => item.kind === "question");
       }),
@@ -215,6 +243,7 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
     delivered,
     hooks,
     threadState,
+    delegatedChildren,
     mirror,
     mirrored,
     changed,
@@ -243,6 +272,111 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
     },
   };
 });
+
+it.effect("only permits answering a delivered, unsettled tracked question", () =>
+  Effect.gen(function* () {
+    const { service } = yield* harness();
+    const message = trackedMessage("first");
+    yield* service.recordTrackedMessages(threadId, [message], false);
+    const send = (id: string, text = "The reconnect handler.") =>
+      service.answerAsk({ threadId, id, text, runId: null });
+    const refusal = (effect: ReturnType<typeof send>, message: string) =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(effect);
+        expect(error.message).toBe(message);
+      });
+    yield* refusal(send("A9"), "A9 does not exist in this thread.");
+    yield* refusal(send("A1"), "A1 has not reached you yet.");
+    yield* service.recordTrackedMessages(threadId, [message], true);
+    yield* refusal(send("A1", "  "), "Give a nonempty answer.");
+    yield* refusal(
+      send("A1", "a".repeat(4001)),
+      "Keep the answer under 4000 characters, and pass the rest as more.",
+    );
+    expect((yield* send("A1")).n).toBe(1);
+    expect((yield* send("A1", "Both handlers.")).n).toBe(2);
+    const close = (action: "close" | "reopen" | "withdraw" | "restore") =>
+      service.updateAsk({ threadId, id: "A1", action });
+    expect((yield* close("close")).state).toBe("closed");
+    yield* refusal(
+      send("A1"),
+      "The user closed A1. They reopen it if they want more, so do not answer it again.",
+    );
+    expect((yield* close("reopen")).state).toBe("answered");
+    expect((yield* close("withdraw")).state).toBe("withdrawn");
+    yield* refusal(send("A1"), "The user withdrew A1.");
+    expect((yield* close("restore")).state).toBe("owed");
+    expect((yield* send("A1")).n).toBe(3);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("keeps tracking idempotent and preserves a user edit and a sent follow-up", () =>
+  Effect.gen(function* () {
+    const { service } = yield* harness();
+    const message = trackedMessage("first");
+    const second = trackedMessage("second");
+    yield* service.recordTrackedMessages(threadId, [message, second], false);
+    yield* service.updateAsk({ threadId, id: "A1", action: "edit", question: "Which handler?" });
+    yield* service.recordTrackedMessages(threadId, [message], true);
+    yield* service.answerAsk({ threadId, id: "A1", text: "Reconnect.", runId: null });
+    const followUp = {
+      ...trackedMessage("follow-up"),
+      context: { version: 1 as const, records: [], discussAnswers: ["A1"] },
+    };
+    yield* service.recordTrackedMessages(threadId, [followUp], true);
+    expect((yield* service.get({ threadId })).asks).toMatchObject([
+      {
+        id: "A1",
+        question: "Which handler?",
+        state: "owed",
+        followUps: [{ messageId: followUp.id }],
+      },
+      { id: "A2", state: "queued" },
+    ]);
+    yield* service.answerAsk({ threadId, id: "A1", text: "Both reconnect handlers.", runId: null });
+    yield* service.recordTrackedMessages(threadId, [followUp], true);
+    expect((yield* service.get({ threadId })).asks?.[0]).toMatchObject({
+      state: "answered",
+      followUps: [{ messageId: followUp.id }],
+    });
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "refuses duplicate and foreign marks and directs a child to give its result to its lead",
+  () =>
+    Effect.gen(function* () {
+      const { service, messages, delegatedChildren } = yield* harness();
+      const message = trackedMessage("sent");
+      const guest = { ...trackedMessage("guest"), createdBy: "agent" as const };
+      messages.push(message, guest);
+      const track = (messageId: MessageId) => service.trackMessage({ threadId, messageId });
+      expect((yield* track(message.id)).state).toBe("owed");
+      expect((yield* Effect.flip(track(message.id))).message).toBe(
+        "That message already has a tracked answer.",
+      );
+      expect((yield* Effect.flip(track(guest.id))).message).toBe(
+        "You can only track an answer to your own message.",
+      );
+      expect((yield* Effect.flip(track(MessageId.make("missing")))).message).toBe(
+        "Message not found.",
+      );
+      const child = ThreadId.make("child");
+      delegatedChildren.add(child);
+      const attempted = yield* Effect.flip(
+        service.answerAsk({
+          id: "A1",
+          threadId: child,
+          text: "The reconnect handler.",
+          runId: null,
+        }),
+      );
+      expect(attempted.message).toBe(
+        "A1 belongs to your lead's thread. Put the answer in your result; the lead gives it.",
+      );
+      expect((yield* service.get({ threadId })).asks?.[0]?.state).toBe("owed");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect("requires handed_off while a ticket is open and reads its live state", () =>
   Effect.gen(function* () {
@@ -1709,7 +1843,7 @@ it.effect("numbers the user's tasks once and lists them with questions as waitin
     );
     expect(edited.items.map((item) => item.ref)).toEqual(["T1", "T3", "T2"]);
     yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
-    expect(yield* h.service.waitingItems(threadId)).toEqual([
+    expect((yield* h.service.waitingItems(threadId)).items).toEqual([
       { kind: "question", ref: "Q1", key: "Q1", title: "Ship it?", state: "open" },
       {
         kind: "task",
@@ -1802,7 +1936,7 @@ it.effect(
       // The relayed message is checked against the user messages since T1 was filed.
       expect(h.turnMessage.anchors).toEqual([created.items[0]!.createdAt]);
       expect(
-        (yield* h.service.waitingItems(threadId)).filter((item) => item.kind === "task"),
+        (yield* h.service.waitingItems(threadId)).items.filter((item) => item.kind === "task"),
       ).toEqual([]);
       expect((yield* h.service.waitingWork(threadId)).tasks.map((task) => task.ref)).toEqual([
         "T1",
@@ -1962,7 +2096,7 @@ it.effect("shows a task discussed until the user changes it again", () =>
       questionIds: [],
       taskIds: ["rotate", "missing"],
     });
-    expect(yield* h.service.waitingItems(threadId)).toEqual([
+    expect((yield* h.service.waitingItems(threadId)).items).toEqual([
       {
         kind: "task",
         ref: "T1",
@@ -2171,7 +2305,7 @@ it.effect("numbers tasks saved before task numbers existed when their thread is 
     delete stored.workspace.items[0].ref;
     delete stored.workspace.lastTaskRef;
     yield* h.fs.writeFileString(file, JSON.stringify(stored));
-    expect(yield* h.service.waitingItems(threadId)).toEqual([
+    expect((yield* h.service.waitingItems(threadId)).items).toEqual([
       {
         kind: "task",
         ref: "T1",

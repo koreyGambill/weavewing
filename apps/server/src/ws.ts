@@ -2401,16 +2401,22 @@ export const layerWsRpc = (
           ),
         [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
           Stream.unwrap(subscribeOrchestrationV2Shell(input)),
-        [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) =>
-          Stream.unwrap(
+        [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) => {
+          const stream = Stream.unwrap(
             Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
               Effect.andThen(subscribeOrchestrationV2Thread(input)),
             ),
+          );
+          return (
+            input.acceptTrackedAnswers
+              ? threadWorkspace.withTrackedAnswers(input.threadId, stream)
+              : stream
           ).pipe(
             Stream.map((item) =>
               forClient[ORCHESTRATION_V2_WS_METHODS.subscribeThread](item, client),
             ),
-          ),
+          );
+        },
         [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
           Stream.unwrap(
             Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
@@ -3241,6 +3247,9 @@ export const layerWsRpc = (
         [WS_METHODS.threadNotesSendSelection]: (input) => threadNotes.sendSelection(input),
         [WS_METHODS.threadNotesSaveImage]: (input) => threadNotes.saveImage(input),
         [WS_METHODS.threadWorkspaceGet]: (input) => threadWorkspace.get(input),
+        [WS_METHODS.threadTrackMessage]: (input) => threadWorkspace.trackMessage(input),
+        [WS_METHODS.threadUpdateAsk]: (input) => threadWorkspace.updateAsk(input),
+        [WS_METHODS.threadAsksRead]: (input) => threadWorkspace.asksRead(input),
         [WS_METHODS.threadListRead]: (input) => threadWorkspace.listRead(input),
         [WS_METHODS.threadArtifactRead]: (input) => threadWorkspace.artifactRead(input),
         [WS_METHODS.threadArtifactList]: (input) => threadWorkspace.artifactList(input),

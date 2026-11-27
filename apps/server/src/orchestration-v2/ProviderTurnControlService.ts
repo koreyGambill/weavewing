@@ -1,6 +1,9 @@
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginText";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
+import { withTrackedAnswerContext } from "../threadWorkspace/trackedAsks.ts";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import {
   MessageId,
@@ -126,6 +129,8 @@ export const layer: Layer.Layer<
     const eventSink = yield* EventSink.EventSinkV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const workspaces = yield* Effect.serviceOption(ThreadWorkspace);
+    const mcpSessions = yield* Effect.serviceOption(McpProviderSessions.McpProviderSessions);
 
     const load = Effect.fn("ProviderTurnControlService.load")(function* (input: {
       readonly threadId: ThreadId;
@@ -457,6 +462,29 @@ export const layer: Layer.Layer<
               return inputMessage === undefined ? [] : [inputMessage];
             }),
           ).find(({ message: inputMessage }) => inputMessage.id === message.id)?.index;
+          const tracked =
+            Option.isSome(workspaces) &&
+            (message.context?.trackedAsk || message.context?.discussAnswers?.length)
+              ? yield* workspaces.value.recordTrackedMessages(input.threadId, [message], true).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderTurnControlError({
+                        threadId: input.threadId,
+                        operation: "steer",
+                        providerTurnId: input.providerTurnId,
+                        cause,
+                      }),
+                  ),
+                )
+              : [];
+          const session =
+            tracked.length > 0 && Option.isSome(mcpSessions)
+              ? yield* mcpSessions.value.read(input.threadId)
+              : undefined;
+          const text = projectComposerContextForProvider({
+            text: message.text,
+            records: message.context?.records ?? [],
+          });
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
@@ -471,10 +499,9 @@ export const layer: Layer.Layer<
                 ...(message.origin === undefined ? {} : { origin: message.origin }),
                 text: renderTurnOriginText(
                   message.origin ?? { kind: "user" },
-                  projectComposerContextForProvider({
-                    text: message.text,
-                    records: message.context?.records ?? [],
-                  }),
+                  session?.capabilities?.has("questions")
+                    ? withTrackedAnswerContext(text, message, tracked)
+                    : text,
                   receivingEnvironmentId,
                   originIndex,
                 ),

@@ -79,7 +79,18 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 - A comment on a question is not its answer. Reply in chat; then ask it again with \`question_ask\` \`replaces\` if the decision is still open, record the answer if the comment settled it, or withdraw the question if the comment made it moot.
 - Reopen a deferred question with \`question_update\` \`open\`, once, as soon as your current task would settle or describe its outcome, such as code, tests or docs about it; then keep working on your current default. Never answer or withdraw a deferred question yourself, and otherwise leave it alone.`;
 
-export type WaitingContextKind = "question" | "qa" | "task";
+export const T3_CODE_TRACKED_ANSWER_INSTRUCTIONS = `## T3 Code tracked answers
+
+- The user tracks a question when they want an answer they can find later: their message says "Tracked as A3", or your turn lists tracked questions you owe. Once you know the answer, call answer_give with its id and the answer in that turn, then reply as usual. The user sees the call as the answer's card.
+- Answer only what you have found out. A plan, a guess or a partial result is not an answer: say what you are doing in your reply and leave it owed. If you find it cannot be answered, give that as the answer, with why.
+- Never call answer_give for a question that is not tracked.
+- Only the user closes a tracked question. Never say it is closed or settled. When the user follows up on your answer, it is owed again: answer again with answer_give once you know.`;
+
+export function trackedAskAboutLine(ref: string, about?: string): string {
+  return `Tracked as ${ref}${about ? `, a follow-up on ${about}` : ""}: the user wants a findable answer to this message. Call answer_give with ${ref} once you know it.`;
+}
+
+type WaitingContextKind = "question" | "qa" | "task";
 
 /** Something waiting on the user, as the agent's turn context names it. */
 export interface WaitingContextItem {
@@ -95,7 +106,7 @@ export interface WaitingContextItem {
 
 /** What the user did to a waiting item since their previous message. */
 export interface WaitingContextChange {
-  readonly kind: WaitingContextKind;
+  readonly kind: WaitingContextKind | "answer";
   readonly ref: string;
   readonly title: string;
   readonly change:
@@ -105,7 +116,14 @@ export interface WaitingContextChange {
     | "confirmed"
     | "dismissed"
     | "done"
-    | "cancelled";
+    | "cancelled"
+    | "closed";
+}
+
+export interface WaitingContextOwedAnswer {
+  readonly id: string;
+  readonly question: string;
+  readonly followedUp: boolean;
 }
 
 /** A QA change the user reported a problem with, which the agent owes a fix for. */
@@ -148,6 +166,7 @@ const CHANGE_ORDER: ReadonlyArray<WaitingContextChange["change"]> = [
   "dismissed",
   "done",
   "cancelled",
+  "closed",
   "withdrew",
   "deferred",
   "reopened",
@@ -181,15 +200,26 @@ export function t3WaitingContext(input: {
   readonly waiting?: ReadonlyArray<WaitingContextItem> | undefined;
   readonly changes?: ReadonlyArray<WaitingContextChange> | undefined;
   readonly problems?: ReadonlyArray<WaitingContextProblem> | undefined;
+  readonly owedAnswers?: ReadonlyArray<WaitingContextOwedAnswer> | undefined;
 }): string {
   const waiting = (input.waiting ?? []).filter((item) => item.sent !== true);
   const changes = input.changes ?? [];
   const problems = input.problems ?? [];
+  const owed = input.owedAnswers ?? [];
   return [
     changes.length === 0 ? "" : sinceLine(changes),
     waiting.length === 0
       ? ""
       : `Waiting on the user, who already sees these, so leave them out of your reply unless this message is about one: ${capped(waiting.map(waitingEntry), "; ")}`,
+    owed.length === 0
+      ? ""
+      : `Tracked questions you owe the user an answer to: ${capped(
+          owed.map(
+            (ask) =>
+              `${ask.id} ${JSON.stringify(ask.question)}${ask.followedUp ? " (they followed up on your answer)" : ""}`,
+          ),
+          "; ",
+        )}. Call answer_give once you know one; until then, leave them out of your reply unless this message is about one.`,
     problems.length === 0
       ? ""
       : `QA problems you owe a fix for: ${capped(
@@ -247,7 +277,9 @@ export function t3AcpPromptWithInstructions(input: {
       ? [
           T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(),
           ...(input.state.hasDeviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
-          ...(input.state.hasQuestionTools ? [T3_CODE_QUESTION_TOOL_INSTRUCTIONS] : []),
+          ...(input.state.hasQuestionTools
+            ? [T3_CODE_QUESTION_TOOL_INSTRUCTIONS, T3_CODE_TRACKED_ANSWER_INSTRUCTIONS]
+            : []),
           T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
           T3_CODE_ACP_MCP_FALLBACK_INSTRUCTIONS,
         ]
@@ -265,7 +297,9 @@ const orchestrationInstructions = (hasDeviceTools: boolean, hasQuestionTools: bo
   [
     T3_CODE_ORCHESTRATION_INSTRUCTIONS,
     ...(hasDeviceTools ? [`${T3_CODE_DEVICE_TOOL_INSTRUCTIONS}\n`] : []),
-    ...(hasQuestionTools ? [`${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n`] : []),
+    ...(hasQuestionTools
+      ? [`${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n`, `${T3_CODE_TRACKED_ANSWER_INSTRUCTIONS}\n`]
+      : []),
   ].join("\n");
 
 function prependT3OrchestrationInstructions(

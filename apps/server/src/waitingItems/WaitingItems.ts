@@ -50,7 +50,9 @@ const make = Effect.gen(function* () {
         commandId: CommandId.make(`waiting-sync:${yield* random.uuidV4()}`),
         threadId,
         // The orchestrator drops a sync that changes nothing.
-        items: [...mine, ...qa],
+        items: [...mine.items, ...qa],
+        ...(mine.answers === undefined ? {} : { answers: mine.answers }),
+        ...(mine.answersRevision === undefined ? {} : { answersRevision: mine.answersRevision }),
       });
     },
     lock.withPermit,

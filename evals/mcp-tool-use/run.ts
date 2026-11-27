@@ -74,7 +74,11 @@ import {
   QUESTION_TOOL_NAMES,
   QuestionToolkit,
 } from "../../apps/server/src/mcp/toolkits/questions/tools.ts";
-import { t3WaitingContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
+import { AnswerToolkit } from "../../apps/server/src/mcp/toolkits/answers/tools.ts";
+import {
+  t3WaitingContext,
+  trackedAskAboutLine,
+} from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { ticketExport } from "./ticketExport.ts";
 import {
@@ -401,6 +405,21 @@ export const McpToolUseCase = Schema.Struct({
         Schema.Struct({ ref: Schema.String, title: Schema.String, note: Schema.String }),
       ),
     ),
+    trackedAsk: Schema.optional(
+      Schema.Struct({
+        ref: Schema.String,
+        question: Schema.String,
+      }),
+    ),
+    owedAnswers: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          question: Schema.String,
+          followedUp: Schema.Boolean,
+        }),
+      ),
+    ),
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
@@ -601,6 +620,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   ReviewToolkit,
   MessageToolkit,
   QuestionToolkit,
+  AnswerToolkit,
   ContextRewindToolkit,
   ContextRewindTurnToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
@@ -673,7 +693,8 @@ const visibleT3Tools = (options: {
       (options.links === true || !hiddenWhileLinksOff.has(tool.name)) &&
       !(options.subagent === true && hiddenFromSubagents.has(tool.name)) &&
       (options.questionTools === true ||
-        !QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))) &&
+        (!QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length)) &&
+          tool.name !== `${T3_PREFIX}answer_give`)) &&
       (options.contextRewind === true ||
         !CONTEXT_REWIND_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))) &&
       (options.contextRewindTurn === true ||
@@ -1347,10 +1368,13 @@ export const buildMessages = (sample: Sample) => {
     }
     if (turn.text) push(turn.role, text(turn.text));
   }
-  const userText =
+  const body =
     testCase.promptContext === undefined
       ? testCase.prompt
       : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
+  const userText = testCase.setup.trackedAsk
+    ? `${trackedAskAboutLine(testCase.setup.trackedAsk.ref)}\n\n${body}`
+    : body;
   // T3 lists what waits on the user ahead of a user's own message, after any side-chat context.
   const inlineContext = [
     sideChatContext ?? "",
@@ -1371,6 +1395,7 @@ export const buildMessages = (sample: Sample) => {
             ...(testCase.setup.waiting ?? []),
           ],
           problems: testCase.setup.qaProblems,
+          owedAnswers: testCase.setup.owedAnswers,
         })
       : "",
   ]

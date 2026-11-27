@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { threadQuestionTitle, type ListItem, type ThreadQuestion } from "./threadWorkspace.ts";
+import type { TrackedAnswerWaitingRow } from "./trackedAnswers.ts";
 
 /** What waits on the user: an agent's question, a landed change's QA, or a task only the user can do. */
 export const WaitingItemKind = Schema.Literals(["question", "qa", "task"]);
@@ -60,6 +61,8 @@ export const WaitingCounts = Schema.Struct({
   liveQuestions: Schema.optional(NonNegativeInt),
   /** Every item still waiting on someone, of any kind; rows past the cap are this minus those listed. */
   live: Schema.optional(NonNegativeInt),
+  answer: Schema.optional(NonNegativeInt),
+  owed: Schema.optional(NonNegativeInt),
 });
 export type WaitingCounts = typeof WaitingCounts.Type;
 
@@ -89,7 +92,7 @@ const waitingItemCounts = (items: ReadonlyArray<WaitingItemSummary>): WaitingCou
 };
 
 export const waitingTotal = (counts: WaitingCounts | undefined): number =>
-  counts === undefined ? 0 : counts.question + counts.qa + counts.task;
+  counts === undefined ? 0 : counts.question + counts.qa + counts.task + (counts.answer ?? 0);
 
 export const sameWaitingCounts = (a: WaitingCounts | undefined, b: WaitingCounts | undefined) =>
   a === b ||
@@ -100,6 +103,8 @@ export const sameWaitingCounts = (a: WaitingCounts | undefined, b: WaitingCounts
     a.task === b.task &&
     a.discussing === b.discussing &&
     a.liveQuestions === b.liveQuestions &&
+    a.answer === b.answer &&
+    a.owed === b.owed &&
     a.live === b.live);
 
 // What a capped list keeps first: what waits on the user, then on the agent, then set aside.
@@ -130,23 +135,47 @@ function capWaiting(
  * so every question is kept, closed ones the user changed included; QA changes and tasks still
  * waiting are capped at `WAITING_ITEMS_LIMIT`, because only the display reads them.
  */
-export function waitingMirror(items: ReadonlyArray<WaitingItemSummary>): {
+export function waitingMirror(
+  items: ReadonlyArray<WaitingItemSummary>,
+  answers: ReadonlyArray<TrackedAnswerWaitingRow> = [],
+): {
   readonly waiting: ReadonlyArray<WaitingItemSummary>;
   readonly waitingCounts: WaitingCounts;
+  readonly waitingAnswers?: ReadonlyArray<TrackedAnswerWaitingRow>;
 } {
-  const others = new Set(
-    capWaiting(
-      items.filter((item) => item.kind !== "question"),
-      WAITING_ITEMS_LIMIT,
+  const ranked = [
+    ...items.flatMap((item) =>
+      item.kind !== "question" && isWaitingItemState(item.state)
+        ? [{ rank: capRank(item), item }]
+        : [],
     ),
-  );
+    ...answers.map((answer) => ({
+      rank: answer.state === "answered" ? 0 : answer.state === "owed" ? 1 : 2,
+      answer,
+    })),
+  ]
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, WAITING_ITEMS_LIMIT);
+  const others = new Set(ranked.flatMap((part) => ("item" in part ? [part.item] : [])));
+  const waitingAnswers = ranked.flatMap((part) => ("answer" in part ? [part.answer] : []));
+  const counts = waitingItemCounts(items);
+  const answer = answers.filter((row) => row.state === "answered").length;
   return {
     waiting: items
       .map((item, index) => ({ item, index }))
       .filter(({ item }) => item.kind === "question" || others.has(item))
       .sort(byKindThenOrder)
       .map(({ item }) => item),
-    waitingCounts: waitingItemCounts(items),
+    waitingCounts:
+      answers.length === 0
+        ? counts
+        : {
+            ...counts,
+            live: (counts.live ?? 0) + answers.length,
+            answer,
+            owed: answers.length - answer,
+          },
+    ...(waitingAnswers.length > 0 ? { waitingAnswers } : {}),
   };
 }
 
@@ -170,6 +199,16 @@ export const sameWaitingItems = (
   a: ReadonlyArray<WaitingItemSummary>,
   b: ReadonlyArray<WaitingItemSummary>,
 ): boolean => a.length === b.length && a.every((item, index) => sameItem(item, b[index]!));
+
+export const sameWaitingAnswers = (
+  a: ReadonlyArray<TrackedAnswerWaitingRow>,
+  b: ReadonlyArray<TrackedAnswerWaitingRow>,
+): boolean =>
+  a.length === b.length &&
+  a.every((row, index) => {
+    const other = b[index];
+    return row.ref === other?.ref && row.title === other.title && row.state === other.state;
+  });
 
 /**
  * A thread workspace's questions as waiting rows: every open or deferred one, marked sent while

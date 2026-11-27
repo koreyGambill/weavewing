@@ -93,6 +93,13 @@ import {
   ThreadQuestionUpdateInput,
 } from "./threadWorkspace.ts";
 import {
+  ThreadTrackMessageInput,
+  ThreadUpdateAskInput,
+  TrackedAsk,
+  TrackedAnswersPage,
+  TrackedAnswersReadInput,
+} from "./trackedAnswers.ts";
+import {
   ReviewArtifact,
   ReviewSummary,
   ReviewArtifactError,
@@ -634,6 +641,9 @@ export const WS_METHODS = {
   threadNotesSendSelection: "threadNotes.sendSelection",
   threadNotesSaveImage: "threadNotes.saveImage",
   threadWorkspaceGet: "threadWorkspace.get",
+  threadTrackMessage: "threadWorkspace.trackMessage",
+  threadUpdateAsk: "threadWorkspace.updateAsk",
+  threadAsksRead: "threadWorkspace.asksRead",
   threadListRead: "threadWorkspace.listRead",
   threadArtifactRead: "threadWorkspace.artifactRead",
   threadArtifactList: "threadWorkspace.artifactList",
@@ -1871,6 +1881,21 @@ const WsThreadWorkspaceGetRpc = Rpc.make(WS_METHODS.threadWorkspaceGet, {
   success: ThreadWorkspace,
   error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
 });
+const WsThreadTrackMessageRpc = Rpc.make(WS_METHODS.threadTrackMessage, {
+  payload: ThreadTrackMessageInput,
+  success: TrackedAsk,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
+const WsThreadUpdateAskRpc = Rpc.make(WS_METHODS.threadUpdateAsk, {
+  payload: ThreadUpdateAskInput,
+  success: TrackedAsk,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
+const WsThreadAsksReadRpc = Rpc.make(WS_METHODS.threadAsksRead, {
+  payload: TrackedAnswersReadInput,
+  success: TrackedAnswersPage,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
 const WsThreadListUpdateRpc = Rpc.make(WS_METHODS.threadListUpdate, {
   payload: ThreadListUpdateInput,
   success: ThreadWorkspace,
@@ -3060,6 +3085,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadNotesSendSelectionRpc,
   WsThreadNotesSaveImageRpc,
   WsThreadWorkspaceGetRpc,
+  WsThreadTrackMessageRpc,
+  WsThreadUpdateAskRpc,
+  WsThreadAsksReadRpc,
   WsThreadListReadRpc,
   WsThreadArtifactReadRpc,
   WsThreadArtifactListRpc,

@@ -47,6 +47,7 @@ import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
 import { WaitingCounts, WaitingItemSummary } from "./waitingItems.ts";
+import { TrackedAnswerWaitingRow, TrackedAsk } from "./trackedAnswers.ts";
 import { ThreadMcpServer, ThreadToolOverrides } from "./threadToolOverrides.ts";
 import { ThreadTitleRegenerationOutcome } from "./threadTitle.ts";
 import {
@@ -693,6 +694,9 @@ export const OrchestrationV2AppThread = Schema.Struct({
    */
   waiting: Schema.optional(Schema.Array(WaitingItemSummary)),
   waitingCounts: Schema.optional(WaitingCounts),
+  waitingAnswers: Schema.optional(Schema.Array(TrackedAnswerWaitingRow)),
+  trackedAnswersRevision: Schema.optional(NonNegativeInt),
+  trackedAsks: Schema.optional(Schema.Array(TrackedAsk)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -2548,6 +2552,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   waiting: Schema.optional(Schema.Array(WaitingItemSummary)),
   /** Items waiting on the user per kind, exact past the cap. */
   waitingCounts: Schema.optional(WaitingCounts),
+  waitingAnswers: Schema.optional(Schema.Array(TrackedAnswerWaitingRow)),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
   latestUserMessageAt: Schema.NullOr(Schema.DateTimeUtc),
   /** Excludes wakes and agent messages that advance latestUserMessageAt through the user role. */
@@ -4023,6 +4028,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     items: Schema.Array(WaitingItemSummary),
+    answers: Schema.optional(Schema.Array(TrackedAnswerWaitingRow)),
+    answersRevision: Schema.optional(NonNegativeInt),
   }),
   // Guest share commands the server issues after checking T3 Connect and the guest token.
   Schema.Struct({
@@ -4546,6 +4553,7 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   /** The client restores `*Omitted` bodies from records it already holds. */
   acceptDedupedBodies: Schema.optionalKey(Schema.Boolean),
   acceptCompactIds: Schema.optionalKey(Schema.Boolean),
+  acceptTrackedAnswers: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
 
@@ -4651,6 +4659,7 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
   Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("synchronized"),
+      trackedAsks: Schema.optional(Schema.Array(TrackedAsk)),
     }),
     Schema.Struct({
       kind: Schema.Literal("snapshot"),

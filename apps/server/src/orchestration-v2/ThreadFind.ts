@@ -10,7 +10,11 @@ import {
 import { searchableMessageSegments, searchablePlanSegments } from "@t3tools/shared/threadFindText";
 import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
 import { sentContextSearchSegments } from "@t3tools/shared/sentContext";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+  trackedAnswerFromToolItem,
+} from "@t3tools/shared/toolOutput";
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -86,7 +90,14 @@ function textKey(
         ? item.markdown
         : item.type === "user_message" || item.type === "assistant_message"
           ? item.text
-          : "",
+          : item.type === "dynamic_tool" &&
+              trackedAnswerFromToolItem(item) !== undefined &&
+              typeof item.input === "object" &&
+              item.input !== null &&
+              "answer" in item.input &&
+              typeof item.input.answer === "string"
+            ? item.input.answer
+            : "",
     role:
       item.type === "proposed_plan" ? "plan" : item.type === "user_message" ? "user" : "assistant",
     streaming: item.type === "assistant_message" && item.streaming,
@@ -353,12 +364,24 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       const index = yield* readIndex(threadId);
       const sourceThreadIds = [...new Set([threadId, ...index.map((row) => row.sourceThreadId)])];
       const sequence = yield* readRevision(sourceThreadIds);
+      const encodedThreadIds = yield* encodeThreadIds(sourceThreadIds);
+      const answerRows = yield* sql<{ thread_id: string; turn_item_id: string }>`
+        SELECT thread_id, turn_item_id FROM orchestration_v2_projection_turn_items
+        WHERE thread_id IN (SELECT value FROM json_each(${encodedThreadIds}))
+          AND type = 'dynamic_tool'
+          AND substr(json_extract(payload_json, '$.toolName'), -11) = 'answer_give'
+      `;
+      const answerIds = new Set(
+        answerRows.map((row) => JSON.stringify([row.thread_id, row.turn_item_id])),
+      );
       const candidates = index
         .map((row, position) => ({ ...row, position }))
-        .filter((row) =>
-          ["user_message", "assistant_message", "proposed_plan", "user_input_request"].includes(
-            row.item.type,
-          ),
+        .filter(
+          (row) =>
+            answerIds.has(JSON.stringify([row.sourceThreadId, row.sourceItemId])) ||
+            ["user_message", "assistant_message", "proposed_plan", "user_input_request"].includes(
+              row.item.type,
+            ),
         );
       const loadAll = Effect.fnUntraced(function* (rows: readonly FindRow[]) {
         const loaded: FindPayload[] = [];

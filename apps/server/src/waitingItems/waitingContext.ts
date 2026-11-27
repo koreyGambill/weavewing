@@ -1,8 +1,14 @@
-import { threadQuestionTitle, type ListItem, type ThreadQuestion } from "@t3tools/contracts";
+import {
+  threadQuestionTitle,
+  type ListItem,
+  type ThreadQuestion,
+  type TrackedAsk,
+} from "@t3tools/contracts";
 import type {
   WaitingContextChange,
   WaitingContextItem,
   WaitingContextProblem,
+  WaitingContextOwedAnswer,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import type { QaForTurn } from "../evidence/EvidenceService.ts";
 
@@ -61,6 +67,7 @@ export function waitingContextInput(input: {
   readonly questions: ReadonlyArray<ThreadQuestion>;
   readonly tasks: ReadonlyArray<ListItem>;
   readonly qa: ReadonlyArray<QaForTurn>;
+  readonly asks?: ReadonlyArray<TrackedAsk>;
   readonly userTurn: boolean;
   /** The user's previous message; earlier changes went with it. Null takes every change. */
   readonly sinceMs: number | null;
@@ -70,15 +77,29 @@ export function waitingContextInput(input: {
   readonly waiting: ReadonlyArray<WaitingContextItem>;
   readonly changes: ReadonlyArray<WaitingContextChange>;
   readonly problems: ReadonlyArray<WaitingContextProblem>;
+  readonly owedAnswers?: ReadonlyArray<WaitingContextOwedAnswer>;
 } {
   const available = input.available ?? { questions: true, lists: true };
   const questions = available.questions ? input.questions : [];
   const tasks = available.lists ? input.tasks : [];
   const qa = available.lists ? input.qa : [];
+  const asks = available.questions ? (input.asks ?? []) : [];
+  const owedAnswers = asks.flatMap((ask) =>
+    ask.state === "owed"
+      ? [
+          {
+            id: ask.id,
+            question: ask.question,
+            followedUp: ask.answers.length > 0 && ask.followUps.length > 0,
+          },
+        ]
+      : [],
+  );
+  const owed = owedAnswers.length > 0 ? { owedAnswers } : {};
   const problems = qa.flatMap((change) =>
     change.state === "problem" ? [{ ref: change.ref, title: change.title, note: change.note }] : [],
   );
-  if (!input.userTurn) return { waiting: [], changes: [], problems };
+  if (!input.userTurn) return { waiting: [], changes: [], problems, ...owed };
   const userTasks = tasks.flatMap((task) =>
     task.owner === "you" && task.ref !== undefined ? [{ ...task, ref: task.ref }] : [],
   );
@@ -117,6 +138,20 @@ export function waitingContextInput(input: {
   ): ReadonlyArray<WaitingContextChange> =>
     change === undefined ? [] : [{ kind, ref, title, change }];
   const changes = [
+    ...asks.flatMap((ask) =>
+      after(ask.userChangedAt, input.sinceMs)
+        ? changed(
+            "answer",
+            ask.id,
+            ask.question,
+            ask.state === "closed"
+              ? "closed"
+              : ask.withdrawnBecause === "user"
+                ? "withdrew"
+                : undefined,
+          )
+        : [],
+    ),
     ...questions.flatMap((question) =>
       after(question.userChangedAt, input.sinceMs)
         ? changed(
@@ -138,5 +173,5 @@ export function waitingContextInput(input: {
         : [],
     ),
   ];
-  return { waiting, changes, problems };
+  return { waiting, changes, problems, ...owed };
 }

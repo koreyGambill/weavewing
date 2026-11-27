@@ -6,6 +6,7 @@ import {
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_SECTIONS,
   T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+  T3_CODE_TRACKED_ANSWER_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 
 /** Codex silently truncates additionalContext values over 1,000 tokens, counted as UTF-8 bytes / 4. */
@@ -63,6 +64,10 @@ export function buildCodexAdditionalContext(
           t3_code_tools_questions: {
             kind: "application",
             value: T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+          },
+          t3_code_tools_tracked_answers: {
+            kind: "application",
+            value: T3_CODE_TRACKED_ANSWER_INSTRUCTIONS,
           },
         }
       : {}),

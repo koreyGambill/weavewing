@@ -22,6 +22,18 @@ const item = (
 ): WaitingItemSummary => ({ kind, ref, key: ref, title: ref, state, ...extra });
 
 describe("waitingMirror", () => {
+  it("keeps answer counts exact when answer and task rows share the cap", () => {
+    const mirror = waitingMirror(
+      [item("task", "T1")],
+      Array.from({ length: 40 }, (_, index) => ({
+        ref: `A${index + 1}`,
+        title: "Tracked question",
+        state: index < 31 ? ("answered" as const) : ("owed" as const),
+      })),
+    );
+    expect(mirror.waiting.length + (mirror.waitingAnswers?.length ?? 0)).toBe(30);
+    expect(mirror.waitingCounts).toMatchObject({ answer: 31, owed: 9, task: 1, live: 41 });
+  });
   it("counts only open items nobody has sent an answer for, and keeps the rest exact", () => {
     const { waitingCounts } = waitingMirror([
       item("question", "Q1"),

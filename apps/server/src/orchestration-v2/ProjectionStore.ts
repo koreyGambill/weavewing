@@ -249,6 +249,7 @@ export type ProjectionSettlementCandidate = Pick<
   | "pendingGuestMessageCount"
   | "waiting"
   | "waitingCounts"
+  | "waitingAnswers"
 > &
   Pick<OrchestrationV2AppThread, "lastSnoozeWakeAt"> & {
     readonly latestUserAuthoredMessageAt: DateTime.Utc | null;
@@ -1803,12 +1804,15 @@ function buildVisibleTurnItems(input: {
 
 // Absent until the thread's first waiting item, like the mirror it reads. Closed items stay on
 // the thread for the agent's turn context; the list shows only what still waits.
-const waitingShellFields = (thread: Pick<OrchestrationV2AppThread, "waiting" | "waitingCounts">) =>
+const waitingShellFields = (
+  thread: Pick<OrchestrationV2AppThread, "waiting" | "waitingCounts" | "waitingAnswers">,
+) =>
   thread.waiting === undefined || thread.waitingCounts === undefined
     ? {}
     : {
         waiting: waitingDisplayRows(thread.waiting),
         waitingCounts: thread.waitingCounts,
+        ...(thread.waitingAnswers === undefined ? {} : { waitingAnswers: thread.waitingAnswers }),
       };
 
 function pendingRuntimeRequestSummary(

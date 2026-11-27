@@ -25,6 +25,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.threadArtifactAnswer]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadArtifactSubmit]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadQuestionUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.threadTrackMessage]: AuthOrchestrationOperateScope,
+  [WS_METHODS.threadUpdateAsk]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadQuestionDraft]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadMarksAnnotate]: AuthOrchestrationOperateScope,
 

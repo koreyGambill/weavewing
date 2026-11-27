@@ -49,6 +49,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.threadNotesGet]: AuthOrchestrationReadScope,
   [WS_METHODS.threadNotesSettings]: AuthOrchestrationReadScope,
   [WS_METHODS.threadWorkspaceGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.threadAsksRead]: AuthOrchestrationReadScope,
   [WS_METHODS.threadListRead]: AuthOrchestrationReadScope,
   [WS_METHODS.threadArtifactRead]: AuthOrchestrationReadScope,
   [WS_METHODS.threadArtifactList]: AuthOrchestrationReadScope,

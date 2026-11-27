@@ -243,6 +243,7 @@ import {
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
   T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+  T3_CODE_TRACKED_ANSWER_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
@@ -2360,6 +2361,7 @@ const CLAUDE_KNOWN_APPEND_ENTRIES = [
   { key: "t3_code_send_to_user", text: CLAUDE_SEND_TO_USER_INSTRUCTIONS },
   { key: "t3_code_devices", text: T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH },
   { key: "t3_code_questions", text: T3_CODE_QUESTION_TOOL_INSTRUCTIONS },
+  { key: "t3_code_tracked_answers", text: T3_CODE_TRACKED_ANSWER_INSTRUCTIONS },
 ];
 
 /** Partitions the actual SDK append into generated and custom text without changing its total byte count. */
@@ -2396,7 +2398,9 @@ function claudeT3Append(input: ClaudeT3AppendInput): string {
         CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
         CLAUDE_SEND_TO_USER_INSTRUCTIONS +
         (input.deviceTools ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "") +
-        (input.questionTools ? `\n${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n` : "")
+        (input.questionTools
+          ? `\n${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n\n${T3_CODE_TRACKED_ANSWER_INSTRUCTIONS}\n`
+          : "")
       : "")
   );
 }

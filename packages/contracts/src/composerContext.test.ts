@@ -13,6 +13,21 @@ const decodeContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
 
 const base = { version: 1, contextId: "ctx_1" } as const;
 
+it("decodes old message context without requiring tracked-answer fields", () => {
+  expect(decodeContext({ version: 1, records: [] })).toEqual({ version: 1, records: [] });
+  expect(
+    decodeContext({
+      version: 1,
+      records: [],
+      trackedAsk: { question: "Which handler resets the counter?" },
+      discussAnswers: ["A2"],
+    }),
+  ).toMatchObject({
+    trackedAsk: { question: "Which handler resets the counter?" },
+    discussAnswers: ["A2"],
+  });
+});
+
 const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<string, unknown>> = {
   "waiting-item": {
     ...base,

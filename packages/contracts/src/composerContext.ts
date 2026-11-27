@@ -14,6 +14,7 @@ import {
   TurnItemId,
 } from "./baseSchemas.ts";
 import { GUEST_MESSAGE_MAX_LENGTH, GUEST_NAME_MAX_LENGTH } from "./guestShare.ts";
+import { TrackedAskContext, TrackedAskId } from "./trackedAnswers.ts";
 
 /** Image and file records reference `ChatAttachment` ids, never bytes. */
 
@@ -354,6 +355,8 @@ export const OrchestrationMessageContext = Schema.Struct({
   /** Root refresh capture time, before which excerpts were considered for the snapshot. */
   sideChatRefreshBefore: Schema.optional(IsoDateTime),
   sideChatRefreshAfterArchive: Schema.optional(ThreadId),
+  trackedAsk: Schema.optional(TrackedAskContext),
+  discussAnswers: Schema.optional(Schema.Array(TrackedAskId).check(Schema.isMaxLength(20))),
   records: Schema.Array(Schema.Unknown)
     .check(
       Schema.isMaxLength(COMPOSER_CONTEXT_MAX_RECORDS),

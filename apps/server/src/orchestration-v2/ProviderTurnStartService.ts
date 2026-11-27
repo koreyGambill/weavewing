@@ -3,6 +3,7 @@ import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginTe
 import { t3WaitingContext } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as EvidenceService from "../evidence/EvidenceService.ts";
 import { ThreadWorkspace } from "../threadWorkspace/ThreadWorkspace.ts";
+import { withTrackedAnswerContext } from "../threadWorkspace/trackedAsks.ts";
 import { waitingContextInput, type WaitingKindsAvailable } from "../waitingItems/waitingContext.ts";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -18,6 +19,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2TurnItem,
+  type MessageId,
   isCompactionCommandMessage,
   parseGoalCommand,
   RunId,
@@ -232,17 +234,27 @@ export const layer: Layer.Layer<
         userTurn: boolean,
         since: DateTime.Utc | null,
         available: WaitingKindsAvailable,
+        currentMessageIds: ReadonlySet<MessageId>,
       ) {
         const work =
-          userTurn && (available.questions || available.lists) && Option.isSome(workspaces)
+          (available.questions || (userTurn && available.lists)) && Option.isSome(workspaces)
             ? yield* workspaces.value.waitingWork(threadId)
-            : { questions: [], tasks: [] };
+            : { questions: [], tasks: [], asks: [] };
         const qa =
           available.lists && Option.isSome(evidence)
             ? yield* evidence.value.qaForTurn(threadId, since && DateTime.formatIso(since))
             : [];
         const sinceMs = since && DateTime.toEpochMillis(since);
-        return t3WaitingContext(waitingContextInput({ ...work, qa, userTurn, sinceMs, available }));
+        return t3WaitingContext(
+          waitingContextInput({
+            ...work,
+            asks: (work.asks ?? []).filter((ask) => !currentMessageIds.has(ask.askedInMessageId)),
+            qa,
+            userTurn,
+            sinceMs,
+            available,
+          }),
+        );
       },
       Effect.catch((error) =>
         Effect.logWarning("Could not read the waiting items for a turn", error).pipe(Effect.as("")),
@@ -988,11 +1000,27 @@ export const layer: Layer.Layer<
       });
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
-      const projectInput = (input: typeof message) =>
-        projectComposerContextForProvider({
+      const capabilities = (yield* mcpSessions.read(projection.thread.id))?.capabilities;
+      const available = {
+        questions: capabilities?.has("questions") === true,
+        lists: capabilities?.has("orchestration") === true,
+      };
+      const tracked =
+        Option.isSome(workspaces) &&
+        inputMessages.some(
+          (input) => input.context?.trackedAsk || input.context?.discussAnswers?.length,
+        )
+          ? yield* workspaces.value
+              .recordTrackedMessages(projection.thread.id, inputMessages, true)
+              .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })))
+          : [];
+      const projectInput = (input: typeof message) => {
+        const text = projectComposerContextForProvider({
           text: input.text,
           records: input.context?.records ?? [],
         });
+        return available.questions ? withTrackedAnswerContext(text, input, tracked) : text;
+      };
       const renderInput = (text: string) =>
         inputMessages.length > 1
           ? text
@@ -1054,11 +1082,6 @@ export const layer: Layer.Layer<
         message.role === "user" &&
         message.createdBy === "user" &&
         (message.origin?.kind ?? "user") === "user";
-      const capabilities = (yield* mcpSessions.read(projection.thread.id))?.capabilities;
-      const available = {
-        questions: capabilities?.has("questions") === true,
-        lists: capabilities?.has("orchestration") === true,
-      };
       const waitingContext =
         available.questions || available.lists
           ? yield* readWaitingContext(
@@ -1066,6 +1089,7 @@ export const layer: Layer.Layer<
               inputMessages.some(fromUser),
               projection.previousUserMessageAt,
               available,
+              new Set(inputMessages.map((message) => message.id)),
             )
           : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(

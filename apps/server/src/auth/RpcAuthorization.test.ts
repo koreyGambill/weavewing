@@ -66,6 +66,8 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.threadArtifactAnswer,
       WS_METHODS.threadArtifactSubmit,
       WS_METHODS.threadQuestionUpdate,
+      WS_METHODS.threadTrackMessage,
+      WS_METHODS.threadUpdateAsk,
       WS_METHODS.threadQuestionDraft,
       WS_METHODS.threadMarksAnnotate,
       WS_METHODS.reviewsCreate,

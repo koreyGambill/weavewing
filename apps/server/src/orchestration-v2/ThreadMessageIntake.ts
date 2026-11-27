@@ -4,9 +4,12 @@ import type {
   ChatAttachment,
   OrchestrationMessageContext,
   OrchestrationV2Command,
+  OrchestrationV2ConversationMessage,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -137,6 +140,21 @@ const markDiscussed = Effect.fn("ThreadMessageIntake.markDiscussed")(function* (
   }
 });
 
+const recordTrackedMessages = Effect.fn("ThreadMessageIntake.recordTrackedMessages")(function* (
+  threadId: ThreadId,
+  messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
+) {
+  if (
+    !messages.some(
+      (message) => message.context?.trackedAsk || message.context?.discussAnswers?.length,
+    )
+  )
+    return;
+  const workspace = yield* Effect.serviceOption(ThreadWorkspace);
+  if (Option.isSome(workspace))
+    yield* workspace.value.recordTrackedMessages(threadId, messages, false);
+});
+
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
   incoming: OrchestrationV2Command,
 ) {
@@ -260,6 +278,23 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
       Effect.tap(() =>
         command.type === "message.dispatch" ? markDiscussed(command) : Effect.void,
       ),
+      Effect.tap((result) =>
+        recordTrackedMessages(
+          command.threadId,
+          result.storedEvents.flatMap(({ event }) =>
+            event.type === "message.updated" ? [event.payload] : [],
+          ),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new Orchestrator.OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+                cause,
+              }),
+          ),
+        ),
+      ),
       Effect.tapError((error) =>
         dispatchWasNotAccepted(error)
           ? AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths)
@@ -379,9 +414,22 @@ const launchInEnvironment = Effect.fnUntraced(function* (
 // The caller's ThreadMessageIntake.launchThread span already covers this.
 const launchResolved = Effect.fnUntraced(function* (input: ThreadLaunch.ThreadLaunchInput) {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
+  const record = (result: ThreadLaunch.ThreadLaunchResult) =>
+    recordTrackedMessages(result.projection.thread.id, result.projection.messages).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ThreadLaunch.ThreadLaunchError({
+            operation: "dispatch-message",
+            commandId: input.commandId,
+            projectId: input.projectId,
+            threadId: result.projection.thread.id,
+            cause,
+          }),
+      ),
+    );
   yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage?.attachments ?? []);
   if (!input.initialMessage?.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
-    return yield* launches.launch(input);
+    return yield* launches.launch(input).pipe(Effect.tap(record));
   }
   if (input.threadId === undefined) {
     return yield* new AttachmentClaims.AttachmentClaimError({
@@ -410,6 +458,7 @@ const launchResolved = Effect.fnUntraced(function* (input: ThreadLaunch.ThreadLa
       },
     })
     .pipe(
+      Effect.tap(record),
       Effect.tap((result) =>
         releaseUnusedClaims(
           claimed.claimedPaths,

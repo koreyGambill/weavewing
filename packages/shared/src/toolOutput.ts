@@ -27,6 +27,7 @@ const MAX_METADATA_BYTES = 8_192;
 const MAX_ID_LENGTH = 256;
 const MAX_THREADS = 100;
 const QUESTION_ASK_TOOL_NAME = "question_ask";
+const TRACKED_ANSWER_TOOL = /^(?:(?:mcp__)?t3[-_]?code(?:[-_]direct)?(?:__|[.:/_]))?answer_give$/i;
 // Review tools have no presentation entry, so the T3 server prefix is matched here.
 const EVIDENCE_RECORD_TOOL =
   /^(?:(?:mcp__)?t3[-_]?code(?:[-_]direct)?(?:__|[.:/_]))?evidence_record$/i;
@@ -72,6 +73,7 @@ interface CompactToolOutput {
   sentMessage?: string;
   /** The ids `question_ask` assigned, so clients place each question's card at the call. */
   questionIds?: string[];
+  trackedAnswer?: { id: string; n: number };
   /** The landing `evidence_record` stored, so clients place its QA cards at the call. */
   landingId?: string;
   /** The user tasks a `list_update` or `list_rewrite` call filed, so clients place their cards. */
@@ -288,6 +290,19 @@ export function compactDynamicToolOutput(
     ) {
       output.questionIds = questionIds;
     }
+    if (toolName != null && TRACKED_ANSWER_TOOL.test(toolName)) {
+      const ref = Predicate.isObject(data.trackedAnswer)
+        ? data.trackedAnswer
+        : { id: data.id, n: data.answer };
+      if (
+        typeof ref.id === "string" &&
+        /^A[1-9]\d{0,30}$/.test(ref.id) &&
+        typeof ref.n === "number" &&
+        Number.isSafeInteger(ref.n) &&
+        ref.n > 0
+      )
+        output.trackedAnswer = { id: ref.id, n: ref.n };
+    }
     // The list write files at most this many; an older or larger result keeps its first cards.
     const filedTasks = Array.isArray(data.filedTasks)
       ? data.filedTasks
@@ -400,6 +415,21 @@ export function questionIdsFromToolItem(item: {
   if (resolveT3McpToolId(item.toolName) !== QUESTION_ASK_TOOL_NAME) return [];
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? [] : (output?.questionIds ?? []);
+}
+
+export function trackedAnswerFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly status: string;
+  readonly output?: unknown;
+}): { readonly id: string; readonly n: number } | undefined {
+  if (
+    item.status !== "completed" ||
+    item.toolName == null ||
+    !TRACKED_ANSWER_TOOL.test(item.toolName)
+  )
+    return undefined;
+  const output = compactDynamicToolOutput(item.output, item.toolName);
+  return output?.isError ? undefined : output?.trackedAnswer;
 }
 
 /** The user tasks a list write filed; empty when it failed, filed none or is another tool. */

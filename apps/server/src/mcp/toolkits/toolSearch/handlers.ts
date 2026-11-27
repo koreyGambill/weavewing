@@ -22,7 +22,7 @@ export const layer = McpToolAccess.toLayer(ToolSearchToolkit, {
           thread.providerSessionId,
           query,
           new Set([
-            ...(capabilities.has("questions") ? [] : QUESTION_TOOL_NAMES),
+            ...(capabilities.has("questions") ? [] : [...QUESTION_TOOL_NAMES, "answer_give"]),
             ...(capabilities.has("context-rewind") ? [] : CONTEXT_REWIND_TOOL_NAMES),
             ...(capabilities.has("context-rewind-turn") ? [] : CONTEXT_REWIND_TURN_TOOL_NAMES),
           ]),

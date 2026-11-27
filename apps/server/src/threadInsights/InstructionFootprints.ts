@@ -14,6 +14,7 @@ import {
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS,
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+  T3_CODE_TRACKED_ANSWER_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { PULL_REQUEST_LINKING_INSTRUCTIONS } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as Context from "effect/Context";
@@ -100,6 +101,11 @@ const knownParts = [
   },
   { key: "t3:devices", label: "Device tools", text: T3_CODE_DEVICE_TOOL_INSTRUCTIONS },
   { key: "t3:questions", label: "Thread questions", text: T3_CODE_QUESTION_TOOL_INSTRUCTIONS },
+  {
+    key: "t3:tracked-answers",
+    label: "Tracked answers",
+    text: T3_CODE_TRACKED_ANSWER_INSTRUCTIONS,
+  },
   {
     key: "t3:pull-requests",
     label: "Pull request links and watches",

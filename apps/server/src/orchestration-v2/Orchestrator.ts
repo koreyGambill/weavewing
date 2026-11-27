@@ -88,6 +88,7 @@ import {
   threadToolOverridesNotice,
   sameWaitingCounts,
   sameWaitingItems,
+  sameWaitingAnswers,
   waitingMirror,
   waitingTotal,
   XwingEnvironmentId,
@@ -4718,13 +4719,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
         ),
       );
-    const { waiting, waitingCounts } = waitingMirror(command.items);
+    const { waiting, waitingCounts, waitingAnswers } = waitingMirror(
+      command.items,
+      command.answers,
+    );
     if (
       thread.deletedAt !== null ||
-      (thread.waiting === undefined
-        ? waiting.length === 0
-        : sameWaitingItems(thread.waiting, waiting) &&
-          sameWaitingCounts(thread.waitingCounts, waitingCounts))
+      (thread.trackedAnswersRevision === command.answersRevision &&
+        (thread.waiting === undefined
+          ? waiting.length === 0 && waitingAnswers === undefined
+          : sameWaitingItems(thread.waiting, waiting) &&
+            sameWaitingCounts(thread.waitingCounts, waitingCounts) &&
+            sameWaitingAnswers(thread.waitingAnswers ?? [], waitingAnswers ?? [])))
     )
       return;
     yield* emit(
@@ -4737,7 +4743,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: command.threadId,
       providerInstanceId: thread.providerInstanceId,
       occurredAt: yield* DateTime.now,
-      payload: { ...thread, waiting: [...waiting], waitingCounts },
+      payload: {
+        ...thread,
+        waiting: [...waiting],
+        waitingCounts,
+        ...(waitingAnswers !== undefined || thread.waitingAnswers !== undefined
+          ? { waitingAnswers: waitingAnswers ?? [] }
+          : {}),
+        ...(command.answersRevision === undefined
+          ? {}
+          : { trackedAnswersRevision: command.answersRevision }),
+      },
     });
   });
 

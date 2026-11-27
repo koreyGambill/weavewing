@@ -98,6 +98,8 @@ import * as ContextRewindHandlers from "./toolkits/contextRewind/handlers.ts";
 import { ContextRewindToolkit, ContextRewindTurnToolkit } from "./toolkits/contextRewind/tools.ts";
 import * as QuestionHandlers from "./toolkits/questions/handlers.ts";
 import { QuestionToolkit } from "./toolkits/questions/tools.ts";
+import * as AnswerHandlers from "./toolkits/answers/handlers.ts";
+import { AnswerToolkit } from "./toolkits/answers/tools.ts";
 import * as ReviewHandlers from "./toolkits/reviews/handlers.ts";
 import { ReviewToolkit } from "./toolkits/reviews/tools.ts";
 import { MCP_HTTP_PATH } from "../httpCors.ts";
@@ -1317,6 +1319,10 @@ export const layerQuestionToolkit = toolkitRegistration(
   QuestionHandlers.layer,
 ).pipe(Layer.provide(questionToolsVisible.layer));
 
+const layerAnswerToolkit = toolkitRegistration(AnswerToolkit, AnswerHandlers.layer).pipe(
+  Layer.provide(questionToolsVisible.layer),
+);
+
 // Untraced: it runs on every list request.
 const contextRewindVisible = McpServer.visibility(
   Effect.fnUntraced(function* () {
@@ -1448,6 +1454,7 @@ export const layerTools = Layer.mergeAll(
   layerHtmlToolkit,
   layerReviewToolkit,
   layerQuestionToolkit,
+  layerAnswerToolkit,
   layerContextRewindToolkit,
   layerContextRewindTurnToolkit,
   layerMessageToolkit,

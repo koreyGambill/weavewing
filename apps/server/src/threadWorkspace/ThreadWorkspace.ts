@@ -16,6 +16,19 @@ import {
   threadQuestionTitle,
   questionWaitingItems,
   taskWaitingItems,
+  TrackedAnswerText,
+  TrackedAnswerMore,
+  trackedQuestionLabel,
+  type RunId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2ThreadStreamItem,
+  type TrackedAsk,
+  type TrackedAnswer,
+  type TrackedAnswerWaitingRow,
+  type TrackedAnswersPage,
+  type TrackedAnswersReadInput,
+  type ThreadTrackMessageInput,
+  type ThreadUpdateAskInput,
   type ArtifactAnswerContextRecord,
   type WaitingItemSummary,
   type ThreadQuestion,
@@ -71,6 +84,14 @@ import {
 } from "./questionDelivery.ts";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import {
+  addTrackedAsk,
+  appendTrackedAnswer,
+  invalidAsk,
+  missingAsk,
+  rollBackTrackedAsk,
+  updateTrackedAsk,
+} from "./trackedAsks.ts";
 
 export class ThreadWorkspace extends Context.Service<
   ThreadWorkspace,
@@ -78,6 +99,27 @@ export class ThreadWorkspace extends Context.Service<
     readonly get: (
       input: ThreadWorkspaceGetInput,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+    readonly trackMessage: (
+      input: ThreadTrackMessageInput,
+    ) => Effect.Effect<TrackedAsk, ThreadWorkspaceError>;
+    readonly updateAsk: (
+      input: ThreadUpdateAskInput,
+    ) => Effect.Effect<TrackedAsk, ThreadWorkspaceError>;
+    readonly asksRead: (
+      input: TrackedAnswersReadInput,
+    ) => Effect.Effect<TrackedAnswersPage, ThreadWorkspaceError>;
+    readonly answerAsk: (input: {
+      readonly threadId: ThreadId;
+      readonly id: string;
+      readonly text: string;
+      readonly more?: string;
+      readonly runId?: RunId | null;
+    }) => Effect.Effect<TrackedAnswer, ThreadWorkspaceError>;
+    readonly recordTrackedMessages: (
+      threadId: ThreadId,
+      messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
+      delivered: boolean,
+    ) => Effect.Effect<ReadonlyArray<TrackedAsk>, ThreadWorkspaceError>;
     readonly listRead: (
       input: ThreadListReadInput,
     ) => Effect.Effect<ReadonlyArray<ThreadListEntry>, ThreadWorkspaceError>;
@@ -131,14 +173,24 @@ export class ThreadWorkspace extends Context.Service<
      * The thread's questions and user tasks as waiting items: every waiting one, plus questions
      * the user withdrew. Repairs answer delivery first and numbers tasks that have no ref yet.
      */
-    readonly waitingItems: (
+    readonly waitingItems: (threadId: ThreadId) => Effect.Effect<
+      {
+        readonly items: ReadonlyArray<WaitingItemSummary>;
+        readonly answers?: ReadonlyArray<TrackedAnswerWaitingRow>;
+        readonly answersRevision?: number;
+      },
+      ThreadWorkspaceError
+    >;
+    readonly withTrackedAnswers: <E, R>(
       threadId: ThreadId,
-    ) => Effect.Effect<ReadonlyArray<WaitingItemSummary>, ThreadWorkspaceError>;
+      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+    ) => Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>;
     /** The thread's questions and user tasks, for the lines ahead of an agent's turn. */
     readonly waitingWork: (threadId: ThreadId) => Effect.Effect<
       {
         readonly questions: ReadonlyArray<ThreadQuestion>;
         readonly tasks: ReadonlyArray<ListItem>;
+        readonly asks?: ReadonlyArray<TrackedAsk>;
       },
       ThreadWorkspaceError
     >;
@@ -197,6 +249,9 @@ export const emptyWorkspace = (threadId: ThreadId): Workspace => ({
   updatedAt: null,
 });
 const invalid = (message: string) => new ThreadWorkspaceError({ code: "invalid", message });
+const isTrackedAnswerText = Schema.is(TrackedAnswerText);
+const isTrackedAnswerMore = Schema.is(TrackedAnswerMore);
+const isWorkspaceError = Schema.is(ThreadWorkspaceError);
 const TOO_MANY_FILED = `File at most ${LIST_FILED_TASKS_LIMIT} tasks for the user in one list write; split the rest into another call.`;
 /** How many items a write makes the user's tasks, by creating them or handing them over. */
 const filedCount = (
@@ -757,6 +812,7 @@ const make = Effect.gen(function* () {
     workspace: Schema.Struct({
       threadId: ThreadId,
       questions: Schema.optional(Schema.Array(Schema.Unknown)),
+      asksRevision: Schema.optional(Schema.Number),
       items: Schema.optional(
         Schema.Array(Schema.Struct({ owner: Schema.optional(Schema.String) })),
       ),
@@ -772,7 +828,11 @@ const make = Effect.gen(function* () {
       ),
       Effect.mapError(storage),
     );
-    const stored: Array<{ readonly threadId: ThreadId; readonly hasWaitingSources: boolean }> = [];
+    const stored: Array<{
+      readonly threadId: ThreadId;
+      readonly hasWaitingSources: boolean;
+      readonly hasAsks: boolean;
+    }> = [];
     for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
       const value = yield* fs.readFileString(path.join(directory, file)).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(StoredWorkspace))),
@@ -792,9 +852,11 @@ const make = Effect.gen(function* () {
       if (value === undefined) continue;
       stored.push({
         threadId: value.workspace.threadId,
+        hasAsks: value.workspace.asksRevision !== undefined,
         // Questions are never deleted, and a user task stays in the list once done.
         hasWaitingSources:
           (value.workspace.questions?.length ?? 0) > 0 ||
+          value.workspace.asksRevision !== undefined ||
           (value.workspace.items ?? []).some((item) => item.owner === "you"),
       });
     }
@@ -803,8 +865,245 @@ const make = Effect.gen(function* () {
   const get = Effect.fn("ThreadWorkspace.get")(function* (input: ThreadWorkspaceGetInput) {
     return yield* enrich(yield* read(input.threadId, "drafts"));
   }, lock.withPermit);
+  const saveAsks = Effect.fn("ThreadWorkspace.saveAsks")(function* (
+    current: Workspace,
+    next: Workspace,
+  ) {
+    const now = DateTime.formatIso(yield* DateTime.now);
+    yield* write({
+      ...next,
+      revision: current.revision + 1,
+      asksRevision: (current.asksRevision ?? 0) + 1,
+      updatedAt: now,
+    });
+  });
+  const saveAsk = Effect.fn("ThreadWorkspace.saveAsk")(function* (
+    current: Workspace,
+    next: TrackedAsk,
+  ) {
+    yield* saveAsks(current, {
+      ...current,
+      asks: (current.asks ?? []).map((ask) => (ask.id === next.id ? next : ask)),
+    });
+    return next;
+  });
+  const recordTrackedMessages = Effect.fn("ThreadWorkspace.recordTrackedMessages")(function* (
+    threadId: ThreadId,
+    messages: ReadonlyArray<OrchestrationV2ConversationMessage>,
+    delivered: boolean,
+  ) {
+    const userMessages = messages.filter(
+      (message) =>
+        message.threadId === threadId &&
+        message.role === "user" &&
+        message.createdBy === "user" &&
+        (message.origin?.kind ?? "user") === "user" &&
+        message.context?.guest === undefined &&
+        (message.context?.trackedAsk !== undefined || message.context?.discussAnswers?.length),
+    );
+    if (userMessages.length === 0) return [];
+    const current = yield* load(threadId);
+    const next = { ...current };
+    let changed = false;
+    for (const message of userMessages) {
+      const tracking = message.context?.trackedAsk;
+      const discussedIds = message.context?.discussAnswers;
+      const at = DateTime.formatIso(message.createdAt);
+      if (discussedIds?.length) {
+        const asks = (next.asks ?? []).map((ask): TrackedAsk => {
+          if (
+            !discussedIds.includes(ask.id) ||
+            ask.state !== "answered" ||
+            ask.followUps.some((followUp) => followUp.messageId === message.id)
+          )
+            return ask;
+          return {
+            ...ask,
+            state: "owed",
+            followUps: [...ask.followUps, { messageId: message.id, at }],
+          };
+        });
+        if (asks.some((ask, index) => ask !== next.asks?.[index])) {
+          next.asks = asks;
+          changed = true;
+        }
+      }
+      if (tracking === undefined) continue;
+      const previous = next.asks?.find((ask) => ask.askedInMessageId === message.id);
+      if (previous === undefined) {
+        const added = addTrackedAsk(
+          next,
+          {
+            askedInMessageId: message.id,
+            question: tracking.question,
+            ...(tracking.about === undefined ? {} : { about: tracking.about }),
+            createdAt: at,
+          },
+          delivered ? "owed" : "queued",
+        ).workspace;
+        next.asks = added.asks;
+        next.lastAskRef = added.lastAskRef;
+        changed = true;
+      } else if (previous.state === "queued") {
+        const question =
+          previous.userChangedAt === undefined ? tracking.question : previous.question;
+        if (delivered || question !== previous.question) {
+          next.asks =
+            next.asks?.map((ask) =>
+              ask.id !== previous.id
+                ? ask
+                : { ...ask, question, state: delivered ? "owed" : "queued" },
+            ) ?? [];
+          changed = true;
+        }
+      }
+    }
+    if (changed) yield* saveAsks(current, next);
+    const ids = new Set(userMessages.map((message) => message.id));
+    return (next.asks ?? []).filter(
+      (ask) =>
+        ids.has(ask.askedInMessageId) || ask.followUps.some((entry) => ids.has(entry.messageId)),
+    );
+  }, lock.withPermit);
+  const recordTrackedRunRemoval = Effect.fn("ThreadWorkspace.recordTrackedRunRemoval")(function* (
+    threadId: ThreadId,
+    run: import("@t3tools/contracts").OrchestrationV2Run,
+  ) {
+    if (run.status !== "rolled_back" && (run.status !== "cancelled" || run.mergedIntoRunId)) return;
+    const current = yield* load(threadId);
+    const messages = new Set(run.inputMessageIds ?? [run.userMessageId]);
+    const asks = current.asks ?? [];
+    const next =
+      run.status === "rolled_back"
+        ? asks.map((ask) => rollBackTrackedAsk(ask, messages, run.id))
+        : asks.filter((ask) => ask.state !== "queued" || !messages.has(ask.askedInMessageId));
+    if (next.length !== asks.length || next.some((ask, index) => ask !== asks[index]))
+      yield* saveAsks(current, { ...current, asks: next });
+  }, lock.withPermit);
   return ThreadWorkspace.of({
     get,
+    recordTrackedMessages,
+    asksRead: Effect.fn("ThreadWorkspace.asksRead")(function* (input) {
+      const ids =
+        "all" in input
+          ? (yield* storedWorkspaces("skip"))
+              .filter((stored) => stored.hasAsks)
+              .map((stored) => stored.threadId)
+          : [input.threadId];
+      const entries: Array<TrackedAnswersPage["entries"][number]> = [];
+      for (const threadId of ids) {
+        const thread = yield* requireThread(threadId).pipe(
+          Effect.catchIf(
+            (error) => "all" in input && error.code === "not_found",
+            () => Effect.succeed(null),
+          ),
+        );
+        if (thread === null) continue;
+        const workspace = yield* load(threadId);
+        for (const ask of workspace.asks ?? []) {
+          entries.push({
+            threadId,
+            threadTitle: thread.title,
+            archived: thread.archivedAt !== null,
+            ask,
+          });
+        }
+      }
+      if (!("all" in input)) return { entries };
+      const key = (entry: TrackedAnswersPage["entries"][number]) =>
+        `${entry.ask.createdAt}/${entry.threadId}/${entry.ask.id}`;
+      const cursor = input.cursor;
+      const sorted = entries
+        .filter((entry) => cursor === undefined || key(entry) < cursor)
+        .sort((a, b) => (key(a) < key(b) ? 1 : -1));
+      const page = sorted.slice(0, 50);
+      return {
+        entries: page,
+        ...(sorted.length > page.length ? { cursor: key(page[page.length - 1]!) } : {}),
+      };
+    }, lock.withPermit),
+    trackMessage: Effect.fn("ThreadWorkspace.trackMessage")(function* (input) {
+      const current = yield* read(input.threadId);
+      if (current.asks?.some((ask) => ask.askedInMessageId === input.messageId))
+        return yield* invalidAsk("That message already has a tracked answer.");
+      const records = yield* orchestrator
+        .getThreadRecords(input.threadId, ["messages"], { messageIds: [input.messageId] })
+        .pipe(Effect.mapError(storage));
+      const message = records.messages.find((candidate) => candidate.id === input.messageId);
+      if (message === undefined)
+        return yield* new ThreadWorkspaceError({
+          code: "not_found",
+          message: "Message not found.",
+        });
+      if (
+        message.role !== "user" ||
+        message.createdBy !== "user" ||
+        (message.origin?.kind ?? "user") !== "user" ||
+        message.context?.guest !== undefined
+      )
+        return yield* invalidAsk("You can only track an answer to your own message.");
+      const { ask, workspace } = addTrackedAsk(
+        current,
+        {
+          question: trackedQuestionLabel(message.text),
+          askedInMessageId: message.id,
+          createdAt: DateTime.formatIso(yield* DateTime.now),
+        },
+        "owed",
+      );
+      yield* saveAsks(current, workspace);
+      return ask;
+    }, lock.withPermit),
+    updateAsk: Effect.fn("ThreadWorkspace.updateAsk")(function* (input) {
+      const current = yield* read(input.threadId);
+      const ask = current.asks?.find((candidate) => candidate.id === input.id);
+      if (ask === undefined) return yield* missingAsk(input.id);
+      const next = updateTrackedAsk(ask, input, DateTime.formatIso(yield* DateTime.now));
+      if (isWorkspaceError(next)) return yield* next;
+      return yield* saveAsk(current, next);
+    }, lock.withPermit),
+    answerAsk: Effect.fn("ThreadWorkspace.answerAsk")(function* (input) {
+      if (input.text.length > 4000)
+        return yield* invalidAsk(
+          "Keep the answer under 4000 characters, and pass the rest as more.",
+        );
+      if (!isTrackedAnswerText(input.text)) return yield* invalidAsk("Give a nonempty answer.");
+      if (input.more !== undefined && !isTrackedAnswerMore(input.more))
+        return yield* invalidAsk("Keep the link or path under 2000 characters.");
+      const thread = yield* requireThread(input.threadId);
+      const current = yield* load(input.threadId);
+      const ask = current.asks?.find((candidate) => candidate.id === input.id);
+      if (ask === undefined) {
+        const parent = thread.lineage.parentThreadId;
+        if (thread.lineage.relationshipToParent === "subagent" && parent != null) {
+          const parentWork = yield* load(parent);
+          if (
+            parentWork.asks?.some(
+              (candidate) => candidate.id === input.id && candidate.state === "owed",
+            )
+          )
+            return yield* invalidAsk(
+              `${input.id} belongs to your lead's thread. Put the answer in your result; the lead gives it.`,
+            );
+        }
+        return yield* missingAsk(input.id);
+      }
+      const next = appendTrackedAnswer(ask, {
+        text: input.text,
+        ...(input.more === undefined ? {} : { more: input.more }),
+        answeredAt: DateTime.formatIso(yield* DateTime.now),
+        runId:
+          input.runId === undefined
+            ? ((yield* orchestrator
+                .getThreadRecords(input.threadId, ["runs"])
+                .pipe(Effect.mapError(storage))).runs.findLast((run) => run.status === "running")
+                ?.id ?? null)
+            : input.runId,
+      });
+      if (isWorkspaceError(next)) return yield* next;
+      yield* saveAsk(current, next);
+      return next.answers[next.answers.length - 1]!;
+    }, lock.withPermit),
     update: Effect.fn("ThreadWorkspace.update")(function* (input, caller) {
       const current = yield* read(input.threadId);
       const applied = yield* apply(
@@ -884,7 +1183,11 @@ const make = Effect.gen(function* () {
     }, lock.withPermit),
     waitingWork: Effect.fn("ThreadWorkspace.waitingWork")(function* (threadId) {
       const workspace = yield* read(threadId);
-      return { questions: workspace.questions, tasks: workspace.items.filter(isUserTask) };
+      return {
+        questions: workspace.questions,
+        tasks: workspace.items.filter(isUserTask),
+        asks: workspace.asks ?? [],
+      };
     }, lock.withPermit),
     markDiscussed: Effect.fn("ThreadWorkspace.markDiscussed")(function* (input) {
       const current = yield* load(input.threadId);
@@ -1285,15 +1588,75 @@ const make = Effect.gen(function* () {
         const workspace = yield* read(threadId, "drafts");
         const refs = withTaskRefs(workspace);
         const numbered = refs === workspace ? workspace : yield* write(refs);
-        return [...questionWaitingItems(numbered), ...taskWaitingItems(numbered)];
+        const items = [...questionWaitingItems(numbered), ...taskWaitingItems(numbered)];
+        if (workspace.asksRevision === undefined) return { items };
+        const answers = (workspace.asks ?? []).flatMap((ask): TrackedAnswerWaitingRow[] =>
+          ask.state === "closed" || ask.state === "withdrawn"
+            ? []
+            : [{ ref: ask.id, title: threadQuestionTitle(ask.question), state: ask.state }],
+        );
+        return { items, answers, answersRevision: workspace.asksRevision };
       },
       lock.withPermit,
       // A deleted thread waits on nobody.
       Effect.catchIf(
         (error) => error.code === "not_found",
-        () => Effect.succeed([]),
+        () => Effect.succeed({ items: [] }),
       ),
     ),
+    withTrackedAnswers: (threadId, stream) =>
+      Stream.suspend(() => {
+        let sawSnapshot = false;
+        let revision: number | undefined;
+        const readAsks = load(threadId).pipe(
+          lock.withPermit,
+          Effect.map((workspace) => workspace.asks),
+          Effect.catch((error) =>
+            Effect.logWarning("Could not read tracked answers.", { threadId, error }).pipe(
+              Effect.as(undefined),
+            ),
+          ),
+        );
+        return stream.pipe(
+          Stream.mapEffect(
+            Effect.fnUntraced(function* (item) {
+              if (item.kind === "snapshot") {
+                sawSnapshot = true;
+                revision = item.projection.thread.trackedAnswersRevision;
+                const trackedAsks = yield* readAsks;
+                return trackedAsks === undefined
+                  ? item
+                  : {
+                      ...item,
+                      projection: {
+                        ...item.projection,
+                        thread: { ...item.projection.thread, trackedAsks },
+                      },
+                    };
+              }
+              if (item.kind === "synchronized" && !sawSnapshot) {
+                const trackedAsks = yield* readAsks;
+                return trackedAsks === undefined ? item : { ...item, trackedAsks };
+              }
+              if (
+                item.kind === "event" &&
+                item.event.type === "thread.tags-updated" &&
+                item.event.payload.trackedAnswersRevision !== revision
+              ) {
+                revision = item.event.payload.trackedAnswersRevision;
+                const trackedAsks = yield* readAsks;
+                return trackedAsks === undefined
+                  ? item
+                  : {
+                      ...item,
+                      event: { ...item.event, payload: { ...item.event.payload, trackedAsks } },
+                    };
+              }
+              return item;
+            }),
+          ),
+        );
+      }),
     waitingThreads: storedWorkspaces("skip").pipe(
       Effect.map((stored) =>
         stored.filter((entry) => entry.hasWaitingSources).map((entry) => entry.threadId),
@@ -1305,9 +1668,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         if (event.type === "message.updated") {
           if (event.payload.role !== "user") return;
+          if (event.payload.context?.trackedAsk || event.payload.context?.discussAnswers?.length)
+            yield* recordTrackedMessages(event.threadId, [event.payload], false);
           // A provider's acceptance can arrive alone, as its turn record, and it is what clears
           // a sent comment's note and closes a sent answer.
-        } else if (event.type !== "run.updated" && event.type !== "provider-turn.updated") return;
+        } else if (event.type === "run.updated") {
+          yield* recordTrackedRunRemoval(event.threadId, event.payload);
+        } else if (event.type !== "provider-turn.updated") return;
         const carriesAnswer =
           event.type === "message.updated" &&
           (event.payload.context?.records.some(

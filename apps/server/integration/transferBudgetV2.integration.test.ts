@@ -122,6 +122,7 @@ const CLIENT_THREAD_SUBSCRIPTION = {
   acceptCompactTurnItems: true,
   acceptCompactIds: true,
   acceptDedupedBodies: true,
+  acceptTrackedAnswers: false,
 } satisfies Required<Omit<OrchestrationV2SubscribeThreadInput, "threadId" | "afterSequence">>;
 type ShellResumeField = "afterSequence" | "httpSnapshotFallback" | "knownProjectIdentities";
 const CLIENT_SHELL_SUBSCRIPTION = {
