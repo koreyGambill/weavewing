@@ -212,7 +212,7 @@ for the security model.
 
 ## Checks
 
-`vp run check:changed` runs CI's fast checks for your branch's changes: format and lint of the
+`xwing app test` runs CI's fast checks for your branch's changes: format and lint of the
 changed files, `knip:check` when code or a manifest changes, the generated GraphQL checks, typecheck
 of the affected packages and their dependents, and the test files beside the changed files. It also
 runs the checks that read other files: the agent context budget when the server is affected, and
@@ -225,12 +225,16 @@ local pass does not promise a green full CI run.
 
 Sparkwing pipelines in `.sparkwing/` run these checks under the machine's admission control, so
 checks started from several checkouts queue instead of overloading the machine.
-`sparkwing run gate -C <main checkout> -- --worktree <checkout>` runs `check:changed` and returns
-the recorded pass when a checkout with identical content already passed through the same `-C`. Its
-key does not read installed package files or files under ignored build, cache and state directories
-such as `dist`; run `vp i` after editing inside `node_modules`, and pass `--no-memo` when a check
-reads one of the others.
-`sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web` runs one full suite as CI
+`xwing app test` runs Sparkwing's `test` pipeline, which calls `gate` for changed files. To reuse a
+pass across checkouts, set `WEAVEWING_SPARKWING_CHECKOUT` to the same absolute pipeline checkout in
+both invocations. Sparkwing shares memo records within that checkout and branch. The gate also
+requires matching inputs, including the comparison base, install state and ignored generated files.
+Its key skips installed package files and ignored build, cache and state directories such as `dist`.
+Run `vp i` after editing inside `node_modules`. To bypass memo when a check reads one of those
+directories, use `sparkwing run gate -C <pipeline checkout> --no-memo -- --worktree <checkout>`.
+For an admitted focused test, use `sparkwing run test -- --worktree "$PWD" --files <files>`.
+
+`xwing app run --command suite -- --suite web` runs one full suite as CI
 does (`web`, `server` or `packages`), when someone needs one, and reports every failing file or package.
 `--full` in place of `--suite` runs all three one after another. To run a suite on a clean tree,
 `git clone` the repository and install it with `vp i`, not `xwing app install`, which also links

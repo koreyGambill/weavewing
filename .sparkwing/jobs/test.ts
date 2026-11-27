@@ -4,17 +4,33 @@ import { checkout, checkoutArgs, logged } from "../lib/checkout.ts";
 
 definePipeline({
   name: "Test",
-  short: "vp test run on the named files, two workers, admitted by cores",
+  short: "Run the changed-files gate, or focused tests with --files",
+  help: "Without --files, runs the gate pipeline so both commands reuse the same recorded passes.",
   args: [
     ...checkoutArgs,
     {
       name: "files",
       type: "[]string",
-      required: true,
       description: "Comma-separated test files or directories, relative to the worktree",
     },
+    { name: "ref", type: "string", description: "Compare against the merge base with this ref (gate only)" },
   ],
-  plan(p) {
+  plan(p, run) {
+    if (run.args.files === undefined) {
+      p.job("gate", async (ctx) => {
+        const { worktree, evidence, ref } = ctx.args;
+        const result = await ctx.runPipeline<{ log: string }>("gate", "check-changed", {
+          args: { worktree, ...(evidence ? { evidence } : {}), ...(ref ? { ref } : {}) },
+        });
+        ctx.log.info("Changed-files gate passed", result);
+        return result;
+      })
+        .inline()
+        .cores(0.25)
+        .startsChildren("gate");
+      return;
+    }
+
     p.job("test", async (ctx) => {
       const co = checkout(ctx);
       const files = (ctx.args.files ?? "").split(",").map((file) => file.trim()).filter(Boolean);

@@ -17,13 +17,19 @@ commands:
   build:
     argv: [vp, run, build]
   test:
-    # The main checkout's pipelines run the gate, so every worktree of it shares recorded passes.
     argv:
       - sh
       - -c
-      - exec sparkwing run gate -C "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" -- --worktree "$(git rev-parse --show-toplevel)" "$@"
-      - gate
-    description: CI's fast checks for changed files through the Sparkwing gate; CI runs the full suites
+      - 'exec sparkwing run test -C "${WEAVEWING_SPARKWING_CHECKOUT:-$PWD}" -- --worktree "$PWD" "$@"'
+      - test
+    description: Run the admitted changed-files landing checks
+  suite:
+    argv:
+      - sh
+      - -c
+      - 'exec sparkwing run suite -C "$PWD" -- --worktree "$PWD" "$@"'
+      - suite
+    description: Run an admitted full suite with --suite web, server or packages, or all three with --full
   run:
     argv: [vp, run, dev]
     description: Server and web dev servers with single-origin Vite proxying
