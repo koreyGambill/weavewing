@@ -20,7 +20,7 @@ definePipeline({
       p.job("gate", async (ctx) => {
         const { worktree, evidence, ref } = ctx.args;
         const result = await ctx.runPipeline<{ log: string }>("gate", "check-changed", {
-          args: { worktree, ...(evidence ? { evidence } : {}), ...(ref ? { ref } : {}) },
+          args: { worktree: worktree ?? "", ...(evidence ? { evidence } : {}), ...(ref ? { ref } : {}) },
         });
         ctx.log.info("Changed-files gate passed", result);
         return result;
