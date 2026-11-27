@@ -827,7 +827,7 @@ describe("upstream client wire compatibility", () => {
     }
 
     function http(endpoint: string, enriched: unknown, plain: unknown) {
-      const key = `orchestration.${endpoint}`;
+      const key = `orchestration.${endpoint}` as const;
       expectUpstreamDecode(
         key,
         anyOf(forkEndpoints.get(key)!.success),
