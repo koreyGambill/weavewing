@@ -55,7 +55,6 @@ export function EvidenceNotePreview(props: {
         label="Needs me"
         accessibilityLabel={`Needs me: ${note.title}`}
         accessibilityHint="Shows it as a QA card in its thread."
-        size="compact"
         disabled={!canSet}
         loading={raising}
         onPress={() => void raise()}

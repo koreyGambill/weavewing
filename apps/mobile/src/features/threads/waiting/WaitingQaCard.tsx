@@ -28,7 +28,6 @@ import { evidenceSetQa } from "../../../state/evidence";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import {
   QA_STATUS_LABEL,
-  QA_RAISE_REASON_LABEL,
   qaCapturePreview,
   qaCheckLabel,
   qaDiscussRecord,
@@ -216,11 +215,6 @@ export function WaitingQaCard(props: {
       <Text selectable className="font-sans text-xs text-foreground-secondary">
         {qaLandedLine(landing, change)}
       </Text>
-      {!quiet && qa.raised && qa.raised.length > 0 ? (
-        <Text selectable className="font-sans text-xs text-foreground-secondary">
-          {qa.raised.map((reason) => QA_RAISE_REASON_LABEL[reason]).join(" · ")}
-        </Text>
-      ) : null}
       {fullSummary === null ? null : (
         <Detail label="Summary">
           <Text selectable className={detailText}>

@@ -10,7 +10,6 @@ import {
   EVIDENCE_THREAD_LANDING_LIMIT,
   type EvidenceChangeQa,
   type EvidenceLanding,
-  type EvidenceQaRaiseReason,
   type EvidenceVerification,
   type WaitingItemContextRecord,
 } from "@t3tools/contracts";
@@ -28,17 +27,6 @@ export const QA_STATUS_LABEL: Record<QaCardStatus, string> = {
   recorded: "Recorded by the agent",
   "agent-fixing": "Agent fixing",
   dismissed: "Dismissed",
-};
-
-export const QA_RAISE_REASON_LABEL: Record<EvidenceQaRaiseReason, string> = {
-  legacy: "Previously requested",
-  captures: "Captures to review",
-  review_waived: "Review waived",
-  review_changes_requested: "Review changes requested",
-  check_failed: "Check failed",
-  check_skipped: "Check skipped",
-  gaps: "Gaps to review",
-  needs_you: "Needs you",
 };
 
 /**

@@ -102,6 +102,7 @@ describe("qaHistory", () => {
           change({ id: "dismissed", qa: qa({ state: "waived", by: "user", updatedAt: at(2) }) }),
           change({ id: "open", qa: qa() }),
           change({ id: "quiet", qa: qa({ state: "quiet", raised: [] }) }),
+          change({ id: "legacy", qa: qa({ state: "confirmed", raised: undefined }) }),
           change({ id: "listed", qa: qa({ state: "problem", updatedAt: at(4) }) }),
         ],
       },
