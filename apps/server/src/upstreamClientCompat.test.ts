@@ -1,13 +1,15 @@
 // Decodes upstream clients' requests with the fork's schemas and the fork's mapped responses with
 // upstream's, bundled in upstreamClientCompat.snapshot.js at the commit on its first line. After each
-// upstream merge: `git fetch upstream && vp run upstream-contracts:refresh`, then rerun this file.
+// upstream merge, run the upstream-contracts pipeline against the new revision.
 // The rule, the checks and how to fix a failure: docs/internals/fork-wire-compatibility.md.
 import { describe, expect, it } from "@effect/vitest";
 import {
   ASSISTANT_TEXT_PARTS_CAPABILITY,
   AUTOMATIONS_CLIENT_CAPABILITY,
   EnvironmentHttpApi,
+  EventId,
   MessageId,
+  OrchestrationV2AppThread,
   ORCHESTRATION_V2_WS_METHODS,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ThreadProjection,
@@ -18,6 +20,8 @@ import {
   ExecutionEnvironmentDescriptor,
   PEER_LINK_UNAUTHORIZED_STATUS_CAPABILITY,
   PeerLinkSummary,
+  ProjectId,
+  ProviderInstanceId,
   SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY,
   SCHEDULED_TASK_SKIPPED_STATUS_CAPABILITY,
   ScheduledTask,
@@ -37,7 +41,7 @@ import * as RpcSchema from "effect/rpc/RpcSchema";
 import * as Schema from "effect/Schema";
 import * as AST from "effect/SchemaAST";
 
-import * as PinnedUpstream from "./upstreamClientCompat.snapshot.js";
+import * as Upstream from "./upstreamClientCompat.snapshot.js";
 import type * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import {
   errorForClient,
@@ -48,13 +52,6 @@ import {
   threadHistoryPageForClient,
   type ClientWireCapabilities,
 } from "./upstreamClientCompat.ts";
-
-// A probe bundle from `UPSTREAM_SNAPSHOT=<absolute path> vp run upstream-contracts:refresh <ref>`. It
-// resolves effect from its own directory, so write it under apps/server/node_modules/.cache.
-const Upstream: typeof PinnedUpstream =
-  process.env.UPSTREAM_SNAPSHOT === undefined
-    ? PinnedUpstream
-    : await import(process.env.UPSTREAM_SNAPSHOT);
 
 // Accepted gaps, each asserted to still fail so a fixed one is removed here.
 const KNOWN_GAPS: ReadonlyMap<string, string> = new Map([
@@ -563,6 +560,103 @@ function unexpected(failures: ReadonlyArray<Failure>, names: ReadonlyArray<strin
 }
 
 describe("upstream client wire compatibility", () => {
+  const probe = process.env.UPSTREAM_SNAPSHOT;
+  if (probe !== undefined) {
+    it("exchanges representative mobile payloads with the selected upstream revision", async () => {
+      const {
+        rpcWire,
+      }: {
+        rpcWire: (tag: string, kind: "request" | "success" | "error", value: unknown) => unknown;
+      } = await import(probe);
+      const { subscribeThread } = ORCHESTRATION_V2_WS_METHODS;
+      const threadId = ThreadId.make("thread");
+      const request = { threadId, afterSequence: 7 };
+      const subscription = forkRpcs.get(subscribeThread)!;
+      expect(
+        fromWire(subscription.payloadSchema, rpcWire(subscribeThread, "request", request)),
+      ).toEqual(Exit.succeed(request));
+
+      const asset = { relativeUrl: "/api/assets/token/proof.png", expiresAt: 1_800_000_000_000 };
+      const assetRpc = forkRpcs.get(WS_METHODS.assetsCreateUrl)!;
+      expect(
+        rpcWire(WS_METHODS.assetsCreateUrl, "success", toWire(successOf(assetRpc), asset)),
+      ).toEqual(asset);
+
+      const moved = new TerminalWorkspaceChangedError({
+        threadId,
+        terminalId: "default",
+        worktreePath: "/work/new",
+      });
+      const terminal = forkRpcs.get(WS_METHODS.terminalOpen)!;
+      const mapped = errorForClient[WS_METHODS.terminalOpen](moved, upstreamClient);
+      expect(
+        rpcWire(WS_METHODS.terminalOpen, "error", toWire(errorOf(terminal), mapped)),
+      ).toMatchObject({ _tag: "TerminalCwdStatError", cwd: moved.message });
+
+      const at = DateTime.makeUnsafe("2026-11-27T12:00:00Z");
+      const instanceId = ProviderInstanceId.make("claude");
+      const thread = OrchestrationV2AppThread.make({
+        id: threadId,
+        projectId: ProjectId.make("project"),
+        title: "Review",
+        createdBy: "user",
+        creationSource: "web",
+        providerInstanceId: instanceId,
+        modelSelection: { instanceId, model: "test-model" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdAt: at,
+        updatedAt: at,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+        delegateRole: "review",
+        toolOverrides: {
+          enabledBuiltinTools: ["Task"],
+          claudeAiConnectors: "on",
+          omittedMcpServers: ["github"],
+        },
+      });
+      const stream = (
+        type: "thread.tags-updated" | "thread.tool-overrides-updated",
+        sequence: number,
+      ) =>
+        toWire(
+          successOf(subscription),
+          responseForClient[subscribeThread](
+            {
+              kind: "event",
+              sequence,
+              event: { id: EventId.make("event"), threadId, occurredAt: at, type, payload: thread },
+            },
+            upstreamClient,
+          ),
+        );
+      const known = stream("thread.tags-updated", 8);
+      expect(known).toMatchObject({
+        event: { payload: { delegateRole: "review", toolOverrides: thread.toolOverrides } },
+      });
+      const decoded = rpcWire(subscribeThread, "success", known);
+      expect(decoded).toMatchObject({
+        kind: "event",
+        sequence: 8,
+        event: { type: "thread.tags-updated", payload: { id: threadId, title: "Review" } },
+      });
+      expect(decoded).not.toHaveProperty("event.payload.delegateRole");
+      expect(decoded).not.toHaveProperty("event.payload.toolOverrides");
+      expect(
+        rpcWire(subscribeThread, "success", stream("thread.tool-overrides-updated", 9)),
+      ).toEqual({ kind: "unknown-event", sequence: 9, eventType: "thread.tool-overrides-updated" });
+    });
+  }
+
   it("serves every upstream method", () => {
     const methods = [
       ...upstreamRpcs.keys(),

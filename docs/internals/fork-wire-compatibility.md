@@ -39,8 +39,18 @@ the fork's mapped RPC responses, stream items and errors, and every HTTP endpoin
 upstream's schemas. Each value the fork adds is forced into samples: an enum member in place of a
 sibling, and a new union member, such as a schedule type or an error, sampled whole where its union
 sits. `check:changed` runs it for any change to `packages/contracts/src`, `ws.ts` or
-the compatibility module. After each upstream merge, refresh the bundle with
-`git fetch upstream && vp run upstream-contracts:refresh`, then run the test. To check another
-upstream commit without replacing the pinned bundle, set `UPSTREAM_SNAPSHOT` to a path under
-`apps/server/node_modules/.cache` for both the refresh and the test. Its `KNOWN_GAPS` list
-names accepted exceptions. Each entry is asserted to still fail, so it is removed once fixed.
+the compatibility module. Its `KNOWN_GAPS` list names accepted exceptions. Each entry is asserted to
+still fail, so it is removed once fixed.
+
+Run `sparkwing run upstream-contracts -- --worktree "$PWD" --ref upstream/main` to add a mobile wire
+probe to the pinned sweep. Pass a `mobile-ios-build/production/…` tag to check the contracts in a
+published native build. Production over-the-air updates require a matching runtime fingerprint, so
+the native build and upstream main are useful reference points and the device's loaded update can
+differ from both.
+
+The probe uses Effect from the selected ref's lockfile because the fork and upstream can use
+different Effect versions. It encodes an upstream request for the fork to decode and decodes a
+fork asset URL, a mapped terminal error and two thread stream events. It checks that the upstream
+decoder preserves the known event while dropping fork-only fields and skips the unknown event
+while preserving its sequence. The probe measures these payloads at the schema boundary.
+Use `--write` with a compatible upstream merge base to refresh the pinned sweep's snapshot.
