@@ -62,7 +62,7 @@ definePipeline({
         const tested = await ctx.runPipeline<{ commit: string; tree: string; results: Record<string, string> }>(
           "suite",
           "suite",
-          { branch: `origin/${BRANCH}`, args: { full: "true", evidence: logs } },
+          { branch: `origin/${BRANCH}`, args: { full: "true", install: "true", evidence: logs } },
         );
         ctx.log.info(`origin/${BRANCH} ${tested.commit.slice(0, 10)} passed every suite`, tested.results);
       } catch (error) {

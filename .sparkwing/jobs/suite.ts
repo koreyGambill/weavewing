@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 
 import { type Context, definePipeline, workDir } from "@sparkwing/sdk";
 
-import { type Checkout, checkoutArgs, checkoutAt, git, isCommittedCheckout } from "../lib/checkout.ts";
+import { type Checkout, checkoutArgs, checkoutAt, evidenceDir, git } from "../lib/checkout.ts";
 import {
   everySuite,
   isSuiteName,
@@ -12,21 +12,14 @@ import {
   recordReceipt,
   SUITES,
   type SuiteName,
+  requireFreshEvidence,
+  suiteRoot,
   testedTree,
 } from "../lib/suites.ts";
 
-/**
- * --worktree when given; otherwise this run's own checkout, but only one Sparkwing made for a
- * committed source (a child run on a branch), installed first because it starts empty.
- */
 async function suiteCheckout(ctx: Context): Promise<Checkout> {
-  if (ctx.args.worktree) return checkoutAt(ctx, ctx.args.worktree);
-  const root = workDir();
-  if (!isCommittedCheckout(root))
-    throw new Error(
-      `--worktree is required here: ${root} is not a checkout Sparkwing made for a branch, ` +
-        "and installing into it could change a developer's checkout",
-    );
+  const root = suiteRoot(ctx.args, workDir());
+  if (ctx.args.install !== "true") return checkoutAt(ctx, root);
   const path = [NodePath.join(NodeOS.homedir(), ".vite-plus/bin"), process.env.PATH ?? ""].join(":");
   // A plain install: `xwing app install` would link the main checkout's env files into it.
   await ctx.exec(["vp", "i"], { cwd: root, env: { PATH: path } }).run();
@@ -60,6 +53,7 @@ definePipeline({
     ),
     { name: "suite", type: "string", description: "web, server or packages" },
     { name: "full", type: "bool", description: "Run web, server and packages one after another" },
+    { name: "install", type: "bool", description: "Install and test this Sparkwing branch checkout (confirm-main's child)" },
   ],
   plan(p, run) {
     // Discovery plans without arguments, so an invalid choice fails when the job runs.
@@ -72,6 +66,8 @@ definePipeline({
     p.job("suite", async (ctx) => {
       if (full === Boolean(name)) throw new Error("Pass either --suite web|server|packages or --full");
       if (!full && !suite) throw new Error(`--suite must be web, server or packages, got "${name}"`);
+      // Classification reads only this run's logs, so the directory must start empty.
+      requireFreshEvidence(evidenceDir(ctx));
       const co = await suiteCheckout(ctx);
       const commit = git(co.root, "rev-parse", "HEAD");
       const tree = git(co.root, "rev-parse", "HEAD^{tree}");

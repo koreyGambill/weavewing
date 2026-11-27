@@ -6,7 +6,17 @@ import { test } from "node:test";
 
 import * as CP from "node:child_process";
 
-import { failingTestFiles, parseTaskList, receiptFor, recordReceipt, suiteRan, testedTree, writeReceipt } from "./suites.ts";
+import {
+  failingTestFiles,
+  parseTaskList,
+  receiptFor,
+  recordReceipt,
+  requireFreshEvidence,
+  suiteRan,
+  suiteRoot,
+  testedTree,
+  writeReceipt,
+} from "./suites.ts";
 
 const list = `  typecheck: vp run -r --cache --concurrency-limit 4 typecheck
   @t3tools/contracts#typecheck: effect-tsgo tsrs --noEmit
@@ -93,21 +103,48 @@ test("only a clean checkout has a tested tree", () => {
   }
 });
 
-test("a suite counts as run only when vitest reported test files in every one of its logs", () => {
+test("a suite counts as run only when vitest ran test files in the log of each one selected", () => {
   const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "suite-ran-"));
   const summary = " Test Files  1 failed | 321 passed (322)\n";
   try {
     assert.equal(suiteRan(dir, "web"), false, "no log");
     FS.writeFileSync(Path.join(dir, "test-web.log"), "failed to load config from vite.config.ts\n");
     assert.equal(suiteRan(dir, "web"), false, "crashed before testing");
+    FS.writeFileSync(Path.join(dir, "test-web.log"), " Test Files  0 passed (0)\n");
+    assert.equal(suiteRan(dir, "web"), false, "a summary with no test files");
     FS.writeFileSync(Path.join(dir, "test-web.log"), summary);
     assert.equal(suiteRan(dir, "web"), true, "ran with a failure");
-    assert.equal(suiteRan(dir, "packages"), false, "no package logs");
-    FS.writeFileSync(Path.join(dir, "packages-a.log"), summary);
-    FS.writeFileSync(Path.join(dir, "packages-b.log"), "error: Task \"test\" not found\n");
-    assert.equal(suiteRan(dir, "packages"), false, "one package never started");
-    FS.writeFileSync(Path.join(dir, "packages-b.log"), summary);
-    assert.equal(suiteRan(dir, "packages"), true);
+    FS.writeFileSync(Path.join(dir, "packages--t3tools-a.log"), summary);
+    FS.writeFileSync(Path.join(dir, "packages--t3tools-other.log"), summary);
+    assert.equal(suiteRan(dir, "packages", []), false, "no package selected");
+    assert.equal(suiteRan(dir, "packages", ["@t3tools/a", "@t3tools/b"]), false, "a selected package has no log");
+    assert.equal(suiteRan(dir, "packages", ["@t3tools/a"]), true);
+  } finally {
+    FS.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a suite run refuses an evidence directory an earlier run used", () => {
+  const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "suite-evidence-"));
+  try {
+    requireFreshEvidence(dir);
+    FS.writeFileSync(Path.join(dir, "test-web.log"), " Test Files  3 passed (3)\n");
+    assert.throws(() => requireFreshEvidence(dir), /fresh evidence directory/);
+  } finally {
+    FS.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only --install in a Sparkwing branch checkout installs; otherwise --worktree is tested as it is", () => {
+  const dir = FS.realpathSync(FS.mkdtempSync(Path.join(OS.tmpdir(), "suite-root-")));
+  try {
+    const developer = Path.join(dir, "code/weavewing");
+    FS.mkdirSync(developer, { recursive: true });
+    CP.execFileSync("git", ["-C", developer, "init", "--quiet"]);
+    assert.equal(suiteRoot({ worktree: developer }, developer), developer);
+    assert.throws(() => suiteRoot({}, developer), /Pass --worktree/);
+    assert.throws(() => suiteRoot({ install: "true" }, developer), /--install refused/);
+    assert.throws(() => suiteRoot({ install: "true", worktree: developer }, developer), /cannot take --worktree/);
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
   }

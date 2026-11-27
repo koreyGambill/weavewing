@@ -39,6 +39,9 @@ export function packageTestNames(co: Checkout): string[] {
   return packagesWithTask(co, "test").filter((name) => name !== "t3" && name !== "@t3tools/web");
 }
 
+/** The log name eachPackage writes for one package. */
+export const packageLog = (label: string, name: string) => `${label}-${name.replace(/[^\w.-]+/g, "-")}`;
+
 /**
  * Runs `vp run --filter <name> <script...>` for each package, four at a time, then fails naming
  * every package that failed. One recursive vp run would stop every remaining package after the
@@ -56,7 +59,7 @@ export async function eachPackage(
   const failed: string[] = [];
   const worker = async () => {
     for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
-      const log = `${label}-${name.replace(/[^\w.-]+/g, "-")}`;
+      const log = packageLog(label, name);
       await logged(ctx, co, log, ["vp", "run", "--fail-if-no-match", "--filter", name, ...script]).catch(() => failed.push(name));
     }
   };
@@ -96,17 +99,20 @@ export type SuiteName = keyof typeof SUITES;
 export type SuiteResult = "passed" | "failed" | "not-run";
 
 // Vitest prints this summary only after it has collected and run test files.
-const TEST_FILES_SUMMARY = /^\s*Test Files\s+\d/m;
+const TEST_FILES_SUMMARY = /^\s*Test Files\s.*\((\d+)\)\s*$/m;
 
-/** Whether a suite's logs in dir show that vitest ran test files: every one of its logs has the summary. */
-export function suiteRan(dir: string, suite: SuiteName): boolean {
-  const names = NodeFS.existsSync(dir) ? NodeFS.readdirSync(dir) : [];
-  const logs = suite === "packages" ? names.filter((name) => /^packages-.+\.log$/.test(name)) : [`test-${suite}.log`];
+/**
+ * Whether vitest ran at least one test file in each of a suite's logs in dir: the web or server
+ * log, or the log of every named package. dir must hold only this run's logs.
+ */
+export function suiteRan(dir: string, suite: SuiteName, packages: readonly string[] = []): boolean {
+  const logs = suite === "packages" ? packages.map((name) => `${packageLog("packages", name)}.log`) : [`test-${suite}.log`];
   return (
     logs.length > 0 &&
     logs.every((log) => {
       const path = NodePath.join(dir, log);
-      return NodeFS.existsSync(path) && TEST_FILES_SUMMARY.test(NodeFS.readFileSync(path, "utf8"));
+      const total = NodeFS.existsSync(path) && TEST_FILES_SUMMARY.exec(NodeFS.readFileSync(path, "utf8"))?.[1];
+      return Number(total) > 0;
     })
   );
 }
@@ -121,7 +127,8 @@ export async function everySuite(ctx: Context, co: Checkout): Promise<Record<Sui
         return false;
       },
     );
-    results[name] = !suiteRan(co.evidence, name) ? "not-run" : passed ? "passed" : "failed";
+    const packages = name === "packages" ? packageTestNames(co) : [];
+    results[name] = !suiteRan(co.evidence, name, packages) ? "not-run" : passed ? "passed" : "failed";
   }
   return results;
 }
@@ -213,4 +220,25 @@ export function failingTestFiles(dir: string): Array<{ readonly log: string; rea
       found.set(`${log}\0${file}`, { log, file: file! });
   }
   return [...found.values()];
+}
+
+/**
+ * The checkout to test: --worktree as it is, or with --install this run's own checkout, which must
+ * be one Sparkwing made for a branch. Nothing else is ever installed into.
+ */
+export function suiteRoot(args: { worktree?: string; install?: string }, own: string): string {
+  if (args.install !== "true") {
+    if (!args.worktree) throw new Error("Pass --worktree <checkout>, or --install in a Sparkwing branch checkout");
+    return args.worktree;
+  }
+  if (args.worktree) throw new Error("--install tests this run's own checkout, so it cannot take --worktree");
+  if (!isCommittedCheckout(own))
+    throw new Error(`--install refused: ${own} is not a checkout Sparkwing made for a branch`);
+  return own;
+}
+
+/** Refuses an evidence directory that already holds files, so results come from this run's logs only. */
+export function requireFreshEvidence(dir: string): void {
+  if (NodeFS.readdirSync(dir).length > 0)
+    throw new Error(`${dir} already holds files; each suite run needs a fresh evidence directory`);
 }
