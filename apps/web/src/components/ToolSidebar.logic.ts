@@ -96,8 +96,8 @@ export interface SideAreaContext {
 export type SideAreaAction =
   | { type: "toggle" }
   /**
-   * Opens on `view`. With `thread`, the request is about that thread: `lock` holds the view on it,
-   * and otherwise a lock on another thread is released so the view follows the selection.
+   * Opens on `view`. A request with `thread` follows that thread when it is already selected
+   * and locks the panel to it otherwise.
    */
   | {
       type: "show";

@@ -159,9 +159,9 @@ red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
 Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.
 **Open inbox** in the command palette, a notification's **Open inbox** button
-and a desktop notification open it in the side panel, so the thread list stays in
-view; on a phone they open the sidebar's Inbox. Critical notifications also send a desktop notification and play a sound, and
-warnings do when Weavewing is in the background,
+and a desktop notification open it in the side panel at every window width.
+Critical notifications also send a desktop notification and play a sound.
+Warnings do when Weavewing is in the background,
 following your settings under **Settings → General → Notifications**.
 
 Open **Status** in the side panel to check your status sources. Its alert dot
