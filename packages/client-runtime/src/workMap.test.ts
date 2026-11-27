@@ -618,6 +618,28 @@ describe("deriveWorkMap edge cases", () => {
     ]);
   });
 
+  it("credits no hold to a cached question on an unreachable reviewer of a blocked change", () => {
+    const map = deriveWorkMap({
+      now: NOW,
+      environments,
+      threads: [
+        thread({ id: "release-lead", waitsOnThreads: true }),
+        implementer("change", { status: "waiting", questions: 1, updatedMin: 10 }),
+        thread({
+          id: "mac-review",
+          env: MAC,
+          parent: "release-lead",
+          parentEnv: PC,
+          role: "review",
+          branch: "change",
+          status: "waiting",
+          questions: 2,
+        }),
+      ],
+    });
+    expect(map.waitingOnYou.map((entry) => [entry.title, entry.holds])).toEqual([["change", 1]]);
+  });
+
   it("does not call a top-level thread's unawaited command silent", () => {
     const map = deriveWorkMap({
       now: NOW,
