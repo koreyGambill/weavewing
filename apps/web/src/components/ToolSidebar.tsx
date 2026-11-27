@@ -34,7 +34,7 @@ import {
 } from "../toolSidebarStore";
 import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
 import {
-  VIEW_DEFINITIONS,
+  PANEL_VIEW_DEFINITIONS,
   viewDefinition,
   type ViewDefinition,
   type ViewSlots,
@@ -649,8 +649,14 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
   const [open, setOpen] = useState(false);
   const Icon = definition.icon;
   const groups = [
-    { label: "This thread", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread") },
-    { label: "Everywhere", views: VIEW_DEFINITIONS.filter((entry) => entry.scope === "global") },
+    {
+      label: "This thread",
+      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "thread"),
+    },
+    {
+      label: "Everywhere",
+      views: PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === "global"),
+    },
   ];
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -675,7 +681,7 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
         <MenuRadioGroup
           value={definition.id}
           onValueChange={(value) => {
-            const next = VIEW_DEFINITIONS.find((entry) => entry.id === value);
+            const next = PANEL_VIEW_DEFINITIONS.find((entry) => entry.id === value);
             if (next) useToolSidebarStore.getState().dispatch({ type: "show", view: next.id });
           }}
         >

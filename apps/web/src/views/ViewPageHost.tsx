@@ -18,16 +18,23 @@ import { WorkspaceTitlebarControls } from "../components/WorkspaceTitlebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { isElectron } from "../env";
 import { observeResize } from "../lib/observeResize";
+import { VIEW_IDS } from "../components/ToolSidebar.logic";
 import { holdSideAreaThroughRoute, useToolSidebarStore } from "../toolSidebarStore";
 import { resolveHostedViewLayout, resolveViewPage } from "./viewPage.logic";
 import {
   VIEW_DEFINITIONS,
+  type RegisteredViewId,
   type ViewDefinition,
+  type ViewId,
   type ViewHost,
   type ViewLayout,
   type ViewSlots,
   type ViewTarget,
 } from "./viewRegistry";
+
+function isSideAreaViewId(id: RegisteredViewId): id is ViewId {
+  return VIEW_IDS.some((entry) => entry === id);
+}
 
 const GLOBAL_TARGET: ViewTarget = { threadRef: null, draft: null };
 
@@ -185,6 +192,7 @@ function ViewPageBody({
   useEffect(() => () => void window.setTimeout(() => holdSideAreaThroughRoute(false), 0), []);
 
   const openInSidePanel = () => {
+    if (!isSideAreaViewId(definition.id)) return;
     useToolSidebarStore.getState().dispatch({ type: "show", view: definition.id });
     holdSideAreaThroughRoute(true);
     goBack();

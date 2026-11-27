@@ -1,4 +1,21 @@
-import type { ViewDefinition, ViewLayout } from "./viewRegistry";
+import type { ViewDefinition, ViewHost, ViewLayout } from "./viewRegistry";
+
+/** The hosts that render a view's body, from its `hosts` or else the default for its page. */
+export function viewHosts(
+  definition: Pick<ViewDefinition, "hosts" | "page">,
+): ReadonlyArray<ViewHost> {
+  return (
+    definition.hosts ??
+    (definition.page === "/view/$viewId" ? ["panel", "tile", "page"] : ["panel", "tile"])
+  );
+}
+
+export function viewSupportsHost(
+  definition: Pick<ViewDefinition, "hosts" | "page">,
+  host: ViewHost,
+): boolean {
+  return viewHosts(definition).includes(host);
+}
 
 export type ViewPageResolution =
   | { readonly kind: "page"; readonly definition: ViewDefinition }
@@ -15,7 +32,7 @@ export function resolveViewPage(
   const definition = definitions.find((entry) => entry.id === viewId);
   if (!definition) return { kind: "unknown" };
   if (definition.scope === "thread") return { kind: "thread-view", definition };
-  if (definition.page === "/view/$viewId") return { kind: "page", definition };
+  if (viewSupportsHost(definition, "page")) return { kind: "page", definition };
   return definition.page ? { kind: "own-route", definition } : { kind: "unknown" };
 }
 
@@ -38,6 +55,6 @@ export function resolveHostedViewLayout(
 export function viewPagePaletteDefinitions(
   definitions: ReadonlyArray<ViewDefinition>,
 ): ReadonlyArray<ViewDefinition> {
-  // Pull requests keeps its own "Open pull requests" entry.
-  return definitions.filter((entry) => entry.scope === "global" && entry.page === "/view/$viewId");
+  // A view with a route of its own, such as Pull requests, keeps its own palette entry.
+  return definitions.filter((entry) => entry.scope === "global" && viewSupportsHost(entry, "page"));
 }

@@ -22,8 +22,11 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { VIEW_IDS, type ViewId, type ViewLayout } from "../components/ToolSidebar.logic";
 import { StatusAlertCount, StatusView } from "./StatusView";
 import { ThreadViewBody } from "./ThreadViewBody";
+import { viewSupportsHost } from "./viewPage.logic";
 
 export type { ViewId, ViewLayout };
+/** Every registered view: those the side area can hold, then views that open only on a page. */
+export type RegisteredViewId = ViewId | "pull-requests";
 export type ViewScope = "thread" | "global";
 export type ViewHost = "panel" | "tile" | "page";
 /** Where a global view opens full size: the shared view page or a route of its own. */
@@ -54,7 +57,7 @@ export interface ViewSlots {
  * Hosts mount a view only while it is visible.
  */
 export interface ViewDefinition {
-  readonly id: ViewId;
+  readonly id: RegisteredViewId;
   readonly title: string;
   readonly icon: LucideIcon;
   /** What the view shows and who writes it, for the host's about note. */
@@ -71,6 +74,12 @@ export interface ViewDefinition {
   readonly PickerCount?: ComponentType<{ readonly target: ViewTarget }>;
   /** The route that shows a global view full size; hosts narrower than `minWidthPx` link to it. */
   readonly page?: ViewPage;
+  /**
+   * The hosts that render this view's body; a host offers only views that list it. Omitted, a
+   * view renders in the panel and in tiles, and on the shared page when `page` is
+   * "/view/$viewId". `[]` makes a view page-only: it opens only on its own `page`.
+   */
+  readonly hosts?: ReadonlyArray<ViewHost>;
   readonly render: (props: {
     readonly target: ViewTarget;
     readonly layout: ViewLayout;
@@ -80,7 +89,7 @@ export interface ViewDefinition {
   }) => ReactNode;
 }
 
-type ThreadViewId = Exclude<ViewId, "calendar" | "status" | "pull-requests">;
+type ThreadViewId = Exclude<ViewId, "calendar" | "status">;
 
 function threadView<Id extends ThreadViewId>(
   id: Id,
@@ -100,7 +109,7 @@ function threadView<Id extends ThreadViewId>(
   };
 }
 
-const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id } } = {
+const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { readonly id: Id } } = {
   todos: threadView(
     "todos",
     "Todos",
@@ -191,15 +200,23 @@ const DEFINITIONS: { readonly [Id in ViewId]: ViewDefinition & { readonly id: Id
     scope: "global",
     minWidthPx: 720,
     page: "/pull-requests",
-    // Its page reads its filters from its own route, so narrower hosts offer only Open full size.
+    // Its page reads its filters from its own route, so no host renders this body.
+    hosts: [],
     render: () => null,
   },
 };
 
-export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = VIEW_IDS.map(
-  (id) => DEFINITIONS[id],
-);
+const PAGE_ONLY_VIEW_IDS = ["pull-requests"] as const satisfies ReadonlyArray<RegisteredViewId>;
 
-export function viewDefinition(id: ViewId): ViewDefinition {
+export const VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition> = [
+  ...VIEW_IDS,
+  ...PAGE_ONLY_VIEW_IDS,
+].map((id) => DEFINITIONS[id]);
+
+/** The side area's picker, in its order: the views the panel can host. */
+export const PANEL_VIEW_DEFINITIONS: ReadonlyArray<ViewDefinition & { readonly id: ViewId }> =
+  VIEW_IDS.map((id) => DEFINITIONS[id]).filter((entry) => viewSupportsHost(entry, "panel"));
+
+export function viewDefinition(id: RegisteredViewId): ViewDefinition {
   return DEFINITIONS[id];
 }

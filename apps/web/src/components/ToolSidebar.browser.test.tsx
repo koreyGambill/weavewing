@@ -331,14 +331,15 @@ it("opens a global view as a page from the side panel and hands it back", async 
   await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
 });
 
-it("offers Open full size for a view narrower than its minimum width", async () => {
-  const { stack, screen, router } = await mountApp([threadWithHistory("narrow", 1)], 1280);
+it("keeps a page-only view out of the side panel's picker", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("picker", 1)], 1280);
   await using _app = stack;
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "pull-requests" }));
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "calendar" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await userEvent.click(panel.getByRole("button", { name: "Open full size" }));
-  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/pull-requests"));
-  await expect.element(panel).not.toBeInTheDocument();
+  await userEvent.click(panel.getByRole("button", { name: /^View: Calendar/ }));
+  await expect.element(page.getByRole("menuitemradio", { name: "Status" })).toBeVisible();
+  expect(page.getByRole("menuitemradio", { name: "Pull requests" }).elements()).toHaveLength(0);
+  await userEvent.keyboard("{Escape}");
 });
 
 it("shows a way back for a view id with no page", async () => {

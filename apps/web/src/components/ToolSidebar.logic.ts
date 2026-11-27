@@ -5,17 +5,9 @@ import { THREAD_TOOL_ORDER } from "../threadContextSidebar";
 import type { ThreadContextSection } from "../threadContextSidebarStore";
 
 /** Every view the side area can show: the thread views, then the views that span threads. */
-export type ViewId =
-  | Exclude<ThreadContextSection, "inbox">
-  | "calendar"
-  | "status"
-  | "pull-requests";
+export type ViewId = Exclude<ThreadContextSection, "inbox"> | "calendar" | "status";
 
-const GLOBAL_VIEW_IDS = [
-  "calendar",
-  "status",
-  "pull-requests",
-] as const satisfies ReadonlyArray<ViewId>;
+const GLOBAL_VIEW_IDS = ["calendar", "status"] as const satisfies ReadonlyArray<ViewId>;
 
 /** The view picker's order: thread views as the rail lists them, then global views. */
 export const VIEW_IDS: ReadonlyArray<ViewId> = [
