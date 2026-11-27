@@ -357,6 +357,7 @@ const TrackedAnswerDraft = Schema.Struct({
   ),
 });
 export type TrackedAnswerDraft = typeof TrackedAnswerDraft.Type;
+const decodeTrackedAnswerDraft = Schema.decodeUnknownOption(TrackedAnswerDraft);
 const decodeLegacyTrackedAnswers = Schema.decodeUnknownOption(
   Schema.fromJsonString(
     Schema.Struct({
@@ -2359,6 +2360,9 @@ function normalizePersistedDraftsByThreadId(
     const waitingItems = Array.isArray(draftCandidate.waitingItems)
       ? draftCandidate.waitingItems.filter(isWaitingItemContextRecord)
       : [];
+    const trackedAnswer = Option.getOrUndefined(
+      decodeTrackedAnswerDraft(draftCandidate.trackedAnswer),
+    );
     const artifactAnswers = Array.isArray(draftCandidate.artifactAnswers)
       ? draftCandidate.artifactAnswers.filter(isArtifactAnswerContextRecord)
       : [];
@@ -2471,24 +2475,32 @@ function normalizePersistedDraftsByThreadId(
 
     const hasModelData =
       Object.keys(modelSelectionByProvider).length > 0 || activeProvider !== null;
-    if (
-      promptCandidate.length === 0 &&
-      attachments.length === 0 &&
-      files.length === 0 &&
-      terminalContexts.length === 0 &&
-      previewAnnotations.length === 0 &&
-      reviewComments.length === 0 &&
-      threadContexts.length === 0 &&
-      environmentContexts.length === 0 &&
-      waitingItems.length === 0 &&
-      artifactAnswers.length === 0 &&
-      replyTo === null &&
-      !hasModelData &&
-      !runtimeMode &&
-      !interactionMode
-    ) {
-      continue;
-    }
+    const normalizedDraft = omitEmptyPersistedDraft({
+      prompt,
+      attachments,
+      ...(files.length > 0 ? { files } : {}),
+      ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
+      ...(previewAnnotations.length > 0 ? { previewAnnotations } : {}),
+      ...(reviewComments.length > 0 ? { reviewComments } : {}),
+      ...(threadContexts.length > 0 ? { threadContexts } : {}),
+      ...(environmentContexts.length > 0 ? { environmentContexts } : {}),
+      ...(waitingItems.length > 0 ? { waitingItems } : {}),
+      ...(trackedAnswer
+        ? { trackedAnswer: { ...trackedAnswer, discuss: [...trackedAnswer.discuss] } }
+        : {}),
+      ...(artifactAnswers.length > 0 ? { artifactAnswers } : {}),
+      ...(replyTo ? { replyTo: replyTo as DeepMutable<ResponseContextRecord> } : {}),
+      ...(hasModelData
+        ? {
+            modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
+            activeProvider,
+            ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+          }
+        : {}),
+      ...(runtimeMode ? { runtimeMode } : {}),
+      ...(interactionMode ? { interactionMode } : {}),
+    });
+    if (!normalizedDraft) continue;
     const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
     const normalizedThreadKey =
       parsedThreadRef !== null
@@ -2501,28 +2513,7 @@ function normalizePersistedDraftsByThreadId(
                 ? normalizeLegacyComposerStorageKey(threadKeyOrId, { environmentId })
                 : threadKeyOrId;
             })();
-    nextDraftsByThreadKey[normalizedThreadKey] = {
-      prompt,
-      attachments,
-      ...(files.length > 0 ? { files } : {}),
-      ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
-      ...(previewAnnotations.length > 0 ? { previewAnnotations } : {}),
-      ...(reviewComments.length > 0 ? { reviewComments } : {}),
-      ...(threadContexts.length > 0 ? { threadContexts } : {}),
-      ...(environmentContexts.length > 0 ? { environmentContexts } : {}),
-      ...(waitingItems.length > 0 ? { waitingItems } : {}),
-      ...(artifactAnswers.length > 0 ? { artifactAnswers } : {}),
-      ...(replyTo ? { replyTo: replyTo as DeepMutable<ResponseContextRecord> } : {}),
-      ...(hasModelData
-        ? {
-            modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
-            activeProvider,
-            ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
-          }
-        : {}),
-      ...(runtimeMode ? { runtimeMode } : {}),
-      ...(interactionMode ? { interactionMode } : {}),
-    };
+    nextDraftsByThreadKey[normalizedThreadKey] = normalizedDraft;
   }
 
   return nextDraftsByThreadKey;
@@ -2539,10 +2530,23 @@ function persistedComposerDraftHasUserContent(draft: PersistedComposerThreadDraf
     (draft.threadContexts?.length ?? 0) > 0 ||
     (draft.environmentContexts?.length ?? 0) > 0 ||
     (draft.waitingItems?.length ?? 0) > 0 ||
-    draft.trackedAnswer !== undefined ||
+    (draft.trackedAnswer?.discuss.length ?? 0) > 0 ||
     (draft.artifactAnswers?.length ?? 0) > 0 ||
     draft.replyTo !== undefined
   );
+}
+
+function omitEmptyPersistedDraft(
+  draft: DeepMutable<PersistedComposerThreadDraftState>,
+): DeepMutable<PersistedComposerThreadDraftState> | undefined {
+  if (persistedComposerDraftHasUserContent(draft)) return draft;
+  const { trackedAnswer: _tracking, ...settings } = draft;
+  return Object.keys(settings.modelSelectionByProvider ?? {}).length > 0 ||
+    settings.activeProvider != null ||
+    settings.runtimeMode !== undefined ||
+    settings.interactionMode !== undefined
+    ? settings
+    : undefined;
 }
 
 function stripLegacyModelSeedsFromEmptyDraftSessions(
@@ -2613,26 +2617,7 @@ export function partializeComposerDraftStoreState(
     }
     const hasModelData =
       Object.keys(draft.modelSelectionByProvider).length > 0 || draft.activeProvider !== null;
-    if (
-      draft.prompt.length === 0 &&
-      draft.persistedAttachments.length === 0 &&
-      draft.files.length === 0 &&
-      draft.terminalContexts.length === 0 &&
-      draft.previewAnnotations.length === 0 &&
-      draft.reviewComments.length === 0 &&
-      draft.threadContexts.length === 0 &&
-      draft.environmentContexts.length === 0 &&
-      draft.waitingItems.length === 0 &&
-      draft.trackedAnswer === undefined &&
-      draft.artifactAnswers.length === 0 &&
-      draft.replyTo === null &&
-      !hasModelData &&
-      draft.runtimeMode === null &&
-      draft.interactionMode === null
-    ) {
-      continue;
-    }
-    const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
+    const persistedDraft = omitEmptyPersistedDraft({
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
       ...(draft.files.length > 0
@@ -2712,8 +2697,8 @@ export function partializeComposerDraftStoreState(
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
-    };
-    persistedDraftsByThreadKey[threadKey] = persistedDraft;
+    });
+    if (persistedDraft) persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
   const persistedDraftThreadsByThreadKey: DeepMutable<
     PersistedComposerDraftStoreState["draftThreadsByThreadKey"]

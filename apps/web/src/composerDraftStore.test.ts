@@ -785,6 +785,53 @@ describe("composerDraftStore context persistence", () => {
     }
   });
 
+  it("restores tracking and Discuss references from storage and omits a bare toggle", async () => {
+    vi.stubGlobal("localStorage", createMemoryStorage());
+    vi.stubGlobal("window", new EventTarget());
+    vi.useFakeTimers();
+    vi.resetModules();
+    try {
+      const { useComposerDraftStore: savedStore } = await import("./composerDraftStore");
+      const discussRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("discuss-only"));
+      const toggleRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("toggle-only"));
+      const plainRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("plain-draft"));
+      const tracking = { track: true, discuss: [] };
+      const discussing = { track: true, discuss: [{ id: "A1", question: "How is it reset?" }] };
+      const draft = savedStore.getState();
+      draft.setPrompt(threadRef, "What resets the counter?");
+      draft.setTrackedAnswer(threadRef, tracking);
+      draft.setTrackedAnswer(discussRef, discussing);
+      draft.setTrackedAnswer(toggleRef, tracking);
+      draft.setPrompt(plainRef, "A draft saved without tracking.");
+      await vi.advanceTimersByTimeAsync(300);
+
+      vi.resetModules();
+      const { useComposerDraftStore: reloadedStore } = await import("./composerDraftStore");
+      const reloaded = reloadedStore.getState();
+      expect(reloaded.getComposerDraft(threadRef)).toMatchObject({
+        prompt: "What resets the counter?",
+        trackedAnswer: tracking,
+      });
+      expect(reloaded.getComposerDraft(discussRef)?.trackedAnswer).toEqual(discussing);
+      expect(reloaded.getComposerDraft(toggleRef)).toBeNull();
+      expect(reloaded.getComposerDraft(plainRef)?.prompt).toBe("A draft saved without tracking.");
+      expect(reloaded.getComposerDraft(plainRef)?.trackedAnswer).toBeUndefined();
+      const stored = await reloadedStore.persist
+        .getOptions()
+        .storage?.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+      expect(stored?.state).toMatchObject({
+        draftsByThreadKey: { [scopedThreadKey(threadRef)]: { trackedAnswer: tracking } },
+      });
+      expect(stored?.state).not.toMatchObject({
+        draftsByThreadKey: { [scopedThreadKey(toggleRef)]: expect.anything() },
+      });
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
   // regression: #35010 typing a draft in one tab erased drafts another tab saved after it loaded
   it("keeps a draft another tab saved after this tab loaded", async () => {
     const sharedStorage = createMemoryStorage();
