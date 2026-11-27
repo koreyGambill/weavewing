@@ -547,6 +547,10 @@ export interface OrchestratorV2Shape {
     options: ProjectionTimelinePageOptions,
   ) => Effect.Effect<ProjectionTimelinePage, OrchestratorProjectionError>;
   readonly getMessageCount: (threadId: ThreadId) => Effect.Effect<number, OrchestratorV2Error>;
+  /** The user-authored input message of the thread's current run, or null. */
+  readonly getCurrentUserMessageId: (
+    threadId: ThreadId,
+  ) => Effect.Effect<MessageId | null, OrchestratorV2Error>;
   readonly getMessagesById: (
     threadId: ThreadId,
     messageIds: ReadonlyArray<MessageId>,
@@ -18729,6 +18733,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .getMessageCount(threadId)
         .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
     }),
+    getCurrentUserMessageId: Effect.fn("OrchestratorV2.getCurrentUserMessageId")(
+      function (threadId) {
+        return projectionStore
+          .getCurrentUserMessageId(threadId)
+          .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+      },
+    ),
     getMessagesById: Effect.fn("OrchestratorV2.getMessagesById")(function (threadId, messageIds) {
       return projectionStore
         .getMessagesById(threadId, messageIds)

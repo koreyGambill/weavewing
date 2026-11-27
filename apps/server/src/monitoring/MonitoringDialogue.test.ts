@@ -516,9 +516,9 @@ it.effect("retries a context proposal after a concurrent Workspace edit", () =>
                           )
                         : workspace.get({ threadId: input.threadId }).pipe(
                             Effect.map((current) => ({
-                              ...current,
-                              revision: current.revision + 1,
-                              items: [],
+                              workspace: { ...current, revision: current.revision + 1, items: [] },
+                              changedIds: [],
+                              filedTasks: [],
                             })),
                           ),
                     ),

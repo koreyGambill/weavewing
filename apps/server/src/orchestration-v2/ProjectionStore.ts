@@ -107,6 +107,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import { currentUserMessage } from "./currentUserMessage.ts";
 import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
@@ -564,6 +565,13 @@ export interface ProjectionStoreV2Shape {
     options: ProjectionTimelinePageOptions,
   ) => Effect.Effect<ProjectionTimelinePage, ProjectionStoreV2Error>;
   readonly getMessageCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;
+  /**
+   * The user-authored input message of the thread's current run, or null: the only message an
+   * agent may record the user's outcome of a waiting item from.
+   */
+  readonly getCurrentUserMessageId: (
+    threadId: ThreadId,
+  ) => Effect.Effect<MessageId | null, ProjectionStoreV2Error>;
   /** Bytes of tool output a transcript export is sure to hold, or 0 when it can fit in `limit`. */
   readonly getTranscriptByteFloor: (
     threadId: ThreadId,
@@ -6684,6 +6692,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError(controlReadError(threadId)),
       );
 
+    const getCurrentUserMessageId: ProjectionStoreV2Shape["getCurrentUserMessageId"] = (threadId) =>
+      currentUserMessage(threadId).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.mapError(controlReadError(threadId)),
+      );
     const getMessageCount: ProjectionStoreV2Shape["getMessageCount"] = (threadId) =>
       sql<{
         count: number;
@@ -10059,6 +10072,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRunProviderRecords: readOnReader(getRunProviderRecords),
       isNodeStored: readOnReader(isNodeStored),
       getMessageCount: readOnReader(getMessageCount),
+      getCurrentUserMessageId: readOnReader(getCurrentUserMessageId),
       getTranscriptByteFloor: readOnReader(getTranscriptByteFloor),
       getSubagentCount: readOnReader(getSubagentCount),
       listAppOwnedChildThreadIds: readOnReader(listAppOwnedChildThreadIds),

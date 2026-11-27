@@ -611,7 +611,9 @@ const make = Effect.gen(function* () {
     const userMessageId =
       caller.threadId === undefined || !changes.some((change) => change.settledFromUser === true)
         ? null
-        : yield* orchestrator.getCurrentUserMessageId(caller.threadId).pipe(Effect.mapError(storage));
+        : yield* orchestrator
+            .getCurrentUserMessageId(caller.threadId)
+            .pipe(Effect.mapError(storage));
     return { by: "agent", userMessageId } satisfies ListActor;
   });
   const apply = Effect.fnUntraced(function* (
