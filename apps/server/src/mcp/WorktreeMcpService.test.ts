@@ -869,6 +869,7 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
         branch: "feature/xwing",
         baseRef: localBaseCommit,
         startFromOrigin: false,
+        baseIsCommit: true,
       });
       expect(harness.holds).toHaveBeenCalledWith({
         xwingEnvironmentId,
@@ -928,7 +929,7 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
       expect(harness.fetchWorktreeBaseCommit).toHaveBeenCalled();
       // The commit the fetch resolved, so a later move of the remote ref cannot change it.
       expect(harness.prepareLaunch).toHaveBeenCalledWith(
-        expect.objectContaining({ baseRef: "abc123", startFromOrigin: false }),
+        expect.objectContaining({ baseRef: "abc123", startFromOrigin: false, baseIsCommit: true }),
       );
       expect(harness.resolveCommit).not.toHaveBeenCalled();
       expect(result).toMatchObject({ baseRef: "dev", startedFromOrigin: true });
@@ -1003,7 +1004,11 @@ describe("t3_worktree_handoff under worktreeProvider xwing", () => {
       const result = yield* runHandoff(harness, { branch: "feature/local", baseRef: "dev" });
       expect(harness.resolveCommit).toHaveBeenCalledWith({ cwd: workspaceRoot, revision: "dev" });
       expect(harness.prepareLaunch).toHaveBeenCalledWith(
-        expect.objectContaining({ baseRef: localBaseCommit, startFromOrigin: false }),
+        expect.objectContaining({
+          baseRef: localBaseCommit,
+          startFromOrigin: false,
+          baseIsCommit: true,
+        }),
       );
       expect(result).toMatchObject({ baseRef: "dev", startedFromOrigin: false });
     });

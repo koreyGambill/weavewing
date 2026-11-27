@@ -2983,6 +2983,7 @@ describe("OrchestratorMcpService provider resolution", () => {
               title: "Build it in isolation.",
               baseRef: "abc123",
               startFromOrigin: false,
+              baseIsCommit: true,
             },
           ]);
           if (outcome === "no-checkout") {

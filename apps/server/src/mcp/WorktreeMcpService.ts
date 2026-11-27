@@ -410,6 +410,7 @@ const make = Effect.gen(function* () {
               branch: input.branch,
               baseRef: baseCommit,
               startFromOrigin: false,
+              baseIsCommit: true,
             }),
           ).pipe(asOperationFailed("Unable to create the Xwing environment"));
           const hold = { threadId: target.threadId, period: ids.commandId };

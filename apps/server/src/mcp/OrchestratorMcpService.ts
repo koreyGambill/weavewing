@@ -1562,6 +1562,7 @@ const make = Effect.gen(function* () {
           title: input.title,
           baseRef: input.baseRef,
           startFromOrigin: false,
+          baseIsCommit: true,
         })
         .pipe(
           Effect.mapError((error) =>

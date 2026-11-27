@@ -640,6 +640,7 @@ describe("DevelopmentEnvironmentLifecycle", () => {
       const launchOn = (launchKey: string, branch: string) => ({
         ...launch(launchKey),
         baseRef: repository.localHead,
+        baseIsCommit: true,
         branch,
       });
       const hold = { threadId: "thread-retry", period: "command-retry" };
@@ -687,10 +688,17 @@ describe("DevelopmentEnvironmentLifecycle", () => {
         yield* service.discardLaunch({ xwingEnvironmentId: ID, hold, newBranch: hooked.newBranch });
         assert.equal(branchTip("feature/hooked"), committed);
 
-        // A ref base can resolve differently inside Xwing, so its new branch is never reported.
+        // A ref base can resolve differently inside Xwing, so its new branch is never reported,
+        // even when the ref looks like a commit.
         const byRef = yield* service.prepareLaunch({ ...launch("retry-6"), branch: "feature/ref" });
         assert.isTrue(byRef.created);
         assert.isUndefined(byRef.newBranch);
+        const shaShaped = yield* service.prepareLaunch({
+          ...launch("retry-7"),
+          baseRef: repository.localHead,
+          branch: "feature/sha-shaped",
+        });
+        assert.isUndefined(shaShaped.newBranch);
 
         // A branch that existed before the launch is never reported as new.
         runGit(repository.clone, ["branch", "feature/existing", "main"]);
