@@ -61,7 +61,6 @@ import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
 import { talkedWithThreads, withDelegates } from "../threadContextSidebar";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
-import type { ThreadViewId } from "./ToolSidebar.logic";
 import { buildThreadRouteParams } from "../threadRoutes";
 import {
   type DraftId,
@@ -69,9 +68,7 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { ThreadInspectPanel, type ThreadInspectSection } from "./insights/ThreadInspectPanel";
-import { ThreadTimelineView } from "./ThreadTimelineView";
 import { ToolHeaderButton } from "./threadToolsHost";
-import { ThreadTodosView } from "./reviews/ThreadListView";
 import { ArtifactsPanel } from "./reviews/ThreadWorkspacePanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -94,56 +91,27 @@ import { useThreadEnvironmentUsage } from "./xwing/ThreadEnvironments";
 import { XwingEnvironmentsPanel } from "./xwing/XwingEnvironmentsPanel";
 import { FileRemoteMenuSection } from "./files/FileRemoteActions";
 
-/** Views that lay out their own padding and scrolling. */
-export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadViewId> = new Set([
-  "inspect",
-  "details",
-  "automations",
-]);
-
-export function ThreadToolSection({
-  section,
+/**
+ * Where the conversation's details card moves while the Details view shows its thread, with the
+ * thread's summary in its place otherwise.
+ */
+export function ThreadDetailsSlot({
   threadRef,
   detailsRef,
-  actions,
 }: {
-  section: Exclude<ThreadViewId, "automations" | "evidence">;
   threadRef: ScopedThreadRef;
   detailsRef: (element: HTMLDivElement | null) => void;
-  actions: HTMLDivElement | null;
 }) {
-  switch (section) {
-    case "todos":
-      return (
-        <ThreadTodosView
-          key={`${threadRef.environmentId}:${threadRef.threadId}`}
-          threadRef={threadRef}
-        />
-      );
-    case "artifacts":
-      return <ThreadArtifacts threadRef={threadRef} />;
-    case "links":
-      return <ThreadLinks threadRef={threadRef} actions={actions} />;
-    case "related":
-      return <ThreadRelated threadRef={threadRef} />;
-    case "timeline":
-      return <ThreadTimelineView threadRef={threadRef} actions={actions} />;
-    case "details":
-      return (
-        <div
-          ref={detailsRef}
-          className="@container group/details-destination mx-auto w-full max-w-4xl overflow-y-auto py-1"
-        >
-          <div className="px-2.5 text-xs group-has-[[data-context-thread-details]]/details-destination:hidden">
-            <ThreadSummary threadRef={threadRef} />
-          </div>
-        </div>
-      );
-    case "environments":
-      return <ThreadEnvironments threadRef={threadRef} />;
-    case "inspect":
-      return <ThreadInspect threadRef={threadRef} />;
-  }
+  return (
+    <div
+      ref={detailsRef}
+      className="@container group/details-destination mx-auto w-full max-w-4xl py-1"
+    >
+      <div className="px-2.5 text-xs group-has-[[data-context-thread-details]]/details-destination:hidden">
+        <ThreadSummary threadRef={threadRef} />
+      </div>
+    </div>
+  );
 }
 
 export function SectionHeading({ children }: { children: ReactNode }) {
@@ -263,7 +231,7 @@ function RowActions({
 const rowClass =
   "group/row flex min-w-0 items-start gap-1 rounded-md px-1.5 py-1 hover:bg-muted/40 focus-within:bg-muted/40";
 
-function ThreadLinks({
+export function ThreadLinks({
   threadRef,
   actions,
 }: {
@@ -661,9 +629,11 @@ function ThreadLinks({
                       type="button"
                       className="block max-w-full truncate text-left text-primary hover:underline"
                       onClick={() =>
-                        useThreadContextSidebarStore
-                          .getState()
-                          .show("environments", { thread: threadRef, environmentId })
+                        useThreadContextSidebarStore.getState().show("details", {
+                          thread: threadRef,
+                          environmentId,
+                          section: "details:environments",
+                        })
                       }
                     >
                       {label}
@@ -703,12 +673,14 @@ function ThreadLinks({
                   {environmentId ? (
                     <MenuItem
                       onClick={() =>
-                        useThreadContextSidebarStore
-                          .getState()
-                          .show("environments", { thread: threadRef, environmentId })
+                        useThreadContextSidebarStore.getState().show("details", {
+                          thread: threadRef,
+                          environmentId,
+                          section: "details:environments",
+                        })
                       }
                     >
-                      Open in Environments
+                      Open in Details
                     </MenuItem>
                   ) : mark.contextSource ? null : (
                     <MenuItem render={<a href={mark.url} target="_blank" rel="noreferrer" />}>
@@ -851,7 +823,7 @@ function fileLinkCopyText(file: ConversationFileLink): string {
     : file.displayPath;
 }
 
-function ThreadArtifacts({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function ThreadArtifacts({ threadRef }: { threadRef: ScopedThreadRef }) {
   const canRead = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
   const workspace = useEnvironmentQuery(
     canRead
@@ -983,7 +955,7 @@ function ThreadArtifacts({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
-function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
   const shell = useThreadShell(threadRef);
   const shells = useThreadRelationshipShells(threadRef);
   const projection = useQuietThreadProjection(threadRef)?.projection;
@@ -1123,7 +1095,7 @@ function ThreadSummary({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
-function ThreadEnvironments({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function ThreadEnvironments({ threadRef }: { threadRef: ScopedThreadRef }) {
   const selection = useThreadContextSidebarStore((state) => state.environmentSelection);
   const selectedId =
     selection?.thread.environmentId === threadRef.environmentId &&

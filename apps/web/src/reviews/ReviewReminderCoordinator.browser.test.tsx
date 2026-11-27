@@ -131,7 +131,7 @@ it.each(["other-thread", "list"])(
     };
     if (view === "list") {
       state.active = { environmentId, threadId: review.threadId };
-      useThreadContextSidebarStore.getState().show("todos", { thread: ref });
+      useThreadContextSidebarStore.getState().show("checklist", { thread: ref });
     }
     const route = view === "list" ? "/remote-environment/review-thread" : "/existing/thread";
     const initialView = useToolSidebarStore.getState().view;

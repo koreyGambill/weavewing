@@ -155,7 +155,7 @@ export function buildThreadActionMenuItems(
     ...(state.canOpenChanges ? [{ id: "changes" as const, label: "Changes" }] : []),
     ...(state.showThreadTools
       ? [
-          { id: "todos" as const, label: "Todos" },
+          { id: "todos" as const, label: "Checklist" },
           { id: "automations" as const, label: "Automations" },
         ]
       : []),

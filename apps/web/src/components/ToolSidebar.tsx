@@ -435,7 +435,7 @@ function SideArea({
   const draft = useRouteDraft(threadRef);
   const setDetails = useSideAreaDetailsSetter();
   const target: ViewTarget =
-    definition.scope === "thread" ? { threadRef, draft } : { threadRef: null, draft: null };
+    definition.scope === "thread" ? { threadRef, draft } : { threadRef, draft: null };
   const layout = resolveViewLayout(definition.compactBelowPx, {
     wide,
     width: maximized ? fullWidth : width,
@@ -674,7 +674,8 @@ function SideAreaBody({
   width: number;
   slots: ViewSlots;
 }) {
-  const key = threadKey(target.threadRef);
+  // A view that spans threads keeps its content and requests when the thread changes.
+  const key = definition.scope === "thread" ? threadKey(target.threadRef) : null;
   const [settledKey, setSettledKey] = useState(key);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A timer decides when a run of thread switches has stopped.
   useEffect(() => {
@@ -687,13 +688,7 @@ function SideAreaBody({
   }, [key, settledKey]);
   return (
     <DeferEnvironmentQueries value={settledKey !== key}>
-      <Fragment
-        key={
-          definition.scope === "thread" && definition.id !== "evidence"
-            ? `${key}:${definition.id}`
-            : definition.id
-        }
-      >
+      <Fragment key={key === null ? definition.id : `${key}:${definition.id}`}>
         <HostedView
           definition={definition}
           target={target}
@@ -767,7 +762,11 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
                       <span className="flex items-center gap-2">
                         <entry.icon className="text-muted-foreground" />
                         {entry.title}
-                        {open && entry.PickerCount ? <entry.PickerCount target={target} /> : null}
+                        {open && entry.PickerCount ? (
+                          <DeferEnvironmentQueries value>
+                            <entry.PickerCount target={target} />
+                          </DeferEnvironmentQueries>
+                        ) : null}
                       </span>
                     </TooltipTrigger>
                     <TooltipPopup side="right">{entry.about}</TooltipPopup>

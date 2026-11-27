@@ -142,12 +142,12 @@ it("shows the menu's thread in Checklist, locked, while a side chat of it is foc
     .element()
     .focus();
   await userEvent.keyboard("{Enter}");
-  await userEvent.click(page.getByRole("menuitem", { name: "Todos" }));
+  await userEvent.click(page.getByRole("menuitem", { name: "Checklist" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel.getByText(main.title, { exact: true })).toBeVisible();
   expect(useToolSidebarStore.getState()).toMatchObject({
     open: true,
-    view: "todos",
+    view: "checklist",
     locked: mainRef,
   });
 });
@@ -214,7 +214,7 @@ it("moves focus into the side panel, tabs through it and out while pinned, and r
 
   await userEvent.keyboard("{Enter}");
   await expect.element(page.getByRole("menuitemradio", { name: "Links" })).toBeVisible();
-  await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}");
   await expect.element(page.getByRole("menuitemradio", { name: "Links" })).toHaveFocus();
   await userEvent.keyboard("{Enter}");
   await expect.element(panel.getByRole("button", { name: /^View: Links/ })).toHaveFocus();
@@ -327,7 +327,7 @@ it("closes an unpinned side panel on a click outside it", async () => {
   await expect.element(panel).not.toBeInTheDocument();
 });
 
-it("loads Todos only for the last of ten quick switches, showing the view at once", async () => {
+it("loads Checklist only for the last of ten quick switches, showing the view at once", async () => {
   const threads = Array.from({ length: 10 }, (_, index) => threadWithHistory(`walk-${index}`, 1));
   const { stack, screen, router } = await mountApp(threads, 1280);
   await using _app = stack;
@@ -354,7 +354,7 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   using _list = answerRpc(WS_METHODS.threadListRead, hold("listRead"));
   using _artifacts = answerRpc(WS_METHODS.threadArtifactList, hold("artifactList"));
   await act(() => {
-    useToolSidebarStore.getState().dispatch({ type: "show", view: "todos" });
+    useToolSidebarStore.getState().dispatch({ type: "show", view: "checklist" });
     useToolSidebarStore.getState().dispatch({ type: "pin" });
   });
   const panel = screen.getByRole("complementary", { name: "Side panel" });
@@ -372,7 +372,7 @@ it("loads Todos only for the last of ten quick switches, showing the view at onc
   }
   expect(started).toEqual([]);
   await vi.waitFor(() => expect(inFlight.size).toBe(0));
-  await expect.element(panel.getByRole("region", { name: "Todos" })).toBeVisible();
+  await expect.element(panel.getByRole("region", { name: "Checklist" })).toBeVisible();
   expect(panel.element().querySelector('[data-slot="skeleton"]')).toBeNull();
   interrupted.length = 0;
   const last = threads.at(-1)!.id;
@@ -467,7 +467,7 @@ it("closes a page view's panel on the first Escape after a thread view was maxim
   await using _app = stack;
   await act(() => {
     const { dispatch } = useToolSidebarStore.getState();
-    dispatch({ type: "show", view: "todos" });
+    dispatch({ type: "show", view: "checklist" });
     dispatch({ type: "maximize" });
     dispatch({ type: "show", view: "calendar" });
   });
@@ -496,13 +496,13 @@ it("shows a way back for a view id with no page", async () => {
   const thread = threadWithHistory("missing", 1);
   const { stack, screen, router } = await mountApp([thread], 1280);
   await using _app = stack;
-  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "todos" } }));
+  await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "checklist" } }));
   await expect.element(screen.getByRole("heading", { name: "View not found" })).toHaveFocus();
   await expect.element(screen.getByText("Todos has no page")).toBeVisible();
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "no-such-view" } }));
   await expect.element(screen.getByText("There is no view here")).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Return to previous page" }));
-  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/view/todos"));
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/view/checklist"));
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "pull-requests" } }));
   await vi.waitFor(() => expect(router.state.location.pathname).toBe("/pull-requests"));
 });
@@ -570,7 +570,7 @@ const emptyWorkspace: ThreadWorkspace = {
 };
 
 it.each([
-  ["a waiting task", { name: "T1: Rotate the webhook secret" }, "todos"],
+  ["a waiting task", { name: "T1: Rotate the webhook secret" }, "checklist"],
   ["the composer's Artifacts button", { name: "Artifacts", exact: true }, "artifacts"],
 ] as const)(
   "keeps an unpinned panel open when %s outside it opens a view",
@@ -599,8 +599,8 @@ it.each([
   },
 );
 
-function viewTitle(view: "todos" | "artifacts") {
-  return view === "todos" ? "Todos" : "Artifacts";
+function viewTitle(view: "checklist" | "artifacts") {
+  return view === "checklist" ? "Checklist" : "Artifacts";
 }
 
 it("closes the thread drawer and focuses the panel when the shortcut opens it on a phone", async () => {
@@ -629,4 +629,59 @@ it("closes the thread drawer when anything opens the side panel on a phone", asy
   await expect.element(page.getByRole("complementary", { name: "Side panel" })).toBeVisible();
   await expect.element(drawer).not.toBeInTheDocument();
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
+});
+
+it("counts Checklist and flags Links in the picker from held data only", async () => {
+  const [held, other] = [threadWithHistory("count-held", 1), threadWithHistory("count-other", 1)];
+  const requested: string[] = [];
+  const item = (id: string, linkStates?: ThreadWorkspace["items"][number]["linkStates"]) => ({
+    id,
+    text: id,
+    state: "open" as const,
+    owner: "agent" as const,
+    createdAt: "2026-11-13T00:00:00.000Z",
+    doneAt: null,
+    details: "",
+    parentId: null,
+    links: [],
+    ...(linkStates ? { linkStates } : {}),
+  });
+  using _workspace = answerRpc(WS_METHODS.threadWorkspaceGet, (input: { threadId: ThreadId }) =>
+    Effect.sync(() => {
+      requested.push(input.threadId);
+      return {
+        ...emptyWorkspace,
+        threadId: input.threadId,
+        items: [
+          item("first", [
+            { type: "ticket", target: "TK-1", state: "needs_review", label: "Review" },
+          ]),
+          item("second"),
+        ],
+      } satisfies ThreadWorkspace;
+    }),
+  );
+  const { stack, screen } = await mountApp([held, other], 1280);
+  await using _app = stack;
+  // The collapsed-sidebar attention dot keeps the selected thread's workspace loaded.
+  await vi.waitFor(() => expect(requested).toContain(held.id));
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "links" }));
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await userEvent.click(panel.getByRole("button", { name: /^View: / }));
+  await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*2/ })).toBeVisible();
+  await expect
+    .element(page.getByRole("menuitemradio", { name: /Links.*Needs review/ }))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  requested.length = 0;
+  await act(() =>
+    useToolSidebarStore
+      .getState()
+      .dispatch({ type: "lock", thread: scopeThreadRef(ENVIRONMENT_ID, other.id) }),
+  );
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "status" }));
+  await userEvent.click(panel.getByRole("button", { name: /^View: / }));
+  await expect.element(page.getByRole("menuitemradio", { name: /^Checklist/ })).toBeVisible();
+  expect(page.getByRole("menuitemradio", { name: /Checklist.*2/ }).query()).toBeNull();
+  expect(requested).not.toContain(other.id);
 });

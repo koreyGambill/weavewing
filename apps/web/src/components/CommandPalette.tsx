@@ -1951,7 +1951,10 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["xwing", "environments", "development environments", "checkouts", "apps"],
       icon: <BoxesIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        useThreadContextSidebarStore.getState().show("environments");
+        useThreadContextSidebarStore.getState().show("details", {
+          thread: scopeThreadRef(activeThread.environmentId, activeThread.id),
+          section: "details:environments",
+        });
       },
     });
   }
@@ -2009,7 +2012,14 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["automations", "scheduled tasks", "schedules", "runs", "webhooks", "triggers"],
     icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      useThreadContextSidebarStore.getState().show("automations");
+      useThreadContextSidebarStore
+        .getState()
+        .show(
+          "automations",
+          activeThread
+            ? { thread: scopeThreadRef(activeThread.environmentId, activeThread.id) }
+            : {},
+        );
     },
   });
 

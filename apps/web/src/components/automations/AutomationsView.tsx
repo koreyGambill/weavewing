@@ -1,11 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { ListFilterIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ListFilterIcon, PlusIcon, SettingsIcon, XIcon } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
+import { useThreadShell } from "../../state/entities";
 import { useConnectedEnvironmentIds } from "../../state/environments";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { ToolFilterInput } from "../ThreadToolViews";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -40,13 +42,15 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
   const [view, setView] = useState<"manage" | "history">("manage");
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<AutomationStatusFilter>("all");
-  const [onlyThread, setOnlyThread] = useState(false);
+  const filterRef = useThreadContextSidebarStore((state) => state.automationThread);
+  const filterContext = useThreadContext(filterRef);
+  const filterTitle = useThreadShell(filterRef)?.title ?? null;
   const connected = useConnectedEnvironmentIds();
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement>(null);
-  const threadFilter = onlyThread ? thread : null;
+  const threadFilter = filterRef === null ? null : filterContext;
   const environmentIds =
-    threadFilter !== null && threadRef !== null ? [threadRef.environmentId] : connected;
+    filterRef !== null && threadFilter !== null ? [filterRef.environmentId] : connected;
   const newEnvironmentId = threadRef?.environmentId ?? connected[0];
   const selectedKey =
     selection === null ? null : automationRowKey(selection.environmentId, selection.taskId);
@@ -142,8 +146,12 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
                 <MenuSeparator />
                 <MenuCheckboxItem
                   checked={threadFilter !== null}
-                  disabled={thread === null}
-                  onCheckedChange={setOnlyThread}
+                  disabled={thread === null && filterRef === null}
+                  onCheckedChange={(checked) =>
+                    useThreadContextSidebarStore
+                      .getState()
+                      .setAutomationThread(checked ? threadRef : null)
+                  }
                 >
                   Applies to this thread
                 </MenuCheckboxItem>
@@ -194,6 +202,32 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
               <TooltipPopup>Automation settings</TooltipPopup>
             </Tooltip>
           </div>
+          {filterRef !== null ? (
+            <div className="flex min-w-0 px-2.5 pb-2">
+              <Badge variant="outline" size="control" className="min-w-0">
+                <span className="min-w-0 truncate">
+                  This thread{filterTitle ? `: ${filterTitle}` : ""}
+                </span>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="Show automations for every thread"
+                        onClick={() =>
+                          useThreadContextSidebarStore.getState().setAutomationThread(null)
+                        }
+                      />
+                    }
+                  >
+                    <XIcon />
+                  </TooltipTrigger>
+                  <TooltipPopup>Show automations for every thread</TooltipPopup>
+                </Tooltip>
+              </Badge>
+            </div>
+          ) : null}
           <div
             ref={listRef}
             className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 pb-2.5 text-xs"

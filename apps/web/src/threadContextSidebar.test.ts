@@ -253,41 +253,67 @@ describe("thread views store", () => {
 
   const lockedElsewhere = { locked: child };
   // One row per entry point that opened a rail view: [entry, view, target, side panel before,
-  // after]. The owner thread's route is open and the side panel follows it.
+  // side panel after, what the views store remembers]. The owner thread's route is open and the
+  // side panel follows it.
   it.each([
-    ["palette: open artifacts", "artifacts", {}, {}, { view: "artifacts", locked: null }],
-    ["palette: open environments", "environments", {}, {}, { view: "environments" }],
-    ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: child }],
-    ["palette: open automations", "automations", {}, {}, { view: "automations" }],
-    ["palette: open evidence", "evidence", {}, {}, { view: "evidence" }],
+    ["palette: open artifacts", "artifacts", {}, {}, { view: "artifacts", locked: null }, {}],
     [
-      "title menu: todos, the followed thread",
-      "todos",
+      "palette: open environments",
+      "details",
+      { thread: owner, section: "details:environments" },
+      {},
+      { view: "details", locked: null },
+      { revealSection: "details:environments" },
+    ],
+    ["palette: open inbox", "inbox", {}, lockedElsewhere, { view: "inbox", locked: child }, {}],
+    [
+      "palette: open automations",
+      "automations",
       { thread: owner },
       lockedElsewhere,
-      { view: "todos", locked: null },
+      { view: "automations", locked: child },
+      { automationThread: owner },
+    ],
+    ["palette: open evidence", "evidence", {}, {}, { view: "evidence" }, {}],
+    [
+      "title menu: checklist, the followed thread",
+      "checklist",
+      { thread: owner },
+      lockedElsewhere,
+      { view: "checklist", locked: null },
+      {},
     ],
     [
-      "title menu: todos, another thread",
-      "todos",
+      "title menu: checklist, another thread",
+      "checklist",
       { thread: child },
       {},
-      { view: "todos", locked: child },
+      { view: "checklist", locked: child },
+      {},
     ],
     [
       "title menu: automations, another thread",
       "automations",
       { thread: child },
       {},
-      { view: "automations", locked: child },
+      { view: "automations", locked: null },
+      { automationThread: child },
     ],
-    ["automation marker", "automations", {}, {}, { view: "automations" }],
+    [
+      "automation marker",
+      "automations",
+      {},
+      {},
+      { view: "automations" },
+      { automationThread: null },
+    ],
     [
       "notification open",
       "inbox",
       { notification: { environmentId: "local", id: "n1" } },
       {},
       { view: "inbox" },
+      { inboxSelection: { kind: "notification", environmentId: "local", id: "n1" } },
     ],
     [
       "review reminder, from another thread",
@@ -295,6 +321,7 @@ describe("thread views store", () => {
       { thread: child, artifactId: "r1", arriving: true },
       {},
       { view: "artifacts", locked: null, arrival: child },
+      { artifactSelection: { thread: child, id: "r1" } },
     ],
     [
       "review reminder, on its thread",
@@ -302,6 +329,7 @@ describe("thread views store", () => {
       { thread: owner, artifactId: "r1", arriving: true },
       lockedElsewhere,
       { view: "artifacts", locked: null, arrival: null },
+      { artifactSelection: { thread: owner, id: "r1" } },
     ],
     [
       "review panel, reviews button",
@@ -309,24 +337,34 @@ describe("thread views store", () => {
       { thread: owner },
       lockedElsewhere,
       { view: "artifacts", locked: null },
+      { artifactSelection: null },
     ],
     [
-      "todos summary inside a locked panel",
-      "todos",
+      "checklist summary inside a locked panel",
+      "checklist",
       { thread: child },
       lockedElsewhere,
-      { view: "todos", locked: child },
+      { view: "checklist", locked: child },
+      {},
     ],
-    ["waiting strip row", "todos", { thread: owner }, {}, { view: "todos", locked: null }],
-    ["evidence chat row", "evidence", {}, {}, { view: "evidence" }],
     [
-      "links: open in environments",
-      "environments",
-      { thread: child, environmentId: "e" },
-      lockedElsewhere,
-      { view: "environments", locked: child },
+      "waiting strip row",
+      "checklist",
+      { thread: owner },
+      {},
+      { view: "checklist", locked: null },
+      {},
     ],
-  ] as const)("opens %s in the side panel", (_entry, view, target, before, after) => {
+    ["evidence chat row", "evidence", {}, {}, { view: "evidence" }, {}],
+    [
+      "links: open in details",
+      "details",
+      { thread: child, environmentId: "e", section: "details:environments" },
+      lockedElsewhere,
+      { view: "details", locked: child },
+      { environmentSelection: { thread: child, id: "e" }, revealSection: "details:environments" },
+    ],
+  ] as const)("opens %s in the side panel", (_entry, view, target, before, after, remembered) => {
     reset();
     // The side panel remembers what had focus when it opened.
     vi.stubGlobal("document", { activeElement: null });
@@ -337,6 +375,30 @@ describe("thread views store", () => {
     useToolSidebarStore.setState(before);
     useThreadContextSidebarStore.getState().show(view, target);
     expect(useToolSidebarStore.getState()).toMatchObject({ open: true, ...after });
+    expect(useThreadContextSidebarStore.getState()).toMatchObject(remembered);
+    vi.unstubAllGlobals();
+  });
+
+  it("expands a collapsed section an opener asks for and remembers collapsed ones", () => {
+    reset();
+    vi.stubGlobal("document", { activeElement: null });
+    vi.stubGlobal("HTMLElement", Object);
+    const store = useThreadContextSidebarStore.getState();
+    store.toggleSection("details:environments");
+    store.toggleSection("activity:landings");
+    expect(useThreadContextSidebarStore.getState().collapsedSections).toEqual([
+      "details:environments",
+      "activity:landings",
+    ]);
+    store.show("details", { section: "details:environments" });
+    expect(useThreadContextSidebarStore.getState()).toMatchObject({
+      collapsedSections: ["activity:landings"],
+      revealSection: "details:environments",
+    });
+    store.consumeRevealSection("details:inspect");
+    expect(useThreadContextSidebarStore.getState().revealSection).toBe("details:environments");
+    store.consumeRevealSection("details:environments");
+    expect(useThreadContextSidebarStore.getState().revealSection).toBeNull();
     vi.unstubAllGlobals();
   });
 
@@ -355,7 +417,7 @@ describe("thread views store", () => {
       thread: child,
       id: "plan",
     });
-    store.show("environments", { thread: child, environmentId: "e" });
+    store.show("details", { thread: child, environmentId: "e", section: "details:environments" });
     expect(useThreadContextSidebarStore.getState().environmentSelection).toEqual({
       thread: child,
       id: "e",
@@ -373,21 +435,27 @@ describe("thread views store", () => {
     const { migrate, partialize } = useThreadContextSidebarStore.persist.getOptions();
     const rail = {
       view: "timeline",
-      lastTool: "timeline",
+      lastTool: "inspect",
       hidden: ["inbox"],
       todoScope: "all",
     };
     expect(migrate?.(rail, 2)).toEqual({ todoScope: "all" });
     expect(useToolSidebarStore.getState()).toMatchObject({
       open: true,
-      view: "timeline",
-      threadView: "timeline",
+      view: "activity",
+      threadView: "activity",
     });
     useToolSidebarStore.setState(useToolSidebarStore.getInitialState());
     expect(migrate?.({ view: "links", lastTool: "links" }, 1)).toEqual({});
     expect(useToolSidebarStore.getState().open).toBe(false);
     expect(
       Object.keys(partialize!(useThreadContextSidebarStore.getState()) as object).toSorted(),
-    ).toEqual(["evidenceCoverageDismissed", "todoFilter", "todoScope", "todoShowClosed"]);
+    ).toEqual([
+      "collapsedSections",
+      "evidenceCoverageDismissed",
+      "todoFilter",
+      "todoScope",
+      "todoShowClosed",
+    ]);
   });
 });

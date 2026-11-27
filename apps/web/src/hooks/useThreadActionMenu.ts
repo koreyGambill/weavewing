@@ -208,7 +208,9 @@ export function useThreadActionMenu(input: {
           return;
         case "todos":
         case "automations": {
-          useThreadContextSidebarStore.getState().show(action, { thread: threadRef });
+          useThreadContextSidebarStore
+            .getState()
+            .show(action === "todos" ? "checklist" : action, { thread: threadRef });
           return;
         }
         case "changes":

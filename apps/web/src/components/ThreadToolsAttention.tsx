@@ -11,7 +11,8 @@ import {
 } from "../threadContextSidebar";
 import { useSelectedThreadRef } from "./threadToolsHost";
 
-function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
+/** The selected thread's counts from its workspace, which the attention dot keeps loaded. */
+export function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
   const canRead = useEnvironmentScope(threadRef?.environmentId ?? null, AuthOrchestrationReadScope);
   const workspace = useEnvironmentQuery(
     threadRef && canRead

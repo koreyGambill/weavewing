@@ -85,23 +85,37 @@ folders appear under **No project**, with the current folder name in the sidebar
 The thread keeps its history. Its next turn starts a new agent session in that
 folder with the conversation carried over. Finish or stop any work before moving.
 
-The thread's views (Todos, Evidence, Artifacts, Links, Related, Timeline, Details,
-Environments, Inspect and Automations) open in the side panel on the right, along
-with Inbox, Calendar and Status. The left sidebar holds only your threads. Open the
+The thread's five views open in the side panel on the right:
+
+- **Checklist**: the agent's checklist and your follow-up flags.
+- **Artifacts**: documents agents publish, with their questions.
+- **Links**: the ticket, pull requests, web links and files, then the threads this
+  one delegated to, forked, messaged or heard from.
+- **Activity**: when the thread and its delegates ran, then its landings, newest first.
+- **Details**: workspace, branch, scripts and automations, then its environments, then
+  context and token use with file reads.
+
+Inbox, Evidence, Automations, Calendar and Status span threads and open in the same
+panel. The left sidebar holds only your threads. A view with several parts shows
+each under its own heading; click a heading to collapse that part, and it stays
+collapsed on this device. A part loads when you scroll to it. Open the
 panel with the panel button at the right of the titlebar, with `Cmd+Alt+Shift+B` on
 macOS or `Ctrl+Alt+Shift+B` on Windows and Linux, or on a thread's details with the
 panel button at the right end of the row under the composer. `Cmd+Alt+I` on macOS or
 `Ctrl+Alt+I` on Windows and Linux opens the panel on the last thread view you used,
 or closes it when a thread view is showing. Choose a view from the menu at the top
-left of the panel: **This thread** lists the thread views and **Everywhere** the rest.
+left of the panel: **This thread** lists the thread views and **Everywhere** the rest. The menu counts
+Checklist's open agent items and follow-up flags and Artifacts' unanswered questions, and
+marks Links when the ticket needs review; hover a view for what it shows.
 The panel covers the right edge of the chat instead of narrowing it, and shows the
 selected thread. It closes when you press Escape, click outside it or switch
 threads. **Pin** keeps it open while you move between threads, and its views
 follow the thread you select. **Lock to thread** keeps showing one thread while
 you select others; the panel names the locked thread, and unlocking returns it to
-following. **Todos** or **Automations** in a conversation's title menu shows that
-conversation; when the panel follows another thread, such as a focused side chat, it
-locks to the conversation and names it. Drag the panel's left edge to resize it; double-click the edge to
+following. **Checklist** in a conversation's title menu shows that conversation;
+when the panel follows another thread, such as a focused side chat, it locks to the
+conversation and names it. **Automations** opened from a thread lists that thread's
+automations; remove the **This thread** chip to list them all. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
 Calendar, Status and Pull requests also open as full pages beside the thread list.
@@ -154,18 +168,18 @@ Open **Status** in the side panel to check your status sources. Its alert dot
 also appears on the panel button while the panel is closed. Configure sources
 under **Settings → Status sources**, also linked from the Status view.
 
-Links, Artifacts and Related have a filter box, and each row can copy its link,
+Links and Artifacts have filter boxes, and each row can copy its link,
 ticket ID or thread link. Links also filters by service, sorts, and copies every
 shown link at once.
 
-**Todos** holds the commitments you and agents track for a thread. New items are
+**Checklist** holds the commitments you and agents track for a thread. New items are
 yours; give one to the agent before adding it, or change who is responsible from
 the item's menu. Items nest up to three levels: indent and outdent from the item's
 menu, or press Tab and Shift+Tab while editing its text. Select an item's text to
 edit it and its note. Filter the list to your items or the agent's, and show done
-and dropped items when you need them. These choices stay on this device. The
-Todos badge counts the agent's open items; your own open items count in the
-thread's **Waiting on you** strip instead (see [Thread workspace](reviews.md#waiting-on-you)).
+and dropped items when you need them. These choices stay on this device. Your own
+open items count in the thread's **Waiting on you** strip (see
+[Thread workspace](reviews.md#waiting-on-you)).
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
@@ -207,9 +221,10 @@ or what's wrong with it, the agent records that on the card as **Recorded by the
 agent**. A problem it records shows as **Agent fixing** until a later landing names the
 fix. **Reopen** on any settled card makes it open again.
 
-The Evidence view lists the same landings. Pick **Thread** for this thread's landings
-or **All** for every thread on this server, and filter to the ones that still need QA
-or to **Notes**. Notes lists each noted change with the start of its gaps, newest landing
+The Evidence view lists the same landings for every thread on this server. Pick
+**Thread** for the selected thread's landings. A thread's own landings also
+show in its **Activity** view. Filter Evidence to changes that need QA or to
+**Notes**. Notes lists each noted change with the start of its gaps, newest landing
 first, 50 at a time, and a lead's thread includes the notes its delegated agents recorded.
 Expand a note or open its landing to read all of it, or choose **Needs me** to show a note
 as a QA card. A later record of that landing keeps the card, and keeps any card you
@@ -250,23 +265,22 @@ step through them, and you can bind keys to them, and to **Chat: Bookmark
 Selection**, in Settings > Keybindings. To remove a bookmark, use its mark beside
 the message, hover its bar, or select its text again.
 
-In Todos, the **Bookmarked** section at the top lists this thread's open bookmark
-to-dos, not its plain bookmarks, and the Todos badge counts them until they're
-done. Click one to jump to it, or tick it once you're finished. **All** at the top
-of Todos lists bookmarks across every thread on that thread's environment. Its filter
+In Checklist, the **Bookmarked** section at the top lists this thread's open bookmark
+to-dos, not its plain bookmarks. Click one to jump to it, or tick it once you're
+finished. **All** at the top of Checklist lists bookmarks across every thread on that thread's environment. Its filter
 shows every bookmark under **All**, open to-dos under **To-do** and finished ones under
 **Done**. Bookmarks are yours only: agents never see them. This is unrelated to
 **Follow-up behavior** in Settings, which decides what a message sent while an
 agent is busy does.
 
-**Timeline** shows when the thread and everything it delegated ran: one row per
+**Runs** in Activity shows when the thread and everything it delegated ran: one row per
 thread, with its delegates and side chats indented beneath it, on a shared clock.
 Use it to see where a long task spent its time and which work ran in parallel.
 Hover a bar for its model, duration and how long it waited to start; click it to
 open that thread. On a thread that ran for days, pick a shorter window from the
-view's header. Delegates in a linked environment and plain forks are not shown.
+section's header. Delegates in a linked environment and plain forks are not shown.
 
-The **Environments** view shows Xwing environments used by the thread
+**Environments** in Details shows Xwing environments used by the thread
 and its delegated children. Open an environment to see its repositories and apps,
 open a terminal, or review an archive or deletion. **Unlink** removes a link to a
 folder the thread is not using. Select it again with **Change folder** to restore
@@ -501,7 +515,7 @@ retry and the normal snooze choices.
 
 On web and desktop, use **Agents** to follow work delegated to subagents.
 A subagent started with a role, such as `review` or `implementation`, shows it as
-a small label in its parent's rows, in **Related**, and in its own header.
+a small label in its parent's rows, in **Links**, and in its own header.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to
 fill the screen; close the full-screen view to return to the parent and inspector.
