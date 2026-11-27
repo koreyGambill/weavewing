@@ -28,8 +28,8 @@ import { findRevertCheckpoint } from "../../session-logic";
 import { type ChatMessage } from "../../types";
 import { newThreadId } from "~/lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { composerTargetKey, useComposerDraftStore } from "../../composerDraftStore";
-import { useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { toggleTrackAnswer } from "../answers/trackedAnswerDraft";
 import { threadEnvironment } from "../../state/threads";
 import { waitForThreadShell } from "../../state/entities";
 import { openRevertConfirm } from "./ChatOverlayHosts";
@@ -246,9 +246,8 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       (ask) => ask.askedInMessageId === message.id,
     );
     if (tracked === undefined ? message.context?.trackedAsk : tracked.state !== "withdrawn") {
-      const key = composerTargetKey(composerDraftTarget);
-      const answerDrafts = useTrackedAnswerDraftStore.getState();
-      if (answerDrafts.drafts[key]?.track !== true) answerDrafts.toggleTrack(key);
+      const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+      if (draft?.trackedAnswer?.track !== true) toggleTrackAnswer(composerDraftTarget);
     }
     if (currentRouteThreadKeyRef.current === routeThreadKey) {
       const nextPrompt = rewind.prompt;

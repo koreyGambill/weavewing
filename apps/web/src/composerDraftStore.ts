@@ -27,6 +27,8 @@ import {
   EnvironmentContextRecord,
   ArtifactAnswerContextRecord,
   WaitingItemContextRecord,
+  TrackedAskId,
+  TrackedQuestion,
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
@@ -348,6 +350,21 @@ const PersistedTerminalContextDraft = Schema.Struct({
 });
 type PersistedTerminalContextDraft = typeof PersistedTerminalContextDraft.Type;
 
+const TrackedAnswerDraft = Schema.Struct({
+  track: Schema.Boolean,
+  discuss: Schema.Array(Schema.Struct({ id: TrackedAskId, question: TrackedQuestion })).check(
+    Schema.isMaxLength(20),
+  ),
+});
+export type TrackedAnswerDraft = typeof TrackedAnswerDraft.Type;
+const decodeLegacyTrackedAnswers = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      state: Schema.Struct({ drafts: Schema.Record(Schema.String, TrackedAnswerDraft) }),
+    }),
+  ),
+);
+
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
@@ -358,6 +375,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   threadContexts: Schema.optionalKey(Schema.Array(ThreadContextRecord)),
   environmentContexts: Schema.optionalKey(Schema.Array(EnvironmentContextRecord)),
   waitingItems: Schema.optionalKey(Schema.Array(WaitingItemContextRecord)),
+  trackedAnswer: Schema.optionalKey(TrackedAnswerDraft),
   artifactAnswers: Schema.optionalKey(Schema.Array(ArtifactAnswerContextRecord)),
   replyTo: Schema.optionalKey(ResponseContextRecord),
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
@@ -493,6 +511,7 @@ export interface ComposerThreadDraftState {
   environmentContexts: EnvironmentContextRecord[];
   /** Discuss references to items waiting on the user, such as a QA change. */
   waitingItems: WaitingItemContextRecord[];
+  trackedAnswer?: TrackedAnswerDraft | undefined;
   artifactAnswers: ArtifactAnswerContextRecord[];
   /** The response this message replies to. It becomes a context record when the message is sent. */
   replyTo: ResponseContextRecord | null;
@@ -520,6 +539,7 @@ export function composerDraftHasUserContent(
     draft.threadContexts.length > 0 ||
     draft.environmentContexts.length > 0 ||
     draft.waitingItems.length > 0 ||
+    draft.trackedAnswer !== undefined ||
     draft.artifactAnswers.length > 0 ||
     draft.replyTo !== null
   );
@@ -791,6 +811,10 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     records: ReadonlyArray<WaitingItemContextRecord>,
   ) => void;
+  setTrackedAnswer: (
+    threadRef: ComposerThreadTarget,
+    tracking: TrackedAnswerDraft | undefined,
+  ) => void;
   addArtifactAnswers: (
     threadRef: ComposerThreadTarget,
     records: ReadonlyArray<ArtifactAnswerContextRecord>,
@@ -805,7 +829,10 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     attachments: PersistedComposerImageAttachment[],
   ) => Promise<void>;
-  clearComposerContent: (threadRef: ComposerThreadTarget) => void;
+  clearComposerContent: (
+    threadRef: ComposerThreadTarget,
+    options?: { readonly retainTrackedAnswer: true },
+  ) => void;
   /** Clears text and attachments, preserving terminal/element contexts, preview annotations, and review comments. */
   clearComposerPromptAndImages: (threadRef: ComposerThreadTarget) => void;
   /** Moves all user content into a destination that has none; otherwise leaves both drafts alone. */
@@ -963,6 +990,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     threadContexts: [],
     environmentContexts: [],
     waitingItems: [],
+    trackedAnswer: undefined,
     artifactAnswers: [],
     replyTo: null,
     modelSelectionByProvider: {},
@@ -1079,6 +1107,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.threadContexts.length === 0 &&
     draft.environmentContexts.length === 0 &&
     draft.waitingItems.length === 0 &&
+    draft.trackedAnswer === undefined &&
     draft.artifactAnswers.length === 0 &&
     draft.replyTo === null &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
@@ -2510,6 +2539,7 @@ function persistedComposerDraftHasUserContent(draft: PersistedComposerThreadDraf
     (draft.threadContexts?.length ?? 0) > 0 ||
     (draft.environmentContexts?.length ?? 0) > 0 ||
     (draft.waitingItems?.length ?? 0) > 0 ||
+    draft.trackedAnswer !== undefined ||
     (draft.artifactAnswers?.length ?? 0) > 0 ||
     draft.replyTo !== undefined
   );
@@ -2593,6 +2623,7 @@ export function partializeComposerDraftStoreState(
       draft.threadContexts.length === 0 &&
       draft.environmentContexts.length === 0 &&
       draft.waitingItems.length === 0 &&
+      draft.trackedAnswer === undefined &&
       draft.artifactAnswers.length === 0 &&
       draft.replyTo === null &&
       !hasModelData &&
@@ -2655,6 +2686,14 @@ export function partializeComposerDraftStoreState(
         : {}),
       ...(draft.waitingItems.length > 0
         ? { waitingItems: draft.waitingItems.map((record) => ({ ...record })) }
+        : {}),
+      ...(draft.trackedAnswer
+        ? {
+            trackedAnswer: {
+              track: draft.trackedAnswer.track,
+              discuss: draft.trackedAnswer.discuss.map((entry) => ({ ...entry })),
+            },
+          }
         : {}),
       ...(draft.artifactAnswers.length > 0
         ? { artifactAnswers: draft.artifactAnswers.map((record) => ({ ...record })) }
@@ -2945,6 +2984,7 @@ function toHydratedThreadDraft(
     threadContexts: persistedDraft.threadContexts?.map((record) => ({ ...record })) ?? [],
     environmentContexts: persistedDraft.environmentContexts?.map((record) => ({ ...record })) ?? [],
     waitingItems: persistedDraft.waitingItems?.map((record) => ({ ...record })) ?? [],
+    trackedAnswer: persistedDraft.trackedAnswer,
     artifactAnswers: persistedDraft.artifactAnswers?.map((record) => ({ ...record })) ?? [],
     replyTo: persistedDraft.replyTo ?? null,
     modelSelectionByProvider,
@@ -4546,6 +4586,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
+        setTrackedAnswer: (threadRef, tracking) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef);
+          if (!threadKey) return;
+          const trackedAnswer = tracking?.track || tracking?.discuss.length ? tracking : undefined;
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const nextDraft = { ...existing, trackedAnswer };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];
+            else nextDraftsByThreadKey[threadKey] = nextDraft;
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
         setWaitingItems: (threadRef, records) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef);
           if (!threadKey) return;
@@ -4722,7 +4775,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           await Promise.resolve();
           verifyPersistedAttachments(threadKey, attachments, set);
         },
-        clearComposerContent: (threadRef) => {
+        clearComposerContent: (threadRef, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
@@ -4735,6 +4788,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...current,
               ...composerDraftContent(createEmptyThreadDraft()),
+              ...(options?.retainTrackedAnswer ? { trackedAnswer: current.trackedAnswer } : {}),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -4862,6 +4916,24 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 );
 
 composerDraftLoadedState = partializeComposerDraftStoreState(composerDraftStore.getState());
+
+const legacyAnswerDraftKey = "t3-tracked-answer-drafts";
+const legacyAnswerDrafts = decodeLegacyTrackedAnswers(
+  composerDraftBaseStorage.getItem(legacyAnswerDraftKey),
+);
+if (Option.isSome(legacyAnswerDrafts)) {
+  composerDraftStore.setState((state) => {
+    const draftsByThreadKey = { ...state.draftsByThreadKey };
+    for (const [key, tracking] of Object.entries(legacyAnswerDrafts.value.state.drafts)) {
+      const current = draftsByThreadKey[key] ?? createEmptyThreadDraft();
+      if (current.trackedAnswer === undefined && (tracking.track || tracking.discuss.length > 0))
+        draftsByThreadKey[key] = { ...current, trackedAnswer: tracking };
+    }
+    return { draftsByThreadKey };
+  });
+  composerDebouncedStorage.flush();
+  if (composerDraftLastWrite !== null) composerDraftBaseStorage.removeItem(legacyAnswerDraftKey);
+}
 
 export const useComposerDraftStore = composerDraftStore;
 
@@ -5029,6 +5101,12 @@ export function useComposerThreadDraft(threadRef: ComposerThreadTarget): Compose
   return useComposerDraftStore((state) => {
     return getComposerDraftState(state, threadRef) ?? EMPTY_THREAD_DRAFT;
   });
+}
+
+export function clearSentTrackedAnswer(target: ComposerThreadTarget, sent: TrackedAnswerDraft) {
+  const store = useComposerDraftStore.getState();
+  if (store.getComposerDraft(target)?.trackedAnswer === sent)
+    store.setTrackedAnswer(target, undefined);
 }
 
 /** The thread composer's answer records; stable while only the prompt text changes. */

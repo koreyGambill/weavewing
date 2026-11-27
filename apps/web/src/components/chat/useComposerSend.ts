@@ -1,4 +1,3 @@
-import { useTrackedAnswerDraftStore, withTrackedAnswerDraft } from "../answers/trackedAnswerDraft";
 import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
 import { consumeSideChatRefresh, readSideChatRefreshArm } from "./sideChatContextRefresh";
@@ -25,6 +24,7 @@ import {
   DEFAULT_MODEL,
   type EnvironmentId,
   type ModelSelection,
+  type OrchestrationMessageContext,
   type PreviewAnnotationPayload,
   type ScopedThreadRef,
   type ThreadId,
@@ -76,11 +76,11 @@ import {
   restoreFailedDraftThread,
   checkoutPullRequestUrlToLink,
   composerDraftHasUserContent,
-  composerTargetKey,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
   useComposerDraftStore,
+  clearSentTrackedAnswer,
   DraftId,
 } from "../../composerDraftStore";
 import {
@@ -252,7 +252,9 @@ interface ComposerSendInput {
   readonly anchorNewTurn: TimelineFollow["anchorNewTurn"];
   readonly acknowledgeActiveThreadWoke: () => void;
   /** Resolves true once the side chat started and got the prompt. */
-  readonly onSideChat?: ((prompt: string) => Promise<boolean>) | undefined;
+  readonly onSideChat?:
+    | ((prompt: string, context?: OrchestrationMessageContext) => Promise<boolean>)
+    | undefined;
   /** Refuses `/side` with this reason and keeps the draft. */
   readonly sideChatDisabledReason: string | null;
   readonly handleNewThreadInActiveProject: () => void;
@@ -394,9 +396,8 @@ export function useComposerSend(input: ComposerSendInput) {
     // What the user pressed send on; uploads below can take a while, and a redirect must not
     // decline approvals for a draft that changed meanwhile.
     const promptAtSend = promptRef.current;
-    const answerDraftKey = composerTargetKey(composerDraftTarget);
     const answerDraft = input.waitingCardsEnabled
-      ? useTrackedAnswerDraftStore.getState().drafts[answerDraftKey]
+      ? useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.trackedAnswer
       : undefined;
     if (
       usageLimitsOffered &&
@@ -542,6 +543,7 @@ export function useComposerSend(input: ComposerSendInput) {
                   waitingItems: context.waitingItems,
                   artifactAnswers: context.artifactAnswers,
                   attachments: [],
+                  trackedAnswer: { text: promptAtSend, draft: answerDraft },
                 }),
               }),
             },
@@ -577,6 +579,16 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     if (onSideChat && sendCtx && sideChatCommand && sideChatDisabledReason === null) {
+      if (answerDraft?.discuss.length) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Send the follow-up in its original thread",
+            description: "A tracked answer can only be discussed in the thread that owns it.",
+          }),
+        );
+        return;
+      }
       if (
         sendCtx.images.length > 0 ||
         sendCtx.files.length > 0 ||
@@ -598,7 +610,18 @@ export function useComposerSend(input: ComposerSendInput) {
         );
         return;
       }
-      const started = await onSideChat(sideChatCommand.prompt);
+      const sidePrompt = sideChatCommand.prompt;
+      const context = sidePrompt.trim()
+        ? buildMessageContext({
+            terminalContexts: [],
+            reviewComments: [],
+            previewAnnotations: [],
+            trackedAnswer: { text: sidePrompt, draft: answerDraft },
+          })
+        : undefined;
+      const started = await onSideChat(sidePrompt, context);
+      if (started && context?.trackedAsk && answerDraft)
+        clearSentTrackedAnswer(composerDraftTarget, answerDraft);
       // Clear only what was sent; the user may have edited the draft or left meanwhile.
       if (
         started &&
@@ -797,7 +820,7 @@ export function useComposerSend(input: ComposerSendInput) {
         },
         clearDraft: () => {
           promptRef.current = "";
-          clearComposerDraftContent(composerDraftTarget);
+          clearComposerDraftContent(composerDraftTarget, { retainTrackedAnswer: true });
           composerRef.current?.resetCursorState();
         },
         onUpdate: (submission) => {
@@ -837,7 +860,7 @@ export function useComposerSend(input: ComposerSendInput) {
     if (freshSessionAvailable && composerHoldsOnlyText && isClearComposerCommand(trimmed)) {
       armFreshSession(routeThreadKey);
       promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
+      clearComposerDraftContent(composerDraftTarget, { retainTrackedAnswer: true });
       composerRef.current?.resetCursorState();
       return;
     }
@@ -928,24 +951,21 @@ export function useComposerSend(input: ComposerSendInput) {
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
     const buildOutgoingMessageContext = (attachmentIds: ReadonlyArray<string>) =>
-      withTrackedAnswerDraft(
-        buildMessageContext({
-          terminalContexts: composerTerminalContextsSnapshot,
-          reviewComments: composerReviewCommentsSnapshot,
-          previewAnnotations: composerPreviewAnnotationsSnapshot,
-          threadContexts: composerThreadContextsSnapshot,
-          environmentContexts: composerEnvironmentContextsSnapshot,
-          waitingItems: composerWaitingItemsSnapshot,
-          artifactAnswers: composerArtifactAnswersSnapshot,
-          replyTo,
-          attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
-            attachment,
-            attachmentId: attachmentIds[index] ?? attachment.id,
-          })),
-        }),
-        messageTextForSend,
-        answerDraft,
-      );
+      buildMessageContext({
+        terminalContexts: composerTerminalContextsSnapshot,
+        reviewComments: composerReviewCommentsSnapshot,
+        previewAnnotations: composerPreviewAnnotationsSnapshot,
+        threadContexts: composerThreadContextsSnapshot,
+        environmentContexts: composerEnvironmentContextsSnapshot,
+        waitingItems: composerWaitingItemsSnapshot,
+        artifactAnswers: composerArtifactAnswersSnapshot,
+        replyTo,
+        attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
+          attachment,
+          attachmentId: attachmentIds[index] ?? attachment.id,
+        })),
+        trackedAnswer: { text: messageTextForSend, draft: answerDraft },
+      });
     const outgoingMessageContext = buildOutgoingMessageContext(
       composerAttachmentsSnapshot.map((attachment) => attachment.id),
     );
@@ -1188,7 +1208,7 @@ export function useComposerSend(input: ComposerSendInput) {
             draftBeforeDecline
         ) {
           promptRef.current = "";
-          clearComposerDraftContent(composerDraftTarget);
+          clearComposerDraftContent(composerDraftTarget, { retainTrackedAnswer: true });
           composerRef.current?.resetCursorState();
         }
         return;
@@ -1335,7 +1355,7 @@ export function useComposerSend(input: ComposerSendInput) {
       : null;
     // Keep new-thread flows from reusing this draft while attachments and worktree setup settle.
     if (sentDraftThreadRef) markPromotedDraftThreadByRef(sentDraftThreadRef);
-    clearComposerDraftContent(composerDraftTarget);
+    clearComposerDraftContent(composerDraftTarget, { retainTrackedAnswer: true });
     // The prompt ref and cursor belong to the thread on screen, which may no longer be this one.
     if (currentRouteThreadKeyRef.current === routeThreadKey) {
       promptRef.current = "";
@@ -1489,8 +1509,7 @@ export function useComposerSend(input: ComposerSendInput) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
-        if (answerDraft)
-          useTrackedAnswerDraftStore.getState().clearSent(answerDraftKey, answerDraft);
+        if (answerDraft) clearSentTrackedAnswer(composerDraftTarget, answerDraft);
         if (pendingTurn !== null) {
           // Wait for the receipt so Stop cannot overtake the send on the server.
           if (pendingTurn.stopRequested) {

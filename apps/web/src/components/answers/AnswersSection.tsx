@@ -26,7 +26,7 @@ import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { TrackedAnswerBody } from "./ThreadAnswerCard";
 import { TrackedAskActions } from "./TrackedAskActions";
-import { useTrackedAnswerDraftStore } from "./trackedAnswerDraft";
+import { toggleAnswerDiscussion, useTrackedAnswerDraft } from "./trackedAnswerDraft";
 import { useUpdateTrackedAsk } from "./trackedAnswers-web-state";
 
 const asksRead = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -208,9 +208,7 @@ function AnswerListRow({
   const { canUpdate, submit } = useUpdateTrackedAsk(target);
   const answer = ask.answers.at(-1);
   const key = scopedThreadKey(target);
-  const discussed = useTrackedAnswerDraftStore(
-    (state) => state.drafts[key]?.discuss.some((item) => item.id === ask.id) ?? false,
-  );
+  const discussed = useTrackedAnswerDraft(target).discuss.some((item) => item.id === ask.id);
   const navigateToThread = async () => {
     if (route?.kind !== "server" || scopedThreadKey(route.threadRef) !== key)
       await navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(target) });
@@ -305,7 +303,7 @@ function AnswerListRow({
                   disabled={!canUpdate}
                   aria-pressed={discussed}
                   onClick={() => {
-                    useTrackedAnswerDraftStore.getState().toggleDiscuss(key, ask);
+                    toggleAnswerDiscussion(target, ask);
                     if (!discussed) void navigateToThread().then(() => focusThreadDraft(target));
                   }}
                 >

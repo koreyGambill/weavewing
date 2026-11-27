@@ -101,6 +101,7 @@ import {
   partializeComposerDraftStoreState,
   threadQuestionNoteImageDraftId,
   useComposerDraftStore,
+  clearSentTrackedAnswer,
   DraftId,
 } from "./composerDraftStore";
 import { waitForDraftHeroTransition } from "./components/chat/draftHeroTransition";
@@ -110,6 +111,39 @@ import {
   environmentContextRecord,
   terminalContextReference,
 } from "./lib/composerContextRecords";
+
+it("serializes the whole tracked draft into a send context and keeps it during optimistic clearing", () => {
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("tracked-send-test"));
+  const store = useComposerDraftStore.getState();
+  const tracking = { track: true, discuss: [{ id: "A4", question: "How is it reset?" }] };
+  store.setPrompt(threadRef, "What resets the counter?");
+  store.setTrackedAnswer(threadRef, tracking);
+  const snapshot = store.getComposerDraft(threadRef)!;
+  store.clearComposerContent(threadRef, { retainTrackedAnswer: true });
+  expect(store.getComposerDraft(threadRef)?.trackedAnswer).toBe(tracking);
+  expect(
+    buildMessageContext({
+      terminalContexts: [],
+      reviewComments: [],
+      previewAnnotations: [],
+      trackedAnswer: { text: snapshot.prompt, draft: snapshot.trackedAnswer },
+    }),
+  ).toEqual({
+    version: 1,
+    records: [],
+    trackedAsk: { question: "What resets the counter?" },
+    discussAnswers: ["A4"],
+  });
+  store.setPrompt(threadRef, "The next message");
+  const laterTracking = { ...tracking };
+  store.setTrackedAnswer(threadRef, laterTracking);
+  clearSentTrackedAnswer(threadRef, tracking);
+  expect(store.getComposerDraft(threadRef)?.trackedAnswer).toBe(laterTracking);
+  clearSentTrackedAnswer(threadRef, laterTracking);
+  expect(store.getComposerDraft(threadRef)?.prompt).toBe("The next message");
+  expect(store.getComposerDraft(threadRef)?.trackedAnswer).toBeUndefined();
+  store.clearComposerContent(threadRef);
+});
 import { bringThreadToDraft } from "./lib/sideChatPane";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import {

@@ -34,13 +34,18 @@ import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
   toKindScopedComposerContextId,
+  trackedAskContextForMessage,
 } from "@t3tools/shared/composerContextReferences";
 
 import {
   type ComposerContextReference,
   producerIdFromComposerContextId,
 } from "./composerContextReferences";
-import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composerDraftStore";
+import type {
+  ComposerFileAttachment,
+  ComposerImageAttachment,
+  TrackedAnswerDraft,
+} from "~/composerDraftStore";
 import type { AttachmentUploadState } from "./attachmentUploadState";
 import { normalizeElementContextSelection } from "./elementContext";
 import {
@@ -400,13 +405,15 @@ export function buildMessageContext(input: {
   artifactAnswers?: ReadonlyArray<ArtifactAnswerContextRecord>;
   replyTo?: ResponseContextRecord | null;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
+  retainedRecords?: ReadonlyArray<ComposerContextRecord>;
+  trackedAnswer?: { readonly text: string; readonly draft: TrackedAnswerDraft | undefined };
 }): OrchestrationMessageContext | undefined {
   const screenshotAttachmentIds = new Set(
     (input.attachments ?? []).flatMap(({ attachment }) =>
       attachment.type === "image" ? [attachment.id] : [],
     ),
   );
-  const records: ComposerContextRecord[] = [
+  const newRecords: ComposerContextRecord[] = [
     ...input.terminalContexts.map(terminalContextRecord),
     ...input.reviewComments.map(reviewCommentContextRecord),
     ...(input.threadContexts ?? []),
@@ -421,7 +428,24 @@ export function buildMessageContext(input: {
     ),
     ...(input.attachments ?? []).map(attachmentContextRecord),
   ];
-  return records.length === 0 ? undefined : { version: 1, records };
+  const records = input.retainedRecords?.length
+    ? [
+        ...new Map(
+          [...input.retainedRecords, ...newRecords].map((record) => [record.contextId, record]),
+        ).values(),
+      ]
+    : newRecords;
+  const draft = input.trackedAnswer?.draft;
+  return records.length === 0 && !draft?.track && !draft?.discuss.length
+    ? undefined
+    : {
+        version: 1,
+        records,
+        ...(draft?.track && input.trackedAnswer
+          ? { trackedAsk: trackedAskContextForMessage(input.trackedAnswer.text, records) }
+          : {}),
+        ...(draft?.discuss.length ? { discussAnswers: draft.discuss.map(({ id }) => id) } : {}),
+      };
 }
 
 export function asKnownContextRecord(

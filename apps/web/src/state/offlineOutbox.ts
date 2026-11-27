@@ -10,7 +10,11 @@ import { environmentCatalog } from "../connection/catalog";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSession } from "./session";
 import { threadEnvironment } from "./threads";
-import { useComposerDraftStore, type ComposerThreadTarget } from "../composerDraftStore";
+import {
+  clearSentTrackedAnswer,
+  useComposerDraftStore,
+  type ComposerThreadTarget,
+} from "../composerDraftStore";
 
 export const offlineOutbox = createOfflineOutbox();
 const isEnvironmentRpcUnavailableError = Schema.is(EnvironmentRpcUnavailableError);
@@ -52,7 +56,14 @@ const send = async (submission: OfflineSubmission) => {
     const draft = drafts.get(submission.input.commandId);
     const store = useComposerDraftStore.getState();
     if (draft && store.getComposerDraft(draft.target) === draft.snapshot)
-      store.clearComposerContent(draft.target);
+      store.clearComposerContent(draft.target, { retainTrackedAnswer: true });
+    const sentContext = submission.input.message.context;
+    if (
+      draft?.snapshot?.trackedAnswer &&
+      (sentContext?.trackedAsk || sentContext?.discussAnswers?.length)
+    ) {
+      clearSentTrackedAnswer(draft.target, draft.snapshot.trackedAnswer);
+    }
     return "sent" as const;
   }
   const error = squashAtomCommandFailure(result);

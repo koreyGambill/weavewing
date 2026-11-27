@@ -2,6 +2,7 @@ import type {
   ModelSelection,
   RuntimeMode,
   OrchestrationV2ForkHistoryPolicy,
+  OrchestrationMessageContext,
   ScopedThreadRef,
   SideChatAnchor,
   ThreadId,
@@ -62,6 +63,7 @@ export function useSideChat(input: {
     threadRef: ScopedThreadRef,
     prompt: string | undefined,
     anchor: SideChatAnchor | undefined,
+    context: OrchestrationMessageContext | undefined,
   ) => {
     const { runtimeMode, modelSelection, forkHistoryPolicy, forkHistoryPolicySupported } =
       input.readSettings();
@@ -125,6 +127,7 @@ export function useSideChat(input: {
             origin: { kind: "user" as const },
             role: "user",
             text,
+            ...(context === undefined ? {} : { context }),
             attachments: [],
           },
           ...(modelSelection === undefined ? {} : { modelSelection }),
@@ -149,11 +152,15 @@ export function useSideChat(input: {
     }
     return true;
   };
-  const open = async (prompt?: string, anchor?: SideChatAnchor) => {
+  const open = async (
+    prompt?: string,
+    anchor?: SideChatAnchor,
+    context?: OrchestrationMessageContext,
+  ) => {
     const threadRef = anchor === undefined ? input.threadRef : input.anchoredThreadRef;
     if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    return start(threadRef, prompt, anchor).finally(() => {
+    return start(threadRef, prompt, anchor, context).finally(() => {
       pendingRef.current = false;
     });
   };

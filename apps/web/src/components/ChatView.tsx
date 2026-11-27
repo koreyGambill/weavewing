@@ -2979,7 +2979,10 @@ export default function ChatView(props: ChatViewProps) {
     sideChat.open(undefined, anchor),
   );
   const openSideChatStable = useStableCallback(() => void sideChat.open());
-  const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
+  const sendSideChatStable = useStableCallback(
+    (prompt: string, context?: Parameters<typeof sideChat.open>[2]) =>
+      sideChat.open(prompt, undefined, context),
+  );
   const {
     onConfirmRevertStable,
     onForkFromRunStable: forkFromRun,

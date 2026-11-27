@@ -199,7 +199,7 @@ import {
 } from "../commandPaletteStore";
 import { hasLiveQuestions } from "./waiting/waitingStrip.logic";
 import { waitingCardsEnvironmentIdsAtom } from "../state/threadQuestions";
-import { useTrackedAnswerDraftStore } from "./answers/trackedAnswerDraft";
+import { toggleTrackAnswer } from "./answers/trackedAnswerDraft";
 import { openTrackedAnswersSection } from "./answers/AnswersSection";
 import { openInbox, openInboxView } from "./inbox/openInbox";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
@@ -1900,14 +1900,14 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (activeThread !== null && waitingCardsEnvironmentIds.includes(activeThread.environmentId)) {
-    const draftKey = scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id));
+    const draftTarget = scopeThreadRef(activeThread.environmentId, activeThread.id);
     actionItems.push({
       kind: "action",
       value: "action:track-answer",
       title: "Track the answer to this message",
       searchTerms: ["track", "answer", "question"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-      run: async () => useTrackedAnswerDraftStore.getState().toggleTrack(draftKey),
+      run: async () => toggleTrackAnswer(draftTarget),
     });
     actionItems.push({
       kind: "action",

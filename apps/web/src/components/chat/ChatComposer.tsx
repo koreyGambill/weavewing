@@ -236,7 +236,11 @@ import {
 } from "./ExpandedImagePreview";
 import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { TrackAnswerToggle } from "../answers/TrackAnswerToggle";
-import { useTrackedAnswerDraft, useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
+import {
+  toggleAnswerDiscussion,
+  toggleTrackAnswer,
+  useTrackedAnswerDraft,
+} from "../answers/trackedAnswerDraft";
 import {
   getComposerPromptLengthValidationMessage,
   getComposerSubmissionValidationMessage,
@@ -604,10 +608,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
-  const answerDraft = useTrackedAnswerDraft(composerDraftTargetKey);
+  const answerDraft = useTrackedAnswerDraft(composerDraftTarget);
   const showTrackAnswer = props.waitingCardsEnabled === true;
-  const toggleTrackAnswer = () =>
-    useTrackedAnswerDraftStore.getState().toggleTrack(composerDraftTargetKey);
+  const onToggleTrackAnswer = () => toggleTrackAnswer(composerDraftTarget);
   const {
     heldRequestIds,
     onDraftChange: onTypingGuardDraftChange,
@@ -3449,7 +3452,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) {
           event.preventDefault();
           event.stopPropagation();
-          toggleTrackAnswer();
+          onToggleTrackAnswer();
         }
       }}
       onFocusCapture={(event) => {
@@ -3722,11 +3725,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       size="xs"
                       variant="contrast-outline"
                       aria-label={`Remove follow-up on ${ask.id}`}
-                      onClick={() =>
-                        useTrackedAnswerDraftStore
-                          .getState()
-                          .toggleDiscuss(composerDraftTargetKey, ask)
-                      }
+                      onClick={() => toggleAnswerDiscussion(composerDraftTarget, ask)}
                     >
                       <span className="min-w-0 truncate">
                         {ask.id} · discuss · {ask.question}
@@ -3983,7 +3982,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         pressed={answerDraft.track}
                         compact={isComposerFooterCompact}
                         disabled={!canOperateThread}
-                        onToggle={toggleTrackAnswer}
+                        onToggle={onToggleTrackAnswer}
                       />
                     ) : null}
                   </ComposerFooterPrimaryActions>

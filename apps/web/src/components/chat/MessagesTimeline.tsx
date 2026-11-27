@@ -135,7 +135,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { ThreadAnswerCard } from "../answers/ThreadAnswerCard";
 import { useTrackedAsks } from "../answers/trackedAnswers-web-state";
-import { useTrackedAnswerDraft, useTrackedAnswerDraftStore } from "../answers/trackedAnswerDraft";
+import { toggleAnswerDiscussion, useTrackedAnswerDraft } from "../answers/trackedAnswerDraft";
 import { focusNearestComposer } from "../waiting/waitingItemComposer";
 import {
   revealInFlowRow,
@@ -1893,7 +1893,7 @@ function ThreadAnswerRow({ answerRef }: { answerRef: { id: string; n: number } }
   const { threadRef } = ctx;
   const key = threadRef ? scopedThreadKey(threadRef) : "";
   const ask = useTrackedAsks(threadRef).find((entry) => entry.id === answerRef.id);
-  const draft = useTrackedAnswerDraft(key);
+  const draft = useTrackedAnswerDraft(threadRef);
   if (!threadRef) return null;
   const answer = ask?.answers.find((entry) => entry.n === answerRef.n);
   if (!ask || !answer)
@@ -1914,7 +1914,7 @@ function ThreadAnswerRow({ answerRef }: { answerRef: { id: string; n: number } }
       {...(ctx.markdownCwd === undefined ? {} : { cwd: ctx.markdownCwd })}
       discussInComposer={discuss}
       onDiscuss={(from) => {
-        useTrackedAnswerDraftStore.getState().toggleDiscuss(key, ask);
+        toggleAnswerDiscussion(threadRef, ask);
         if (!discuss) focusNearestComposer(from);
       }}
       onAsked={() => {
