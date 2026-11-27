@@ -6,7 +6,7 @@
         {
           "image-name": "mark.svg",
           "name": "Web",
-          "position": { "scale": 1, "translation-in-points": [0, 0] }
+          "position": { "scale": 3, "translation-in-points": [0, 0] }
         }
       ]
     }
