@@ -1919,7 +1919,7 @@ it.effect("names a task by its ref alone, and refuses an id that reads as anothe
       },
       agent,
     );
-    const refusal = (write: Effect.Effect<unknown, ThreadWorkspaceError>) =>
+    const refusal = <A>(write: Effect.Effect<A, ThreadWorkspaceError>) =>
       write.pipe(
         Effect.flip,
         Effect.map((error) => error.message),
