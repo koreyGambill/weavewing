@@ -82,7 +82,7 @@ vi.mock(
 
 import { useRightPanelStore } from "../rightPanelStore";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
-import { useToolSidebarStore } from "../toolSidebarStore";
+import { provideSideAreaContext, useToolSidebarStore } from "../toolSidebarStore";
 import { ReviewReminderCoordinator } from "./ReviewReminderCoordinator";
 
 const environmentId = EnvironmentId.make("remote-environment");
@@ -118,6 +118,17 @@ it.each(["other-thread", "list"])(
     using _focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     using _visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const ref = scopeThreadRef(environmentId, review.threadId);
+    // What a mounted side panel reports: the open route's thread, which it follows.
+    using _context = {
+      [Symbol.dispose]: provideSideAreaContext(() =>
+        view === "list"
+          ? { route: ref, selected: ref }
+          : {
+              route: scopeThreadRef(EnvironmentId.make("existing"), ThreadId.make("thread")),
+              selected: null,
+            },
+      ),
+    };
     if (view === "list") {
       state.active = { environmentId, threadId: review.threadId };
       useThreadContextSidebarStore.getState().show("todos", { thread: ref });
@@ -139,15 +150,32 @@ it.each(["other-thread", "list"])(
       thread: ref,
       id: review.id,
     });
-    // From another thread the view waits for the navigation's arrival instead of closing on it.
+    // From another thread the view waits for the navigation's arrival; on its thread it settles.
     expect(useToolSidebarStore.getState()).toMatchObject({
       open: true,
       view: "artifacts",
       locked: null,
-      arrival: view === "list" ? null : `${environmentId}:${review.threadId}`,
+      arrival: view === "list" ? null : ref,
     });
   },
 );
+
+it("opens a review shown on its thread for arrival after you switch away", async () => {
+  setup();
+  using _focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  using _visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  state.active = { environmentId, threadId: review.threadId };
+  await using screen = await render(<ReviewReminderCoordinator />, {
+    router: "/remote-environment/review-thread",
+  });
+  await vi.waitFor(() => expect(state.add).toHaveBeenCalledTimes(1));
+  state.active = { environmentId: "existing", threadId: "thread" };
+  await screen.rerender(<ReviewReminderCoordinator />);
+  await act(() => state.add.mock.calls[0]?.[0].actionProps?.onClick?.());
+  expect(useToolSidebarStore.getState().arrival).toEqual(
+    scopeThreadRef(environmentId, review.threadId),
+  );
+});
 
 it("respects notification permission and never asks for it", async () => {
   setup();

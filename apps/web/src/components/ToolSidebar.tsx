@@ -27,10 +27,12 @@ import { useThreadShell } from "../state/entities";
 import { DeferEnvironmentQueries } from "../state/query";
 import { useEnvironmentThread } from "../state/threads";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { readSelectedThreadRef } from "../threadContextSidebar";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import {
   completeSideAreaHandoff,
   isSideAreaHandoffArriving,
+  provideSideAreaContext,
   sideAreaOpenRequests,
   takeSideAreaFocusRequest,
   useToolSidebarStore,
@@ -153,14 +155,19 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const routeKey = useRouterState({ select: (state) => state.resolvedLocation?.state.__TSR_key });
   const seenThreadKey = useRef(routeThreadKey);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
+  // The route's thread, and the thread the side area follows there: a focused side chat's, say.
+  const readContext = useStableCallback(() => {
+    const route = resolveThreadRouteRef(router.state.matches.at(-1)?.params ?? {});
+    return { route, selected: readSelectedThreadRef(route) };
+  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching threads by route, from a link or a shortcut, closes an unpinned side area unless the view was opened for that arrival.
   useEffect(() => {
     if (seenThreadKey.current === routeThreadKey) return;
     seenThreadKey.current = routeThreadKey;
     if (isSideAreaHandoffArriving(sideAreaRoute(router.state.location))) return;
-    useToolSidebarStore.getState().dispatch({ type: "routeChanged", threadKey: routeThreadKey });
+    useToolSidebarStore.getState().dispatch({ type: "routeChanged", context: readContext() });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only a thread switch dismisses; the router is read for the location it switched to.
-  }, [routeThreadKey]);
+  }, [routeThreadKey, readContext]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A page's handoff ends on the entry it went to; focus stays in the side area, which the destination's composer leaves alone.
   useEffect(() => {
     const route = { pathname: routePathname, key: routeKey, index: routeIndex };
@@ -183,6 +190,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
+    const stopContext = provideSideAreaContext(readContext);
     const toggle = () => openFromShortcut({ type: "toggle" });
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
@@ -226,6 +234,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       },
     );
     return () => {
+      stopContext();
       stopObserving();
       stopCommands();
       stopEscape();
