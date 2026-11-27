@@ -77,9 +77,9 @@ export interface ViewDefinition {
   /** The route that shows a global view full size; hosts narrower than `minWidthPx` link to it. */
   readonly page?: ViewPage;
   /**
-   * The hosts that render this view's body; a host offers only views that list it. Omitted, a
-   * view renders in the panel and in tiles, and on the shared page when `page` is
-   * "/view/$viewId". `[]` makes a view page-only: it opens only on its own `page`.
+   * Hosts that render this view's body; omitted means panel and tile, plus the shared page when
+   * `page` is "/view/$viewId". `"page"` is that shared host: a view whose dedicated route
+   * renders it lists `[]` (page-only), never `["page"]`.
    */
   readonly hosts?: ReadonlyArray<ViewHost>;
   readonly render: (props: {
