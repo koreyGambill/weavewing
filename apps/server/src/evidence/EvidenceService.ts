@@ -960,7 +960,8 @@ const make = Effect.gen(function* () {
         if (input.by === "user" && current.by === "agent" && current.state === input.state)
           return yield* invalid("The agent recorded this; reopen it to change it.");
         // Any answer to a quiet change raises its card first, as Needs me does: it is marked
-        // needs_you and gets a QA number, so the answer is never left where nobody sees it.
+        // needs_you and keeps its QA number, or takes the next one if it never had one, so the
+        // answer is never left where nobody sees it.
         const promote = current.state === "quiet";
         const ref =
           (promote || input.state === "pending") && current.ref === null

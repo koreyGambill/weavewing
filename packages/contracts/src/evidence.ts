@@ -109,7 +109,7 @@ export const EvidenceChange = Schema.Struct({
   attention: Schema.optional(
     Schema.Literals(["needs_you", "note"]).annotate({
       description:
-        "needs_you raises a QA card, which shows the captures; note, the default, logs the change without one. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
+        "needs_you raises a QA card, which shows the captures in chat; note, the default, logs the change without one. A visual change the user should look at is needs_you. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
     }),
   ),
   evidenceDir: Schema.optional(Text(1024)),

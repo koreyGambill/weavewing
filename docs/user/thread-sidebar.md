@@ -183,7 +183,7 @@ check, always shows a **QA card** in the thread where the agent recorded it. The
 agent marks each other change: **needs you** when you should look at it, such as a
 visual change with its screenshots, or check behavior the agent could not run, which
 also shows a card, or a **note** when its gaps are routine, such as no run on a device.
-A note's captures show only when you open it in Evidence.
+A note's captures are not shown in chat; expand it in Evidence to see them.
 An approval alone raises no card, because no review verdict is checked yet; a card
 that is raised still shows it as an unverified review. A landing a delegated agent
 recorded shows in its lead's thread, where the delegated work reported back. A
