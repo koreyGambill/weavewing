@@ -618,18 +618,29 @@ it("closes the thread drawer and focuses the panel when the shortcut opens it on
     .toHaveFocus();
 });
 
-it("closes the thread drawer when anything opens the side panel on a phone", async () => {
-  const { stack, screen } = await mountApp([threadWithHistory("phone-inbox", 1)], 390);
-  await using _app = stack;
-  await userEvent.click(screen.getByRole("button", { name: /^Toggle main sidebar/ }));
-  const drawer = page.getByRole("navigation", { name: "Threads" });
-  await expect.element(drawer).toBeVisible();
-  // As the thread list's Waiting on you row or a notification does.
-  await act(() => openInbox());
-  await expect.element(page.getByRole("complementary", { name: "Side panel" })).toBeVisible();
-  await expect.element(drawer).not.toBeInTheDocument();
-  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
-});
+it.each([false, true])(
+  "closes the phone drawer and focuses Inbox with an existing panel: %s",
+  async (existingPanel) => {
+    const { stack, screen } = await mountApp([threadWithHistory("phone-inbox", 1)], 390);
+    await using _app = stack;
+    if (existingPanel) {
+      await act(() => {
+        const panel = useToolSidebarStore.getState();
+        panel.dispatch({ type: "show", view: "activity" });
+        panel.dispatch({ type: "pin" });
+      });
+    }
+    await userEvent.click(screen.getByRole("button", { name: /^Toggle main sidebar/ }));
+    const drawer = page.getByRole("navigation", { name: "Threads" });
+    await expect.element(drawer).toBeVisible();
+    // As the thread list's Waiting on you row or a notification does.
+    await act(() => openInbox());
+    expect(document.querySelector('[data-mobile="true"][data-open]')).toBeNull();
+    await expect.element(page.getByRole("complementary", { name: "Side panel" })).toBeVisible();
+    await expect.element(drawer).not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: /^View: Inbox/ })).toHaveFocus();
+  },
+);
 
 it("counts Checklist and flags Links in the picker from held data only", async () => {
   const [held, other] = [threadWithHistory("count-held", 1), threadWithHistory("count-other", 1)];

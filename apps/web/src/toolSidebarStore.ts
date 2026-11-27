@@ -47,7 +47,8 @@ export function sideAreaOpenRequests(): number {
 }
 
 /** True once after an action opened the side area, so a reload that restores it open keeps focus. */
-export function takeSideAreaFocusRequest(): boolean {
+export function takeSideAreaFocusRequest(request: number): boolean {
+  if (request !== openRequests) return false;
   const requested = focusOnOpen;
   focusOnOpen = false;
   return requested;
@@ -118,6 +119,8 @@ export const useToolSidebarStore = create<SideAreaStore>()(
         if (!wasOpen && next.open) {
           returnFocus =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }
+        if (next.open && (!wasOpen || action.type === "show" || action.type === "toggleView")) {
           focusOnOpen = true;
         }
         // Focus the user moved elsewhere while it was open stays where they put it.

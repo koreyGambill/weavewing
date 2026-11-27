@@ -40,7 +40,8 @@ type SidebarContextProps = {
   openMobile: boolean;
   mobileSheetMounted: boolean;
   setMobileSheetMounted: (mounted: boolean) => void;
-  setOpenMobile: (open: boolean) => void;
+  setOpenMobile: (open: boolean, returnFocus?: () => HTMLElement | null) => void;
+  mobileReturnFocus: (() => HTMLElement | null) | undefined;
   isMobile: boolean;
   toggleSidebar: () => void;
   /** Runs before the desktop sidebar collapses. */
@@ -138,6 +139,7 @@ function moveFocusOutOfCollapsingSidebar() {
 interface SidebarOpenState {
   readonly open: boolean;
   readonly openMobile: boolean;
+  readonly mobileReturnFocus: (() => HTMLElement | null) | undefined;
 }
 
 /** Per-provider open state, kept outside React so shortcuts can toggle it at event time. */
@@ -145,6 +147,7 @@ function createSidebarOpenStore(defaultOpen: boolean, storageKey: string | undef
   let state: SidebarOpenState = {
     open: readStoredSidebarOpen(storageKey) ?? defaultOpen,
     openMobile: false,
+    mobileReturnFocus: undefined,
   };
   const listeners = new Set<() => void>();
   const collapseListeners = new Set<() => void>();
@@ -163,8 +166,10 @@ function createSidebarOpenStore(defaultOpen: boolean, storageKey: string | undef
     }
     if (storageKey) writeLocalStorageValue(storageKey, open, defaultOpen, Schema.Boolean);
   };
-  const setOpenMobile = (openMobile: boolean) => {
-    if (openMobile !== state.openMobile) publish({ ...state, openMobile });
+  const setOpenMobile = (openMobile: boolean, mobileReturnFocus?: () => HTMLElement | null) => {
+    if (openMobile !== state.openMobile || mobileReturnFocus !== undefined) {
+      publish({ ...state, openMobile, mobileReturnFocus });
+    }
   };
   return {
     subscribe: (listener: () => void) => {
@@ -199,7 +204,7 @@ function SidebarProvider({
 }) {
   const isMobile = useMediaQuery(SIDEBAR_MOBILE_QUERY);
   const [store] = React.useState(() => createSidebarOpenStore(defaultOpen, storageKey));
-  const { open, openMobile } = React.useSyncExternalStore(
+  const { open, openMobile, mobileReturnFocus } = React.useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
     store.getSnapshot,
@@ -223,6 +228,7 @@ function SidebarProvider({
     setMobileSheetMounted,
     setOpen: store.setOpen,
     setOpenMobile: store.setOpenMobile,
+    mobileReturnFocus,
     state,
     toggleSidebar: store.toggle,
     onCollapse: store.onCollapse,
@@ -292,7 +298,8 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetMounted } = useSidebar();
+  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetMounted, mobileReturnFocus } =
+    useSidebar();
   // Not usePanelAnimationSettings: its navigation suppression would snap the sheet shut mid-exit when an item navigates.
   const panelAnimationDurationMs = useClientSettings(
     (settings) => settings.panelAnimationDurationMs,
@@ -325,7 +332,7 @@ function Sidebar({
     return (
       <SidebarInstanceContext value={instanceContextValue}>
         <Sheet
-          onOpenChange={setOpenMobile}
+          onOpenChange={(open) => setOpenMobile(open)}
           onOpenChangeComplete={(open) => {
             if (!open) setMobileSheetMounted(false);
           }}
@@ -334,6 +341,7 @@ function Sidebar({
           {/* Children stay mounted while closed so their window shortcuts, like thread jumps, keep working. */}
           <SheetPopup
             keepMounted
+            finalFocus={mobileReturnFocus}
             {...(panelAnimationsActive ? {} : { transitionDurationMs: 0 })}
             className={cn(
               "w-(--sidebar-width) max-w-none bg-sidebar surface-grain p-0 text-sidebar-foreground",

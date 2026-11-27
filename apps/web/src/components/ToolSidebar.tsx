@@ -12,7 +12,7 @@ import {
   PinIcon,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { isElectron } from "../env";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -58,8 +58,6 @@ import {
   type ViewId,
   SIDE_AREA_MAX_WIDTH,
   SIDE_AREA_MIN_WIDTH,
-  transitionSideArea,
-  type SideAreaAction,
 } from "./ToolSidebar.logic";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription } from "./ui/empty";
@@ -179,26 +177,25 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   }, [routePathname, routeKey, routeIndex]);
   const sidebar = useSidebar();
   // On a phone the side area is a sheet the thread drawer would cover, so the drawer gives way.
-  const closeDrawer = useStableCallback(() => {
-    if (sidebar.isMobile && sidebar.openMobile) sidebar.setOpenMobile(false);
+  const closeDrawer = useStableCallback((layout: HTMLElement) => {
+    if (sidebar.isMobile && sidebar.mobileSheetMounted) {
+      sidebar.setOpenMobile(false, () =>
+        layout.querySelector<HTMLElement>("[data-side-area-picker]"),
+      );
+    }
   });
-  // A shortcut that opens the side area on a phone shows it, so the thread drawer gives way first.
-  const openFromShortcut = useStableCallback((action: SideAreaAction) => {
-    const wasOpen = useToolSidebarStore.getState().open;
-    const opening = !wasOpen && transitionSideArea(useToolSidebarStore.getState(), action).open;
-    if (opening) closeDrawer();
-    useToolSidebarStore.getState().dispatch(action);
-  });
-
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
     const stopContext = provideSideAreaContext(readContext);
-    const stopDrawer = useToolSidebarStore.subscribe((state, previous) => {
-      if (state.open && !previous.open) closeDrawer();
+    let requests = sideAreaOpenRequests();
+    const stopDrawer = useToolSidebarStore.subscribe((state) => {
+      const requested = requests !== sideAreaOpenRequests();
+      requests = sideAreaOpenRequests();
+      if (state.open && requested) closeDrawer(node);
     });
-    const toggle = () => openFromShortcut({ type: "toggle" });
+    const toggle = () => useToolSidebarStore.getState().dispatch({ type: "toggle" });
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
       {
@@ -210,7 +207,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         "threadContext.toggle": (event) => {
           event.preventDefault();
           event.stopPropagation();
-          openFromShortcut({ type: "toggleThreadViews" });
+          useToolSidebarStore.getState().dispatch({ type: "toggleThreadViews" });
         },
       },
       { capture: true },
@@ -705,6 +702,14 @@ function SideAreaBody({
 
 function ViewPicker({ definition, target }: { definition: ViewDefinition; target: ViewTarget }) {
   const [open, setOpen] = useState(false);
+  const drawerMounted = useMobileSidebarSheetMounted();
+  const requests = useToolSidebarStore(sideAreaOpenRequests);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The drawer releases modal focus before the picker takes it.
+  useLayoutEffect(() => {
+    if (!drawerMounted && takeSideAreaFocusRequest(requests))
+      trigger.current?.focus({ preventScroll: true });
+  }, [drawerMounted, requests]);
   const Icon = definition.icon;
   const groups = [
     {
@@ -719,9 +724,8 @@ function ViewPicker({ definition, target }: { definition: ViewDefinition; target
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger
-        ref={(node: HTMLButtonElement | null) => {
-          if (node && takeSideAreaFocusRequest()) node.focus({ preventScroll: true });
-        }}
+        ref={trigger}
+        data-side-area-picker
         render={
           <Button
             variant="ghost"
