@@ -271,7 +271,8 @@ export const EvidenceLandingSummary = Schema.Struct({
         title: Schema.String,
         gapPreviews: Schema.Array(Schema.String),
         gapCount: NonNegativeInt,
-        captureCount: NonNegativeInt,
+        /** Absent from servers that did not count captures; read it as zero. */
+        captureCount: Schema.optional(NonNegativeInt),
       }),
     ),
   ),

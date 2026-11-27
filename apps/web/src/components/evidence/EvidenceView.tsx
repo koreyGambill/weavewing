@@ -502,8 +502,9 @@ function LandingNotes({
   return (
     <ul className="min-w-0 space-y-2 border-t border-border p-2">
       {notes.map((note) => {
+        const captures = note.captureCount ?? 0;
         const shortened =
-          note.captureCount > 0 ||
+          captures > 0 ||
           note.gapCount > note.gapPreviews.length ||
           [note.title, ...note.gapPreviews].some((text) => text.endsWith("…"));
         const open = expanded.has(note.id);
@@ -563,10 +564,10 @@ function LandingNotes({
                     and {note.gapCount - note.gapPreviews.length} more
                   </p>
                 ) : null}
-                {note.captureCount > 0 ? (
+                {captures > 0 ? (
                   <p className="flex items-center gap-1.5 text-muted-foreground">
                     <ImageIcon aria-hidden className="size-3 shrink-0" />
-                    {note.captureCount} capture{note.captureCount === 1 ? "" : "s"}
+                    {captures} capture{captures === 1 ? "" : "s"}
                   </p>
                 ) : null}
               </>
