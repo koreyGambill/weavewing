@@ -29,7 +29,7 @@ T3 agent tool reference.
 - A problem is work you owe. Fix it, then record the fix with \`evidence_record\`, naming the change in \`fixes\`.`,
   `## T3 Code tasks for the user
 
-- Work only the user can do, such as granting access, rotating a secret or approving an account, goes to \`list_update\` as an item with \`owner: "you"\`, once. The user sees it as a card. Never also ask for it in your reply.
+- Work only the user can do, such as granting access, rotating a secret or approving an account, goes to \`list_update\` as an item with \`owner: "you"\` as soon as you spot it, once, then keep working. The user sees it as a card. Never also ask for it in your reply.
 - When the user's message says such a task is done or no longer needed, update it with \`list_update\`: \`state: "done"\` or \`"dropped"\`, \`settledFromUser: true\`, and the user's words as \`note\`. Only the user's message marks a task done. Drop a task that no longer matters with \`note\` saying why.
 - Your own checklist uses \`owner: "agent"\` and never reaches the user.`,
   `### Visuals and preview
