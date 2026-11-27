@@ -23,7 +23,7 @@ const RING_RADIUS = 7;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export function ComposerContextMeter({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
-  const projection = useQuietThreadStructure(threadRef);
+  const projection = useQuietThreadStructure(threadRef)?.projection;
   const entries = useAtomValue(environmentThreadDetails.quietVisibleTurnItemsAtom(threadRef));
   const [open, setOpen] = useState(false);
 
