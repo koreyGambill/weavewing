@@ -18,6 +18,7 @@ import {
   ArrowUpRightIcon,
   CheckIcon,
   ChevronDownIcon,
+  ImageIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
   ClipboardCheckIcon,
@@ -502,6 +503,7 @@ function LandingNotes({
     <ul className="min-w-0 space-y-2 border-t border-border p-2">
       {notes.map((note) => {
         const shortened =
+          note.captureCount > 0 ||
           note.gapCount > note.gapPreviews.length ||
           [note.title, ...note.gapPreviews].some((text) => text.endsWith("…"));
         const open = expanded.has(note.id);
@@ -561,6 +563,12 @@ function LandingNotes({
                     and {note.gapCount - note.gapPreviews.length} more
                   </p>
                 ) : null}
+                {note.captureCount > 0 ? (
+                  <p className="flex items-center gap-1.5 text-muted-foreground">
+                    <ImageIcon aria-hidden className="size-3 shrink-0" />
+                    {note.captureCount} capture{note.captureCount === 1 ? "" : "s"}
+                  </p>
+                ) : null}
               </>
             )}
           </li>
@@ -592,8 +600,9 @@ function NoteDetail({
   title: string;
 }) {
   const landing = useEnvironmentQuery(evidenceGet({ environmentId, input: { landingId } }));
-  const change = landing.data?.changes.find((candidate) => candidate.id === changeId);
-  if (change === undefined)
+  const data = landing.data;
+  const change = data?.changes.find((candidate) => candidate.id === changeId);
+  if (data === null || change === undefined)
     return (
       <p className="text-muted-foreground">
         {landing.error ? `Couldn't load this note: ${landing.error}` : "Loading the note…"}
@@ -608,6 +617,20 @@ function NoteDetail({
         // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
         <GapLine key={`${index}:${gap}`} gap={gap} />
       ))}
+      {change.captures.length ? (
+        <div className="grid grid-cols-2 gap-1.5 @min-[17rem]/evidence:grid-cols-3">
+          {change.captures.map((capture, index) => (
+            <CaptureTile
+              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
+              key={`${index}:${capture.path}`}
+              environmentId={environmentId}
+              threadId={data.threadId}
+              path={capture.path}
+              caption={capture.caption}
+            />
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

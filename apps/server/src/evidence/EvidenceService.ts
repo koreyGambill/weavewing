@@ -33,6 +33,7 @@ import {
   EVIDENCE_BULK_DISMISS_LIMIT,
   EVIDENCE_THREAD_LANDING_LIMIT,
   type MessageId,
+  NonNegativeInt,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -185,32 +186,37 @@ interface QaRow {
 const QA_COLUMNS =
   "landing_id, change_id, state, note, updated_at, by, ref, raised_json, message_id, discussed_message_id";
 
+/** Reasons that raised a card before agents marked changes; a stored card keeps them unmarked. */
+type KeptReason = "captures" | "gaps";
+
 /**
- * Why a change asks for the user's QA; with none it is recorded quietly, as a note if it has gaps.
- * An unverified review claim alone raises nothing. Gaps raise a card only through `keepsGaps`,
- * for a change whose card they raised before agents marked changes.
+ * Why a change asks for the user's QA; with none it is recorded quietly, as a note if it has gaps
+ * or captures. A waived or changes-requested review and a failed or skipped check force a card;
+ * otherwise only `needs_you` raises one, or `kept`, for a card stored before agents marked changes.
  *
  * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // []
  */
 export function qaRaiseReasons(
   change: Pick<EvidenceChange, "captures" | "gaps" | "review" | "attention">,
   verifications: EvidenceRecord["verifications"],
-  keepsGaps = false,
+  kept: ReadonlyArray<KeptReason> = [],
 ): ReadonlyArray<EvidenceQaRaiseReason> {
   const reasons: EvidenceQaRaiseReason[] = [];
-  if (change.captures.length > 0) reasons.push("captures");
   if (change.review.verdict === "waived") reasons.push("review_waived");
   if (change.review.verdict === "changes_requested") reasons.push("review_changes_requested");
   if (verifications.some((check) => check.result === "fail")) reasons.push("check_failed");
   if (verifications.some((check) => check.result === "skipped")) reasons.push("check_skipped");
   if (change.attention === "needs_you") reasons.push("needs_you");
-  else if (keepsGaps && change.gaps.length > 0) reasons.push("gaps");
+  else {
+    if (kept.includes("captures") && change.captures.length > 0) reasons.push("captures");
+    if (kept.includes("gaps") && change.gaps.length > 0) reasons.push("gaps");
+  }
   return reasons;
 }
 
 /**
  * The reasons a recorded change raises, given what its stored QA row raised. Left unmarked, a
- * change keeps its earlier mark, and one whose gaps raised a card keeps it, so a re-record never
+ * change keeps its earlier mark, and one whose captures or gaps raised a card keeps it, so a re-record never
  * turns a card into a note by omission. An agent's `note` withdraws only a card no server-forced
  * reason holds; the user's `needs_you` outlasts it, and the record keeps any card the user touched.
  */
@@ -224,11 +230,13 @@ function recordedRaiseReasons(
   const needsYou =
     change.attention === "needs_you" ||
     (stored.includes("needs_you") && (unmarked || row?.by === "user"));
-  const keepsGaps = unmarked && stored.includes("gaps");
+  const kept = unmarked
+    ? (["captures", "gaps"] as const).filter((reason) => stored.includes(reason))
+    : [];
   return qaRaiseReasons(
     needsYou ? { ...change, attention: "needs_you" } : change,
     verifications,
-    keepsGaps,
+    kept,
   );
 }
 
@@ -255,6 +263,7 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
             summary: Schema.String,
             ask: Schema.String,
             gaps: EvidenceChange.fields.gaps,
+            captureCount: NonNegativeInt,
           }),
         ),
       ),
@@ -516,9 +525,10 @@ const make = Effect.gen(function* () {
     return review.verdict === "waived" ? review : { ...review, check: "unverified" };
   };
 
-  // A note: a change recorded without a card that lists gaps. `c` is the change in record_json.
+  // A note: a change recorded without a card that lists gaps or captures. `c` is the change in
+  // record_json.
   const isNote = sql.literal(
-    "q.state = 'quiet' AND q.change_id = json_extract(c.value, '$.id') AND json_array_length(c.value, '$.gaps') > 0",
+    "q.state = 'quiet' AND q.change_id = json_extract(c.value, '$.id') AND (json_array_length(c.value, '$.gaps') > 0 OR json_array_length(c.value, '$.captures') > 0)",
   );
 
   // A change the user is discussing waits on the agent, so it leaves what waits on the user.
@@ -742,7 +752,8 @@ const make = Effect.gen(function* () {
             input.notes === true
               ? sql`(SELECT json_group_array(json_object('id', q.change_id,
                     'summary', json_extract(c.value, '$.summary'), 'ask', json_extract(c.value, '$.ask'),
-                    'gaps', json_extract(c.value, '$.gaps')))
+                    'gaps', json_extract(c.value, '$.gaps'),
+                    'captureCount', json_array_length(c.value, '$.captures')))
                   FROM json_each(p.record_json, '$.changes') c JOIN evidence_qa q ON q.landing_id = p.landing_id
                   WHERE ${isNote})`
               : sql`NULL`
@@ -769,13 +780,14 @@ const make = Effect.gen(function* () {
         ? item
         : {
             ...item,
-            notes: notes.map(({ id, gaps, ...text }) => ({
+            notes: notes.map(({ id, gaps, captureCount, ...text }) => ({
               id,
               title: shorten(noteTitle({ id, ...text }), NOTE_TITLE_PREVIEW),
               gapPreviews: gaps
                 .slice(0, NOTE_GAP_PREVIEWS)
                 .map((gap) => shorten(gap, NOTE_GAP_PREVIEW)),
               gapCount: gaps.length,
+              captureCount,
             })),
           },
     );

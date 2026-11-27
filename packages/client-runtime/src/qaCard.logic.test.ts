@@ -62,11 +62,15 @@ describe("qaCardTitle", () => {
 });
 
 describe("qaNoted", () => {
-  it("calls a quiet change with gaps a note, and nothing else", () => {
+  it("calls a quiet change with gaps or captures a note, and nothing else", () => {
     const gaps = ["Not run on a phone."];
-    expect(qaNoted({ qa: qa({ state: "quiet", raised: [] }), gaps })).toBe(true);
-    expect(qaNoted({ qa: qa({ state: "quiet", raised: [] }), gaps: [] })).toBe(false);
-    expect(qaNoted({ qa: qa({}), gaps })).toBe(false);
-    expect(qaNoted({ qa: qa({ state: "confirmed", by: "user" }), gaps })).toBe(false);
+    const captures: ReadonlyArray<never> = [];
+    const shot = [{ path: "/home/user/evidence/acme/after.png", caption: "After" }];
+    const quiet = qa({ state: "quiet", raised: [] });
+    expect(qaNoted({ qa: quiet, gaps, captures })).toBe(true);
+    expect(qaNoted({ qa: quiet, gaps: [], captures: shot })).toBe(true);
+    expect(qaNoted({ qa: quiet, gaps: [], captures })).toBe(false);
+    expect(qaNoted({ qa: qa({}), gaps, captures: shot })).toBe(false);
+    expect(qaNoted({ qa: qa({ state: "confirmed", by: "user" }), gaps, captures })).toBe(false);
   });
 });

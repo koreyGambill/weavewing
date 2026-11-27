@@ -178,11 +178,12 @@ the turn that answers that message is not asked about again, so an answer can ne
 start another round. Turn this off with **Ask agents to record landed work** in
 **Settings → Threads**.
 
-A change with captures, a waived review or one that asked for changes, or a failed
-or skipped check always shows a **QA card** in the thread where the agent recorded
-it. The agent marks each other change: **needs you** when you must look at or
-decide something the agent could not, such as a layout nobody has seen, which also
-shows a card, or a **note** when its gaps are routine, such as no run on a device.
+A change with a waived review or one that asked for changes, or a failed or skipped
+check, always shows a **QA card** in the thread where the agent recorded it. The
+agent marks each other change: **needs you** when you should look at it, such as a
+visual change with its screenshots, or check behavior the agent could not run, which
+also shows a card, or a **note** when its gaps are routine, such as no run on a device.
+A note's captures show only when you open it in Evidence.
 An approval alone raises no card, because no review verdict is checked yet; a card
 that is raised still shows it as an unverified review. A landing a delegated agent
 recorded shows in its lead's thread, where the delegated work reported back. A

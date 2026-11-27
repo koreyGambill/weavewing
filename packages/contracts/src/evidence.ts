@@ -109,7 +109,7 @@ export const EvidenceChange = Schema.Struct({
   attention: Schema.optional(
     Schema.Literals(["needs_you", "note"]).annotate({
       description:
-        "needs_you raises a QA card; note, the default, logs the change without one. Captures, a waived or changes-requested review, or a failed or skipped check raise a card either way.",
+        "needs_you raises a QA card, which shows the captures; note, the default, logs the change without one. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
     }),
   ),
   evidenceDir: Schema.optional(Text(1024)),
@@ -237,7 +237,7 @@ export const EvidenceQaTally = Schema.Struct({
   confirmed: NonNegativeInt,
   problem: NonNegativeInt,
   waived: NonNegativeInt,
-  /** Of the quiet changes, those that are notes: they list gaps. */
+  /** Of the quiet changes, those that are notes: they list gaps or captures. */
   noted: Schema.optional(NonNegativeInt),
 });
 export type EvidenceQaTally = typeof EvidenceQaTally.Type;
@@ -260,7 +260,7 @@ export const EvidenceLandingSummary = Schema.Struct({
   qa: EvidenceQaTally,
   exempt: Schema.optional(EvidenceExempt),
   /**
-   * With `notes`: the changes recorded without a card that list gaps, in record order, shortened
+   * With `notes`: the changes recorded without a card that list gaps or captures, in record order, shortened
    * for the list. `title` is the summary's first line, else the ask's; `gapPreviews` are the first
    * gaps, each cut short, of `gapCount`. Reading the landing gives the full text.
    */
@@ -271,6 +271,7 @@ export const EvidenceLandingSummary = Schema.Struct({
         title: Schema.String,
         gapPreviews: Schema.Array(Schema.String),
         gapCount: NonNegativeInt,
+        captureCount: NonNegativeInt,
       }),
     ),
   ),
