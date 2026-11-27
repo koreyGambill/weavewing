@@ -5,6 +5,7 @@ import {
   type MessageId,
   type OrchestrationMessageContext,
   type ThreadQuestion,
+  type TrackedAsk,
 } from "@t3tools/contracts";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 
@@ -12,7 +13,8 @@ import { collectComposerContextReferences } from "@t3tools/shared/composerContex
 export type ReferencedItem =
   | { readonly kind: "question"; readonly questionId: string }
   | { readonly kind: "qa"; readonly landingId: string; readonly changeId: string }
-  | { readonly kind: "task"; readonly taskId: string };
+  | { readonly kind: "task"; readonly taskId: string }
+  | { readonly kind: "answer"; readonly answerId: TrackedAsk["id"] };
 
 /** One item's key in a reference index. */
 export const referencedItemKey = (item: ReferencedItem): string => {
@@ -23,6 +25,8 @@ export const referencedItemKey = (item: ReferencedItem): string => {
       return `qa:${item.landingId}/${item.changeId}`;
     case "task":
       return `task:${item.taskId}`;
+    case "answer":
+      return `answer:${item.answerId}`;
   }
 };
 
@@ -127,6 +131,13 @@ export const questionPointers = (
 export const qaPointers = (
   qa: Pick<EvidenceChangeQa, "discussedMessageId" | "messageId">,
 ): ReadonlyArray<MessageId | undefined> => [qa.discussedMessageId];
+
+export const trackedAnswerPointers = (
+  ask: Pick<TrackedAsk, "askedInMessageId" | "followUps">,
+): ReadonlyArray<MessageId> => [
+  ask.askedInMessageId,
+  ...ask.followUps.map(({ messageId }) => messageId),
+];
 
 /**
  * Which reference the control shows next: the oldest first, then each following one, wrapping

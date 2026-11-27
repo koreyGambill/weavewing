@@ -1,4 +1,5 @@
 import { type ScopedThreadRef, type TrackedAnswer, type TrackedAsk } from "@t3tools/contracts";
+import { trackedAnswerPointers } from "@t3tools/client-runtime/state/waiting-item-references";
 import { useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
@@ -9,6 +10,7 @@ import { useTallEnoughToFold } from "../chat/useTallEnoughToFold";
 import { CardStatusBadge, type CardBadgeVariant } from "../questions/QuestionStatusBadge";
 import {
   HelpButton,
+  NextReferenceButton,
   ThreadCard,
   ThreadCardClosedLine,
   ThreadCardHeading,
@@ -141,6 +143,13 @@ export function ThreadAnswerCard({
             ? ["In composer", "info-outline"]
             : ["Answered", "outline"];
   const badge = <CardStatusBadge label={status} variant={variant} help={status} />;
+  const nextReference = (
+    <NextReferenceButton
+      item={{ kind: "answer", answerId: ask.id }}
+      refLabel={ask.id}
+      pointers={trackedAnswerPointers(ask)}
+    />
+  );
   const focus = (target: "line" | "card") => (button: HTMLButtonElement | null) => {
     if (!button || button.disabled || focusNext.current !== target) return;
     focusNext.current = null;
@@ -179,6 +188,7 @@ export function ThreadAnswerCard({
         stackOnNarrow
       >
         {badge}
+        {nextReference}
         {reopen}
       </ThreadCardClosedLine>
     );
@@ -189,7 +199,12 @@ export function ThreadAnswerCard({
       label={label}
       waiting={waiting}
       heading={<ThreadCardHeading refLabel={ask.id} title={question} editable={waiting} />}
-      controls={badge}
+      controls={
+        <>
+          {badge}
+          {nextReference}
+        </>
+      }
       onCollapse={collapsible ? () => setExpanded(false) : undefined}
     >
       <div className="flex items-baseline gap-2 px-1.5 py-1">

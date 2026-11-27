@@ -13,6 +13,7 @@ import {
   nextReferencePosition,
   qaPointers,
   questionPointers,
+  trackedAnswerPointers,
   waitingItemReferenceIndex,
 } from "./waitingItemReferences.ts";
 
@@ -59,6 +60,30 @@ const message = (
 });
 const ids = (references: ReadonlyArray<{ readonly messageId: string }> | undefined) =>
   (references ?? []).map((reference) => reference.messageId);
+
+it("cycles a tracked answer's asking message and delivered follow-ups in chat order", () => {
+  const first = MessageId.make("ask");
+  const followUp = MessageId.make("follow-up");
+  const cropped = MessageId.make("earlier-follow-up");
+  const at = "2026-10-01T00:00:00.000Z";
+  const pointers = trackedAnswerPointers({
+    askedInMessageId: first,
+    followUps: [
+      { messageId: cropped, at },
+      { messageId: followUp, at },
+    ],
+  });
+  const references = itemReferences({
+    index: new Map(),
+    item: { kind: "answer", answerId: "A1" },
+    messageOrder: new Map([
+      [first, 0],
+      [followUp, 1],
+    ]),
+    pointers,
+  });
+  expect(ids(references)).toEqual([first, followUp]);
+});
 
 describe("waitingItemReferenceIndex", () => {
   it("collects answers, comments and Discuss references per item, oldest first", () => {
