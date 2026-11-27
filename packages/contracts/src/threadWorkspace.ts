@@ -61,7 +61,7 @@ export const ListItem = Schema.Struct({
   userChangedAt: Schema.optional(IsoDateTime),
 });
 export type ListItem = typeof ListItem.Type;
-const LIST_ITEM_NOTE_MAX_LENGTH = 500;
+export const LIST_ITEM_NOTE_MAX_LENGTH = 500;
 export const ThreadArtifactVersion = Schema.Struct({
   questions: Schema.Array(ArtifactQuestion),
   answers: Schema.Record(Schema.String, ArtifactAnswer),

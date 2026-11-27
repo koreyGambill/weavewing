@@ -225,6 +225,35 @@ describe("changeUserTask", () => {
   });
 });
 
+describe("a dismissal reason", () => {
+  it("lets the user add, change or clear the reason of a task they dismissed, later", () => {
+    const dismissed = {
+      ...task,
+      state: "dropped" as const,
+      settledBy: "user" as const,
+      userChangedAt: now,
+    };
+    expect(
+      changeUserTask(
+        dismissed,
+        { ...task, state: "dropped" },
+        { id: task.id, note: " Vendor gone " },
+        user,
+        now,
+      ),
+    ).toEqual({ ...dismissed, note: "Vendor gone" });
+    expect(
+      changeUserTask(
+        { ...dismissed, note: "Vendor gone" },
+        { ...task, state: "dropped" },
+        { id: task.id, note: "" },
+        user,
+        now,
+      ),
+    ).toEqual(dismissed);
+  });
+});
+
 describe("resolveListItemId", () => {
   const agentItem: ListItem = {
     ...task,

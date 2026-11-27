@@ -2,6 +2,7 @@ import type { ReactNode, Ref } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /** A card button with its hint on hover and focus; the hint stays reachable while disabled. */
@@ -187,5 +188,63 @@ export function ThreadCard({
       </header>
       {children}
     </section>
+  );
+}
+
+/**
+ * The optional reason a card takes after the user dismissed it: one field with Cancel and Save.
+ * Escape closes it from the field or either button.
+ */
+export function CardReasonForm({
+  label,
+  value,
+  maxLength,
+  disabled,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  /** The field's accessible name, such as "Why T2 was dismissed". */
+  readonly label: string;
+  readonly value: string;
+  readonly maxLength: number;
+  readonly disabled: boolean;
+  readonly onChange: (value: string) => void;
+  readonly onCancel: () => void;
+  readonly onSave: () => void;
+}) {
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+      // On the form, so Escape closes it from the textarea, Cancel or Save alike.
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <Textarea
+        size="sm"
+        aria-label={label}
+        placeholder="Why dismiss it? (optional)"
+        value={value}
+        maxLength={maxLength}
+        autoFocus
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="flex justify-end gap-1">
+        <Button size="xs" variant="ghost" type="button" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button size="xs" type="submit" disabled={disabled}>
+          Save reason
+        </Button>
+      </div>
+    </form>
   );
 }
