@@ -34,10 +34,16 @@ const filed: ListItem & { readonly ref: string } = {
 let task = filed;
 const listeners = new Set<() => void>();
 const sent: ThreadListUpdateInput[] = [];
+// Set to make the next write fail, as a stale revision does.
+let refuseNext = false;
 vi.mock(import("../../state/use-atom-command"), () => ({
   useAtomCommand: (() =>
     async ({ input }: { input: ThreadListUpdateInput }) => {
       sent.push(input);
+      if (refuseNext) {
+        refuseNext = false;
+        return { _tag: "Failure", cause: new Error("List changed. Read it again before writing.") };
+      }
       const state = input.changes[0]?.state ?? task.state;
       task =
         state === "open"
@@ -155,4 +161,16 @@ it("shows what the agent recorded, with the user's words", async () => {
   await using screen = await render(<Card />);
   await expect.element(screen.getByText("Recorded by the agent")).toBeVisible();
   await expect.element(screen.getByText("“done, rotated it”")).toBeVisible();
+});
+
+it("keeps a drafted Discuss reference when the server refuses Done", async () => {
+  using _fresh = fresh();
+  await using screen = await render(<Card />);
+  await userEvent.click(screen.getByRole("button", { name: "Discuss T2" }));
+  await vi.waitFor(() => expect(records()).toHaveLength(1));
+  refuseNext = true;
+  await userEvent.click(screen.getByRole("button", { name: "Done: T2" }));
+  expect(sent.at(-1)?.changes).toEqual([{ id: "task-rotate", state: "done" }]);
+  await expect.element(screen.getByRole("button", { name: "Done: T2" })).toBeVisible();
+  expect(records().map((record) => record.key)).toEqual(["task-rotate"]);
 });

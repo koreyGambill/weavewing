@@ -10,6 +10,19 @@ import { render } from "../../../test/render";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
 
+// Every card write answers as the server would; set to refuse the next one.
+const writes = vi.hoisted(() => ({ refuseNext: false, sent: [] as unknown[] }));
+vi.mock(import("../../state/use-atom-command"), () => ({
+  useAtomCommand: (() =>
+    async ({ input }: { input: unknown }) => {
+      writes.sent.push(input);
+      if (writes.refuseNext) {
+        writes.refuseNext = false;
+        return { _tag: "Failure", cause: new Error("Connection lost.") };
+      }
+      return { _tag: "Success", value: null };
+    }) as never,
+}));
 vi.mock(import("../../state/threadQuestions"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const actual = await original();
@@ -152,5 +165,34 @@ it("discusses an open question through a composer reference, with or without a n
   await userEvent.click(discuss);
   await vi.waitFor(() => expect(records()).toEqual([]));
   await expect.element(discuss).toHaveAttribute("aria-pressed", "false");
+  useComposerDraftStore.setState({ draftsByThreadKey: {} });
+});
+
+it("keeps a question's Discuss reference when the server refuses its dismissal", async () => {
+  const open: ThreadQuestion = {
+    ...answered,
+    state: "open",
+    closedAt: null,
+    answer: null,
+    answeredBy: null,
+  };
+  function Card() {
+    useSyncExternalStore(useComposerDraftStore.subscribe, () =>
+      useComposerDraftStore.getState().getComposerDraft(threadRef),
+    );
+    return <ThreadQuestionCard question={open} threadRef={threadRef} />;
+  }
+  const records = () =>
+    useComposerDraftStore.getState().getComposerDraft(threadRef)?.waitingItems ?? [];
+  // router: false because the card never navigates.
+  await using screen = await render(<Card />, { router: false });
+  await userEvent.click(screen.getByRole("button", { name: "Discuss Q8" }));
+  await vi.waitFor(() => expect(records()).toHaveLength(1));
+  writes.refuseNext = true;
+  await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  await vi.waitFor(() =>
+    expect(writes.sent.at(-1)).toMatchObject({ id: "Q8", state: "withdrawn" }),
+  );
+  expect(records()).toHaveLength(1);
   useComposerDraftStore.setState({ draftsByThreadKey: {} });
 });

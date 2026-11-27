@@ -125,8 +125,9 @@ export function ThreadTaskCard({
   };
   const settle = async (state: "done" | "dropped") => {
     focusNext.current = "line";
-    removeWaitingItemDiscuss(threadRef, "task", task.id);
-    if (!(await setState(state))) focusNext.current = null;
+    // Only once the server took it: a refused write leaves the task open with its draft intact.
+    if (await setState(state)) removeWaitingItemDiscuss(threadRef, "task", task.id);
+    else focusNext.current = null;
     setExpanded(false);
   };
   const reopen = async () => {

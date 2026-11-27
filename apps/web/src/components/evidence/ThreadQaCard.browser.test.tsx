@@ -51,11 +51,17 @@ const landing: EvidenceLanding = {
 const change = landing.changes[0]!;
 
 const sent: EvidenceSetQaInput[] = [];
+// Set to make the next write fail, as a lost connection does.
+let refuseNext = false;
 // The card's QA writes answer as the server would, one second later each time.
 vi.mock(import("../../state/use-atom-command"), () => ({
   useAtomCommand: (() =>
     async ({ input }: { input: EvidenceSetQaInput }) => {
       sent.push(input);
+      if (refuseNext) {
+        refuseNext = false;
+        return { _tag: "Failure", cause: new Error("Could not save QA.") };
+      }
       const value: EvidenceChangeQa = {
         state: input.state,
         note: input.note ?? "",
@@ -173,4 +179,18 @@ it("dismisses in one click and takes an optional reason afterwards", async () =>
     .element(screen.getByRole("textbox", { name: "Why QA1 was dismissed" }))
     .not.toBeInTheDocument();
   await expect.element(edit).toHaveFocus();
+});
+
+it("keeps a drafted Discuss reference when the server refuses Looks good", async () => {
+  using _fresh = fresh();
+  await using screen = await render(<Card />);
+  await userEvent.click(screen.getByRole("button", { name: "Discuss QA1" }));
+  const records = () =>
+    useComposerDraftStore.getState().getComposerDraft(threadRef)?.waitingItems ?? [];
+  await vi.waitFor(() => expect(records()).toHaveLength(1));
+  refuseNext = true;
+  await userEvent.click(screen.getByRole("button", { name: "Looks good: QA1" }));
+  expect(sent.at(-1)).toMatchObject({ state: "confirmed" });
+  await expect.element(screen.getByRole("button", { name: "Looks good: QA1" })).toBeVisible();
+  expect(records()).toHaveLength(1);
 });
