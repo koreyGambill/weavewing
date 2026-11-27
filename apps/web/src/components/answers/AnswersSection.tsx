@@ -207,6 +207,13 @@ function AnswerListRow({
   const route = resolveThreadRouteTarget(useParams({ strict: false }));
   const { canUpdate, submit } = useUpdateTrackedAsk(target);
   const answer = ask.answers.at(-1);
+  const archived = entry.archived;
+  const unavailableReason =
+    ask.withdrawnBecause === "rollback"
+      ? "The asking message was removed by a rollback."
+      : archived
+        ? "Restore this archived thread to open its chat or discuss the answer."
+        : null;
   const key = scopedThreadKey(target);
   const discussed = useTrackedAnswerDraft(target).discuss.some((item) => item.id === ask.id);
   const navigateToThread = async () => {
@@ -280,35 +287,35 @@ function AnswerListRow({
       {expanded ? (
         <div className="space-y-2 px-2 pb-2">
           {answer ? <TrackedAnswerBody answer={answer} threadRef={target} /> : null}
-          {ask.withdrawnBecause === "rollback" ? (
-            <p className="text-muted-foreground">The asking message was removed by a rollback.</p>
-          ) : null}
+          {unavailableReason ? <p className="text-muted-foreground">{unavailableReason}</p> : null}
           <div className="flex flex-wrap items-center justify-end gap-1">
-            {ask.withdrawnBecause === "rollback" ? null : (
+            {unavailableReason === null ? (
               <Button size="xs" variant="ghost-muted" onClick={() => void showInChat()}>
                 Show in chat
               </Button>
-            )}
+            ) : null}
             <TrackedAskActions
               ask={ask}
               threadRef={target}
-              onShow={() => void showInChat()}
+              {...(unavailableReason === null ? { onShow: () => void showInChat() } : {})}
               {...(onSaved ? { onSaved } : {})}
             />
             {ask.state === "answered" ? (
               <>
-                <Button
-                  size="xs"
-                  variant="contrast-outline"
-                  disabled={!canUpdate}
-                  aria-pressed={discussed}
-                  onClick={() => {
-                    toggleAnswerDiscussion(target, ask);
-                    if (!discussed) void navigateToThread().then(() => focusThreadDraft(target));
-                  }}
-                >
-                  Discuss
-                </Button>
+                {!archived ? (
+                  <Button
+                    size="xs"
+                    variant="contrast-outline"
+                    disabled={!canUpdate}
+                    aria-pressed={discussed}
+                    onClick={() => {
+                      toggleAnswerDiscussion(target, ask);
+                      if (!discussed) void navigateToThread().then(() => focusThreadDraft(target));
+                    }}
+                  >
+                    Discuss
+                  </Button>
+                ) : null}
                 <Button size="xs" disabled={!canUpdate || busy} onClick={() => void gotIt()}>
                   Got it
                 </Button>

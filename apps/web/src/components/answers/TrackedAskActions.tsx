@@ -20,7 +20,7 @@ export function TrackedAskActions({
 }: {
   readonly ask: TrackedAsk;
   readonly threadRef: ScopedThreadRef;
-  readonly onShow: () => void;
+  readonly onShow?: () => void;
   readonly onSaved?: () => void;
 }) {
   const { canUpdate, submit } = useUpdateTrackedAsk(threadRef);
@@ -68,7 +68,7 @@ export function TrackedAskActions({
           <EllipsisIcon aria-hidden="true" />
         </MenuTrigger>
         <MenuPopup align="end" finalFocus={trigger}>
-          {showAnswer ? <MenuItem onClick={onShow}>Show answer</MenuItem> : null}
+          {showAnswer && onShow ? <MenuItem onClick={onShow}>Show answer</MenuItem> : null}
           {canEdit ? (
             <MenuItem
               disabled={busy}
