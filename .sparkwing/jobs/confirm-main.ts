@@ -66,14 +66,12 @@ definePipeline({
         );
         ctx.log.info(`origin/${BRANCH} ${tested.commit.slice(0, 10)} passed every suite`, tested.results);
       } catch (error) {
+        // Only a child that reached its checkout records what it tested; a child that could not
+        // plan or start tested nothing, so its failure is the run's error, not a finding about main.
         // main may have moved between the fetch and the child's checkout, so name what it tested.
-        let commit = head;
-        try {
-          commit = JSON.parse(NodeFS.readFileSync(NodePath.join(logs, "tested.json"), "utf8")).commit || head;
-        } catch {
-          // The child failed before it recorded a commit.
-        }
-        recordFailures(file, commit, ctx.run.id, logs);
+        const tested = NodePath.join(logs, "tested.json");
+        if (NodeFS.existsSync(tested))
+          recordFailures(file, JSON.parse(NodeFS.readFileSync(tested, "utf8")).commit || head, ctx.run.id, logs);
         throw error;
       }
     })
