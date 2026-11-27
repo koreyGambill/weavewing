@@ -50,6 +50,7 @@ import {
   resolveSideAreaWidth,
   resolveViewLayout,
   type LockedThreadState,
+  type ViewId,
   SIDE_AREA_MAX_WIDTH,
   SIDE_AREA_MIN_WIDTH,
 } from "./ToolSidebar.logic";
@@ -102,6 +103,11 @@ function openLayerVisible() {
   ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }));
 }
 
+/** Whether the side area shows maximized: a view with a page opens its page instead. */
+function shownMaximized(state: { readonly maximized: boolean; readonly view: ViewId }) {
+  return state.maximized && !viewDefinition(state.view).page;
+}
+
 /**
  * The side area: one view at a time on the right, covering the content instead of resizing it.
  * Its thread views follow the selected thread unless locked; Pin keeps it open.
@@ -109,10 +115,7 @@ function openLayerVisible() {
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const open = useToolSidebarStore((state) => state.open);
   const width = useToolSidebarStore((state) => state.width);
-  // A view with a page opens its page instead of maximizing.
-  const maximized = useToolSidebarStore(
-    (state) => state.maximized && !viewDefinition(state.view).page,
-  );
+  const maximized = useToolSidebarStore(shownMaximized);
   const pinned = useToolSidebarStore((state) => state.pinned);
   const { state: statusState } = useStatusSignal();
   const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
@@ -173,7 +176,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           if (openLayerVisible()) return false;
           state.dispatch({
             type:
-              state.maximized && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
+              shownMaximized(state) && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
                 ? "restore"
                 : "close",
           });

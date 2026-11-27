@@ -331,6 +331,25 @@ it("opens a global view as a page from the side panel and hands it back", async 
   await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
 });
 
+it("closes a page view's panel on the first Escape after a thread view was maximized", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("escape", 1)], 1280);
+  await using _app = stack;
+  await act(() => {
+    const { dispatch } = useToolSidebarStore.getState();
+    dispatch({ type: "show", view: "todos" });
+    dispatch({ type: "maximize" });
+    dispatch({ type: "show", view: "calendar" });
+  });
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel).toHaveAttribute("data-side-area", "open");
+  panel
+    .getByRole("button", { name: /^View: Calendar/ })
+    .element()
+    .focus();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(panel).not.toBeInTheDocument();
+});
+
 it("keeps a page-only view out of the side panel's picker", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("picker", 1)], 1280);
   await using _app = stack;
