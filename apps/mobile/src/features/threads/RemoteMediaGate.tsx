@@ -35,7 +35,7 @@ export function RemoteMediaGate(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      className="flex-row items-center gap-2 self-start rounded-[10px] bg-md-code-bg px-3 py-2"
+      className="flex-row items-center gap-2 self-start rounded-[10px] border border-foreground-muted/50 bg-md-code-bg px-3 py-2 active:opacity-70"
       onPress={() => {
         loadRemoteMedia(uri);
         setTappedUri(uri);
@@ -44,9 +44,9 @@ export function RemoteMediaGate(props: {
       <SymbolView
         name={props.kind === "video" ? "play" : "photo"}
         size={14}
-        tintColorClassName="accent-foreground-muted"
+        tintColorClassName="accent-foreground"
       />
-      <Text numberOfLines={1} className="shrink text-xs text-foreground-muted">
+      <Text numberOfLines={1} className="shrink text-xs text-foreground">
         {label}
       </Text>
     </Pressable>
