@@ -105,11 +105,27 @@ export const EvidenceChange = Schema.Struct({
   captures: Schema.Array(Schema.Struct({ path: Text(1024), caption: Text(300) })).check(
     Schema.isMaxLength(12),
   ),
-  gaps: Schema.Array(Text(300)).check(Schema.isMaxLength(10)),
+  qaCheck: Schema.optional(
+    Schema.Struct({
+      where: Text(120).annotate({
+        description: "Name the screen, capture or starting state the user should open.",
+      }),
+      do: Text(120).annotate({
+        description: "Describe the one action or inspection to perform.",
+      }),
+      expect: Text(120).annotate({
+        description: "Describe the result the user can see or otherwise verify.",
+      }),
+    }).annotate({ description: "One concrete check the user can perform." }),
+  ),
+  gaps: Schema.Array(Text(300)).check(Schema.isMaxLength(10)).annotate({
+    description:
+      "List things the user could check and you did not. Keep the primary QA action in qaCheck.",
+  }),
   attention: Schema.optional(
     Schema.Literals(["needs_you", "note"]).annotate({
       description:
-        "needs_you raises a QA card, which shows the captures in chat; note, the default, logs the change without one. A visual change the user should look at is needs_you. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
+        "Use needs_you with one qaCheck. Use note, the default, when you have no concrete check for the user. A waived or changes-requested review, or a failed or skipped check, raises a card either way.",
     }),
   ),
   evidenceDir: Schema.optional(Text(1024)),

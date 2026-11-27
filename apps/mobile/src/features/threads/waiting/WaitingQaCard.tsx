@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  qaCardLead,
   qaCardStatus,
   qaCardTitle,
   qaPresence,
@@ -137,6 +138,8 @@ export function WaitingQaCard(props: {
   const [answered, setAnswered] = useState<EvidenceChangeQa | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const lead = qaCardLead(change);
   const [reason, setReason] = useState<string | null>(null);
   const qa = answered !== null && answered.updatedAt > change.qa.updatedAt ? answered : change.qa;
   const quiet = qaPresence(qa) === "quiet";
@@ -212,74 +215,17 @@ export function WaitingQaCard(props: {
           </Text>
         </View>
       )}
-      <Text selectable className="font-sans text-xs text-foreground-secondary">
-        {qaLandedLine(landing, change)}
-      </Text>
-      {fullSummary === null ? null : (
-        <Detail label="Summary">
-          <Text selectable className={detailText}>
-            {fullSummary}
-          </Text>
-        </Detail>
-      )}
-      {fullAsk === null ? null : (
-        <Detail label="Ask">
-          <Text selectable className={detailText}>
-            {fullAsk}
-          </Text>
-        </Detail>
-      )}
-      <Detail label="Review">
-        <Text selectable className={detailText}>
-          {qaReviewLabel(change.review)}
-        </Text>
-      </Detail>
-      {landing.verifications.length > 0 ? (
-        <Detail label="Checks">
-          {landing.verifications.map((check, index) => (
-            <Text
-              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
-              key={index}
-              selectable
-              className={cn(
-                detailText,
-                check.result === "fail" && "text-danger-foreground",
-                check.result === "skipped" && "text-foreground-secondary",
-              )}
-            >
-              {qaCheckLabel(check)}
+      {lead.kind === "check" ? (
+        lead.rows.map(({ label, text }) => (
+          <Detail key={label} label={label}>
+            <Text selectable className={detailText}>
+              {text}
             </Text>
-          ))}
-        </Detail>
-      ) : null}
-      {change.captures.length > 0 ? (
-        <Detail label="Captures">
-          {change.captures.map((capture, index) => (
-            <CaptureLink
-              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
-              key={`${index}:${capture.path}`}
-              environmentId={environmentId}
-              threadId={landing.threadId}
-              path={capture.path}
-              caption={capture.caption}
-            />
-          ))}
-        </Detail>
-      ) : null}
-      {change.gaps.length > 0 ? (
-        <Detail label="Gaps">
-          {change.gaps.map((gap, index) => (
-            <Text
-              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
-              key={`${index}:${gap}`}
-              selectable
-              className={detailText}
-            >
-              {gap}
-            </Text>
-          ))}
-        </Detail>
-      ) : null}
+          </Detail>
+        ))
+      ) : (
+        <Text className={detailText}>{lead.text}</Text>
+      )}
       {noteLabel === null ? null : (
         <Detail label={noteLabel}>
           <Text selectable className={detailText}>
@@ -382,6 +328,85 @@ export function WaitingQaCard(props: {
           />
         </View>
       )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: evidenceOpen }}
+        onPress={() => setEvidenceOpen(!evidenceOpen)}
+      >
+        <Text className={detailText}>Evidence</Text>
+      </Pressable>
+      {evidenceOpen ? (
+        <View className="gap-2">
+          <Text selectable className="font-sans text-xs text-foreground-secondary">
+            {qaLandedLine(landing, change)}
+          </Text>
+          {fullSummary === null ? null : (
+            <Detail label="Summary">
+              <Text selectable className={detailText}>
+                {fullSummary}
+              </Text>
+            </Detail>
+          )}
+          {fullAsk === null ? null : (
+            <Detail label="Ask">
+              <Text selectable className={detailText}>
+                {fullAsk}
+              </Text>
+            </Detail>
+          )}
+          <Detail label="Review">
+            <Text selectable className={detailText}>
+              {qaReviewLabel(change.review)}
+            </Text>
+          </Detail>
+          {landing.verifications.length > 0 ? (
+            <Detail label="Checks">
+              {landing.verifications.map((check, index) => (
+                <Text
+                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
+                  key={index}
+                  selectable
+                  className={cn(
+                    detailText,
+                    check.result === "fail" && "text-danger-foreground",
+                    check.result === "skipped" && "text-foreground-secondary",
+                  )}
+                >
+                  {qaCheckLabel(check)}
+                </Text>
+              ))}
+            </Detail>
+          ) : null}
+          {change.captures.length > 0 ? (
+            <Detail label="Captures">
+              {change.captures.map((capture, index) => (
+                <CaptureLink
+                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
+                  key={`${index}:${capture.path}`}
+                  environmentId={environmentId}
+                  threadId={landing.threadId}
+                  path={capture.path}
+                  caption={capture.caption}
+                />
+              ))}
+            </Detail>
+          ) : null}
+          {change.gaps.length > 0 ? (
+            <Detail label="Gaps">
+              {change.gaps.map((gap, index) => (
+                <Text
+                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+                  key={`${index}:${gap}`}
+                  selectable
+                  className={detailText}
+                >
+                  {gap}
+                </Text>
+              ))}
+            </Detail>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

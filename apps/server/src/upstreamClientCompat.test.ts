@@ -784,6 +784,46 @@ describe("upstream client wire compatibility", () => {
     }),
   );
 
+  it("keeps QA check records on the fork's evidence reads", () => {
+    const qaCheck = { where: "Settings", do: "Widen the window", expect: "Two columns" };
+    const landing = {
+      id: "settings",
+      title: "Settings columns",
+      threadId: "thread-1",
+      projectId: null,
+      landedAt: "2026-11-26T10:00:00.000Z",
+      updatedAt: "2026-11-26T10:00:00.000Z",
+      target: { branch: "main", sha: "abc1234" },
+      verifications: [],
+      changes: [
+        {
+          id: "columns",
+          ask: "Use two columns",
+          summary: "Settings columns",
+          commits: ["abc1234"],
+          review: { verdict: "approved" },
+          captures: [],
+          gaps: [],
+          qaCheck,
+          qa: { state: "pending", note: "", by: "agent", updatedAt: "2026-11-26T10:00:00.000Z" },
+        },
+      ],
+    };
+    // The pinned client does not request landing details or thread evidence.
+    expect(Upstream.WsRpcGroup.requests.has(WS_METHODS.evidenceGet)).toBe(false);
+    expect(Upstream.WsRpcGroup.requests.has(WS_METHODS.evidenceThread)).toBe(false);
+    for (const [method, payload] of [
+      [WS_METHODS.evidenceGet, landing],
+      [WS_METHODS.evidenceThread, { landings: [landing] }],
+    ] as const) {
+      const schema = successOf(forkRpcs.get(method)!);
+      const wire = toWire(schema, payload);
+      expect(wire).toBeDefined();
+      expect(Exit.isSuccess(fromWire(schema, wire))).toBe(true);
+      expect(JSON.stringify(wire)).toContain("qaCheck");
+    }
+  });
+
   describe("tracked answer payloads", () => {
     const samples = trackedAnswerWireSamples();
     const {

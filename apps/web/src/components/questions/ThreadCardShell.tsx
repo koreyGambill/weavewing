@@ -60,6 +60,7 @@ export function ThreadCardClosedLine({
   expandRef,
   onExpand,
   stackOnNarrow = false,
+  detail,
   children,
 }: {
   readonly id: string | undefined;
@@ -74,6 +75,7 @@ export function ThreadCardClosedLine({
   readonly onExpand: () => void;
   /** On a narrow card, `children` move under the title so the title stays readable. */
   readonly stackOnNarrow?: boolean;
+  readonly detail?: ReactNode;
   readonly children?: ReactNode;
 }) {
   return (
@@ -120,6 +122,7 @@ export function ThreadCardClosedLine({
         </Tooltip>
         {children}
       </div>
+      {detail}
     </section>
   );
 }

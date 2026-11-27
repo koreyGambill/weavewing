@@ -66,3 +66,18 @@ export const qaRef = (change: QaChange) =>
 
 /** The composer record key of a change, `<landingId>/<changeId>`. */
 export const qaKey = (landingId: string, changeId: string) => `${landingId}/${changeId}`;
+
+/** Selects the lead of an expanded QA card for both clients. */
+export function qaCardLead(change: Pick<QaChange, "qaCheck">) {
+  const check = change.qaCheck;
+  return check === undefined
+    ? ({ kind: "fallback", text: "No QA check was recorded" } as const)
+    : ({
+        kind: "check",
+        rows: [
+          { label: "Where", text: check.where },
+          { label: "Do", text: check.do },
+          { label: "Expect", text: check.expect },
+        ],
+      } as const);
+}

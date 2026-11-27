@@ -1,7 +1,39 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import { EvidenceLandingSummary } from "./evidence.ts";
+import { EvidenceChange, EvidenceLandingSummary } from "./evidence.ts";
+
+describe("QA checks", () => {
+  const decode = Schema.decodeUnknownSync(EvidenceChange);
+  const change = {
+    id: "settings",
+    ask: "Use columns",
+    summary: "Settings layout",
+    commits: [],
+    captures: [],
+    gaps: [],
+    review: { verdict: "approved" },
+  };
+  const qaCheck = { where: " Settings ", do: " Widen the window ", expect: " Two columns " };
+
+  it("decodes records with and without a check and trims the check", () => {
+    expect(decode(change).qaCheck).toBeUndefined();
+    expect(decode({ ...change, qaCheck }).qaCheck).toEqual({
+      where: "Settings",
+      do: "Widen the window",
+      expect: "Two columns",
+    });
+  });
+
+  it.each(["where", "do", "expect"])("requires a short non-blank %s", (key) => {
+    for (const value of [undefined, "  ", "x".repeat(121)]) {
+      expect(() => decode({ ...change, qaCheck: { ...qaCheck, [key]: value } })).toThrow();
+    }
+    expect(() =>
+      decode({ ...change, qaCheck: { ...qaCheck, [key]: "x".repeat(120) } }),
+    ).not.toThrow();
+  });
+});
 
 const decodeSummary = Schema.decodeUnknownSync(EvidenceLandingSummary);
 

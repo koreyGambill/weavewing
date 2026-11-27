@@ -102,7 +102,7 @@ it("settles with Looks good, starts no turn, and keeps focus on the line it coll
   using _fresh = fresh();
   await using screen = await render(<Card />);
   await expect.element(screen.getByRole("region", { name: /^QA1: Toast shows/ })).toBeVisible();
-  await expect.element(screen.getByText("Not checked in Safari.")).toBeVisible();
+  await expect.element(screen.getByText("No QA check was recorded")).toBeVisible();
 
   await userEvent.click(screen.getByRole("button", { name: "Looks good: QA1" }));
   expect(sent).toEqual([{ landingId: landing.id, changeId: change.id, state: "confirmed" }]);
@@ -114,6 +114,44 @@ it("settles with Looks good, starts no turn, and keeps focus on the line it coll
   await userEvent.click(screen.getByRole("button", { name: "Reopen QA1" }));
   expect(sent.at(-1)).toMatchObject({ state: "pending" });
   await expect.element(screen.getByRole("button", { name: "Looks good: QA1" })).toHaveFocus();
+});
+
+it("leads with the check and opens the proof from the keyboard", async () => {
+  const check = { where: "Upload panel", do: "Retry the upload", expect: "Toast reads 2 of 3" };
+  await using screen = await render(
+    <ThreadQaCard threadRef={threadRef} landing={landing} change={{ ...change, qaCheck: check }} />,
+  );
+  for (const [label, value] of Object.entries({
+    Where: check.where,
+    Do: check.do,
+    Expect: check.expect,
+  })) {
+    await expect.element(screen.getByText(label, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(value)).toBeVisible();
+  }
+  await expect.element(screen.getByText("Not checked in Safari.")).not.toBeInTheDocument();
+  await expect.element(screen.getByRole("button", { name: "Looks good: QA1" })).toBeVisible();
+  const evidence = screen.getByRole("button", { name: "Evidence" });
+  await userEvent.click(evidence);
+  await expect.element(evidence).toHaveFocus();
+  await expect.element(screen.getByText("Not checked in Safari.")).toBeVisible();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(evidence).toHaveFocus();
+  await expect.element(screen.getByText("Not checked in Safari.")).not.toBeInTheDocument();
+});
+
+it("shows a recorded problem on the collapsed card", async () => {
+  await using screen = await render(
+    <ThreadQaCard
+      threadRef={threadRef}
+      landing={landing}
+      change={{
+        ...change,
+        qa: { ...change.qa, state: "problem", note: "The toast overlaps the button." },
+      }}
+    />,
+  );
+  await expect.element(screen.getByText("The toast overlaps the button.")).toBeVisible();
 });
 
 it("puts one Discuss reference in the composer and takes it out again", async () => {

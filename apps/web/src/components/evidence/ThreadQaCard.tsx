@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  qaCardLead,
   qaCardOutcome,
   qaCardStatus,
   qaCardTitle,
@@ -11,7 +12,7 @@ import {
 } from "@t3tools/client-runtime/qa-card";
 import { qaPointers } from "@t3tools/client-runtime/state/waiting-item-references";
 import type { EvidenceChangeQa, EvidenceLanding, ScopedThreadRef } from "@t3tools/contracts";
-import { ArrowUpRightIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronRightIcon } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 
 import { evidenceSetQa } from "../../state/evidence";
@@ -27,6 +28,7 @@ import {
 } from "../questions/ThreadCardShell";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CaptureTile } from "./CaptureTile";
 import { CHECKS, checkLabel, reviewDisplay } from "./evidence.logic";
@@ -213,6 +215,13 @@ export function ThreadQaCard({
         title={title}
         outcome={outcome}
         hint={note ? <p className="whitespace-pre-wrap">{note}</p> : undefined}
+        detail={
+          qa.state === "problem" && note ? (
+            <QaRow label="Problem">
+              <span className="whitespace-pre-wrap break-words">{note}</span>
+            </QaRow>
+          ) : undefined
+        }
         expandRef={focusOnMount("line")}
         onExpand={() => setExpanded(true)}
         stackOnNarrow
@@ -226,13 +235,7 @@ export function ThreadQaCard({
 
   const review = reviewDisplay(change.review);
   const link = review.link;
-  const landedLine = [
-    `Landed on ${landing.target.branch}`,
-    landing.target.sha.slice(0, 7),
-    ...(change.ask.trim() && qaCardTitle({ ...change, summary: "" }) !== title
-      ? [`from “${change.ask.split("\n", 1)[0]!.trim()}”`]
-      : []),
-  ].join(" · ");
+  const lead = qaCardLead(change);
   const ownNote = note
     ? qa.state === "problem"
       ? "Problem"
@@ -255,111 +258,16 @@ export function ThreadQaCard({
         </>
       }
     >
-      <p className="px-1.5 text-xs break-words text-muted-foreground">{landedLine}</p>
       <div className="space-y-0.5">
-        <QaRow label="Review">
-          <span className="flex flex-wrap items-center gap-1">
-            {review.hint === null ? (
-              <span className="break-words">{review.label}</span>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span
-                      tabIndex={0}
-                      className="rounded-sm break-words outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                    />
-                  }
-                >
-                  {review.label}
-                </TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-72">
-                  {review.hint}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-            {link === null ? null : link.kind === "unavailable" ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span
-                      tabIndex={0}
-                      aria-description={link.description}
-                      className="rounded-sm text-xs text-muted-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                    />
-                  }
-                >
-                  {link.label}
-                </TooltipTrigger>
-                <TooltipPopup side="top">{link.description}</TooltipPopup>
-              </Tooltip>
-            ) : (
-              <Button
-                variant="link"
-                size="micro"
-                onClick={() =>
-                  void navigate({
-                    to: "/$environmentId/$threadId",
-                    params: { environmentId, threadId: link.threadId },
-                  })
-                }
-              >
-                <ArrowUpRightIcon />
-                {link.label}
-              </Button>
-            )}
-          </span>
-        </QaRow>
-        {landing.verifications.length > 0 ? (
-          <QaRow label="Checks">
-            <span className="flex flex-wrap gap-1">
-              {landing.verifications.map((check, index) => (
-                <Tooltip
-                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
-                  key={index}
-                >
-                  <TooltipTrigger
-                    render={
-                      <Badge
-                        size="sm"
-                        variant={CHECKS[check.result].variant}
-                        className="max-w-full"
-                        tabIndex={0}
-                      />
-                    }
-                  >
-                    <span className="truncate">{checkLabel(check)}</span>
-                  </TooltipTrigger>
-                  <TooltipPopup side="top" className="max-w-72">
-                    {checkLabel(check)}
-                  </TooltipPopup>
-                </Tooltip>
-              ))}
-            </span>
-          </QaRow>
-        ) : null}
-        {change.captures.length > 0 ? (
-          <QaRow label="Captures">
-            <div className="grid grid-cols-1 gap-1.5 @min-[28rem]:grid-cols-[repeat(auto-fill,11.25rem)]">
-              {change.captures.map((capture, index) => (
-                <CaptureTile
-                  // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
-                  key={`${index}:${capture.path}`}
-                  environmentId={environmentId}
-                  threadId={landing.threadId}
-                  path={capture.path}
-                  caption={capture.caption}
-                />
-              ))}
-            </div>
-          </QaRow>
-        ) : null}
-        {change.gaps.map((gap, index) => (
-          // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
-          <QaRow key={`${index}:${gap}`} label="Gap">
-            <span className="break-words">{gap}</span>
-          </QaRow>
-        ))}
+        {lead.kind === "check" ? (
+          lead.rows.map(({ label, text }) => (
+            <QaRow key={label} label={label}>
+              <span className="break-words">{text}</span>
+            </QaRow>
+          ))
+        ) : (
+          <p className="px-1.5 text-sm text-muted-foreground">{lead.text}</p>
+        )}
         {ownNote ? (
           <QaRow label={ownNote}>
             <span className="whitespace-pre-wrap break-words">{note}</span>
@@ -433,6 +341,128 @@ export function ThreadQaCard({
           )}
         </div>
       )}
+      <Collapsible>
+        <CollapsibleTrigger className="group" render={<Button variant="ghost" size="sm" />}>
+          <ChevronRightIcon aria-hidden className="group-data-panel-open:rotate-90" />
+          Evidence
+        </CollapsibleTrigger>
+        <CollapsiblePanel animate={false}>
+          <p className="px-1.5 text-xs break-words text-muted-foreground">
+            Landed on {landing.target.branch} · {landing.target.sha.slice(0, 7)}
+          </p>
+          <div className="space-y-0.5">
+            <QaRow label="Ask">
+              <span className="whitespace-pre-wrap break-words">{change.ask}</span>
+            </QaRow>
+            <QaRow label="Summary">
+              <span className="whitespace-pre-wrap break-words">{change.summary}</span>
+            </QaRow>
+            <QaRow label="Review">
+              <span className="flex flex-wrap items-center gap-1">
+                {review.hint === null ? (
+                  <span className="break-words">{review.label}</span>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          tabIndex={0}
+                          className="rounded-sm break-words outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        />
+                      }
+                    >
+                      {review.label}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top" className="max-w-72">
+                      {review.hint}
+                    </TooltipPopup>
+                  </Tooltip>
+                )}
+                {link === null ? null : link.kind === "unavailable" ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          tabIndex={0}
+                          aria-description={link.description}
+                          className="rounded-sm text-xs text-muted-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        />
+                      }
+                    >
+                      {link.label}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{link.description}</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    variant="link"
+                    size="micro"
+                    onClick={() =>
+                      void navigate({
+                        to: "/$environmentId/$threadId",
+                        params: { environmentId, threadId: link.threadId },
+                      })
+                    }
+                  >
+                    <ArrowUpRightIcon />
+                    {link.label}
+                  </Button>
+                )}
+              </span>
+            </QaRow>
+            {landing.verifications.length > 0 ? (
+              <QaRow label="Checks">
+                <span className="flex flex-wrap gap-1">
+                  {landing.verifications.map((check, index) => (
+                    <Tooltip
+                      // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
+                      key={index}
+                    >
+                      <TooltipTrigger
+                        render={
+                          <Badge
+                            size="sm"
+                            variant={CHECKS[check.result].variant}
+                            className="max-w-full"
+                            tabIndex={0}
+                          />
+                        }
+                      >
+                        <span className="truncate">{checkLabel(check)}</span>
+                      </TooltipTrigger>
+                      <TooltipPopup side="top" className="max-w-72">
+                        {checkLabel(check)}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ))}
+                </span>
+              </QaRow>
+            ) : null}
+            {change.captures.length > 0 ? (
+              <QaRow label="Captures">
+                <div className="grid grid-cols-1 gap-1.5 @min-[28rem]:grid-cols-[repeat(auto-fill,11.25rem)]">
+                  {change.captures.map((capture, index) => (
+                    <CaptureTile
+                      // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
+                      key={`${index}:${capture.path}`}
+                      environmentId={environmentId}
+                      threadId={landing.threadId}
+                      path={capture.path}
+                      caption={capture.caption}
+                    />
+                  ))}
+                </div>
+              </QaRow>
+            ) : null}
+            {change.gaps.map((gap, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+              <QaRow key={`${index}:${gap}`} label="Gap">
+                <span className="break-words">{gap}</span>
+              </QaRow>
+            ))}
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
     </ThreadCard>
   );
 }

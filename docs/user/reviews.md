@@ -159,6 +159,12 @@ QA of landed work lives in the **Evidence** view of the side panel (see
 [Thread sidebar](thread-sidebar.md)). Pending QA does not stop routine work or
 authorized landing.
 
+A QA card leads with one check: where to start, what to do, and what to expect.
+Open **Evidence** on the card to see the landing, review, checks, captures, and
+gaps. A card can still need your attention when it says “No QA check was
+recorded.” You can open its evidence, discuss it, dismiss it, or choose **Looks
+good** if you already checked the change.
+
 Verification entries distinguish a run by another thread from the implementing
 thread's own report. Source review stays labeled as source review, with the tested
 revision, evidence, and remaining gaps when supplied.

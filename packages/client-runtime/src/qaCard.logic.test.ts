@@ -1,7 +1,14 @@
 import { MessageId, type EvidenceChangeQa } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { qaCardOutcome, qaCardStatus, qaCardTitle, qaNoted, qaPresence } from "./qaCard.logic.ts";
+import {
+  qaCardLead,
+  qaCardOutcome,
+  qaCardStatus,
+  qaCardTitle,
+  qaNoted,
+  qaPresence,
+} from "./qaCard.logic.ts";
 
 const qa = (overrides: Partial<EvidenceChangeQa>): EvidenceChangeQa => ({
   state: "pending",
@@ -72,5 +79,21 @@ describe("qaNoted", () => {
     expect(qaNoted({ qa: quiet, gaps: [], captures })).toBe(false);
     expect(qaNoted({ qa: qa({}), gaps, captures: shot })).toBe(false);
     expect(qaNoted({ qa: qa({ state: "confirmed", by: "user" }), gaps, captures })).toBe(false);
+  });
+});
+
+it("leads with the check or an explicit fallback", () => {
+  expect(qaCardLead({})).toEqual({ kind: "fallback", text: "No QA check was recorded" });
+  expect(
+    qaCardLead({
+      qaCheck: { where: "Settings", do: "Widen the window", expect: "Two columns" },
+    }),
+  ).toEqual({
+    kind: "check",
+    rows: [
+      { label: "Where", text: "Settings" },
+      { label: "Do", text: "Widen the window" },
+      { label: "Expect", text: "Two columns" },
+    ],
   });
 });

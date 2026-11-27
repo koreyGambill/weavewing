@@ -749,6 +749,22 @@ function ChangeRow({
       <p className={cn("whitespace-pre-wrap break-words", !full && "line-clamp-2")}>
         “{change.ask}”
       </p>
+      {change.qaCheck ? (
+        <dl className="space-y-1 break-words text-sm">
+          <div>
+            <dt className="inline font-medium">Where </dt>
+            <dd className="inline">{change.qaCheck.where}</dd>
+          </div>
+          <div>
+            <dt className="inline font-medium">Do </dt>
+            <dd className="inline">{change.qaCheck.do}</dd>
+          </div>
+          <div>
+            <dt className="inline font-medium">Expect </dt>
+            <dd className="inline">{change.qaCheck.expect}</dd>
+          </div>
+        </dl>
+      ) : null}
       {full && change.summary ? (
         <p className="whitespace-pre-wrap break-words text-muted-foreground">{change.summary}</p>
       ) : null}

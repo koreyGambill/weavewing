@@ -173,12 +173,19 @@ it.effect(
         yield* evidence.setQa({ landingId: "batch-1", changeId: "b", state: "confirmed" });
         assert.deepStrictEqual(yield* qaCounts, { pending: 0, problem: 0 });
 
-        const again = yield* evidence.record(recordInput("batch-1", [change("a"), change("c")]));
+        const qaCheck = { where: "Settings", do: "Widen the window", expect: "Two columns" };
+        const again = yield* evidence.record(
+          recordInput("batch-1", [{ ...change("a"), qaCheck }, change("c")]),
+        );
         assert.deepStrictEqual(again.changes, [
           { id: "a", qa: "waived", raised: [...unverified], ref: 1 },
           { id: "c", qa: "pending", raised: [...unverified], ref: 3 },
         ]);
         const landing = yield* evidence.get({ landingId: "batch-1" });
+        assert.deepStrictEqual(
+          landing.changes.map((item) => item.qaCheck),
+          [qaCheck, undefined],
+        );
         assert.deepStrictEqual(
           landing.changes.map((item) => [item.id, item.qa.state, item.qa.note]),
           [
