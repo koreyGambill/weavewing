@@ -42,7 +42,7 @@ it.effect("a list update refetches the workspace query, so the attention dot fol
 );
 
 it.effect("a card's write refetches the open Todos list as well as the badge", () =>
-  Effect.gen(function* () {
+  Effect.sync(() => {
     fetches.count = 0;
     const environmentId = EnvironmentId.make("env");
     const threadId = ThreadId.make("thread");
