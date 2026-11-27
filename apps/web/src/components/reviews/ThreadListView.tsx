@@ -619,7 +619,7 @@ function TodoRow({
                 onChange({ state: terminal ? "open" : "dropped" });
               }}
             >
-              {terminal ? "Reopen" : "Drop"}
+              {terminal ? "Reopen" : item.owner === "you" ? "Dismiss" : "Drop"}
             </MenuItem>
           </MenuPopup>
         </Menu>
