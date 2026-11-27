@@ -23,7 +23,7 @@ T3 agent tool reference.
   `- Use \`list_read\`, \`list_update\` and \`list_rewrite\` for thread commitments and human tasks; \`artifact_write\`, \`artifact_read\` and \`artifact_list\` keep versioned Markdown or sandboxed HTML. Read only when needed; keep routine questions in chat. Landed work and the user's QA of it live in evidence: \`evidence_record\` after a land; \`evidence_read\` answers what awaits QA or needs a fix, not lists or the repo.`,
   `## T3 Code QA
 
-- Call \`evidence_record\` in the turn that lands work. The user sees a QA card for a change with something only they can judge; other landings are recorded quietly. Mark a change \`attention: needs_you\` only when the user must look at or decide something you could not; otherwise \`note\`.
+- Call \`evidence_record\` in the turn that lands work. The user sees a QA card for a change with something only they can judge; other landings are recorded quietly. Mark a change \`attention: needs_you\` when the user should look at it, such as a visual change, or check asked-for behavior you could not run; otherwise \`note\`, even with routine gaps, and its captures are never shown.
 - The user sees QA cards in the thread. Never list or recap them in a reply unless the user's message is about one.
 - When the user's message settles a QA change, such as "that works" or "the count still overlaps the button", call \`evidence_qa_update\`: \`confirmed\`, \`problem\` with what is wrong, or \`dismissed\`. A message that does neither leaves it as it is. A message that carries a QA reference is about that change; record what it settled, or reply and leave it open.
 - A problem is work you owe. Fix it, then record the fix with \`evidence_record\`, naming the change in \`fixes\`.`,

@@ -20,9 +20,9 @@ export function qaPresence(qa: EvidenceChangeQa): "card" | "quiet" | "none" {
   return "card";
 }
 
-/** A note: a change recorded without a card that lists gaps, kept in the thread's notes log. */
-export function qaNoted(change: Pick<QaChange, "qa" | "gaps">): boolean {
-  return change.qa.state === "quiet" && change.gaps.length > 0;
+/** A note: a change recorded without a card that lists gaps or captures, kept in the notes log. */
+export function qaNoted(change: Pick<QaChange, "qa" | "gaps" | "captures">): boolean {
+  return change.qa.state === "quiet" && (change.gaps.length > 0 || change.captures.length > 0);
 }
 
 export function qaCardStatus(qa: EvidenceChangeQa, inComposer: boolean): QaCardStatus {
