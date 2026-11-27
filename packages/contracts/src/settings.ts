@@ -216,7 +216,7 @@ export const SavedTileLayout = Schema.Struct({
    * The same layout with its views, present only when it has some. Builds without views ignore
    * it, and drop it when they save settings, which leaves `root`.
    */
-  viewRoot: Schema.optionalKey(SavedTileViewNode.check(withinGroupLimit)),
+  viewRoot: ForwardCompatibleOptional(SavedTileViewNode.check(withinGroupLimit)),
 });
 export type SavedTileLayout = typeof SavedTileLayout.Type;
 export const SavedTileLayouts = Schema.Array(SavedTileLayout).check(Schema.isMaxLength(32));

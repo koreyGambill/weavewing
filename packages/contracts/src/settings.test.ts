@@ -535,13 +535,13 @@ describe("ServerSettings tile layouts", () => {
       kind: "group",
       areas: ["chat", "view:retired-view"],
     });
-    expect(() =>
+    expect(
       decodeServerSettingsPatch({
         tileLayouts: [
           { ...withViews.tileLayouts[0], viewRoot: { kind: "group", areas: ["view:"] } },
         ],
-      }),
-    ).toThrow();
+      }).tileLayouts?.[0]?.viewRoot,
+    ).toBeUndefined();
     const deep = Array.from({ length: 16 }).reduce<unknown>(
       (node) => ({ kind: "split", axis: "vertical", ratio: 0.5, first: group, second: node }),
       group,
@@ -552,6 +552,31 @@ describe("ServerSettings tile layouts", () => {
         projectSettingsOverrides: { project: { defaultTileLayoutId: null } },
       }).projectSettingsOverrides?.[ProjectId.make("project")],
     ).toEqual({ defaultTileLayoutId: null });
+  });
+
+  it.each([
+    { label: "an unknown area", viewRoot: { kind: "group", areas: ["chat", "future-area"] } },
+    { label: "a malformed group", viewRoot: { kind: "group", areas: "chat" } },
+    { label: "a non-object", viewRoot: "chat" },
+  ])("drops a viewRoot with $label and keeps the rest of the settings", ({ viewRoot }) => {
+    const layout = { id: "fallback", name: "Fallback", root: { kind: "group", areas: ["chat"] } };
+    const otherLayout = {
+      id: "views",
+      name: "Views",
+      root: { kind: "group", areas: ["chat"] },
+      viewRoot: { kind: "group", areas: ["chat", "view:links"] },
+    };
+    const settings = {
+      continueThreadsAfterServerUpdate: false,
+      defaultTileLayoutId: layout.id,
+      tileLayouts: [layout, otherLayout],
+    };
+    const decoded = decodeServerSettings({
+      ...settings,
+      tileLayouts: [{ ...layout, viewRoot }, otherLayout],
+    });
+    expect(decoded.tileLayouts[0]?.viewRoot).toBeUndefined();
+    expect(decoded).toEqual(decodeServerSettings(settings));
   });
 });
 

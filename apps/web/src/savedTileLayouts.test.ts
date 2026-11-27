@@ -200,10 +200,20 @@ describe("saved tile layouts", () => {
       kind: "split",
       axis: "horizontal",
       ratio: 0.5,
-      first: { kind: "group", areas: ["chat", "view:retired"] },
-      second: { kind: "group", areas: ["view:todos", "view:retired", "view:status"] },
+      first: { kind: "group", areas: ["chat", "view:some-future-view"] },
+      second: { kind: "group", areas: ["view:todos", "view:some-future-view", "view:status"] },
     };
-    const built = buildTileLayoutFromSaved(withRetired, [], sequentialIds());
+    const decoded = decodeServerSettings({
+      tileLayouts: [
+        {
+          id: "views",
+          name: "Views",
+          root: { kind: "group", areas: ["chat"] },
+          viewRoot: withRetired,
+        },
+      ],
+    }).tileLayouts[0]!;
+    const built = buildTileLayoutFromSaved(savedLayoutTree(decoded), [], sequentialIds());
     const [chat, views] = getTileGroups(built);
     expect(chat?.tabs).toEqual([CONVERSATION_TAB_ID]);
     expect(Object.values(built.pendingAreas ?? {})).toEqual(["view:todos", "view:status"]);
@@ -214,6 +224,31 @@ describe("saved tile layouts", () => {
     expect(getTileGroups(filled)[1]?.tabs).toEqual(["view:todos", "view:status"]);
     expect(views?.tabs).toHaveLength(2);
     expect(filled.pendingAreas).toBeUndefined();
+  });
+
+  it("restores the fallback tree when the saved view tree cannot be decoded", () => {
+    const saved = decodeServerSettings({
+      tileLayouts: [
+        {
+          id: "fallback",
+          name: "Fallback",
+          root: {
+            kind: "split",
+            axis: "horizontal",
+            ratio: 0.4,
+            first: { kind: "group", areas: ["chat"] },
+            second: { kind: "group", areas: ["notes"] },
+          },
+          viewRoot: { kind: "group", areas: ["chat", "future-area"] },
+        },
+      ],
+    }).tileLayouts[0]!;
+    const restored = buildTileLayoutFromSaved(savedLayoutTree(saved), ["notes"], sequentialIds());
+    expect(restored.root).toMatchObject({ kind: "split", axis: "horizontal", ratio: 0.4 });
+    expect(getTileGroups(restored).map((group) => group.tabs)).toEqual([
+      [CONVERSATION_TAB_ID],
+      ["notes"],
+    ]);
   });
 
   it("stores views beside a view-free tree that builds without views decode and keep", () => {
