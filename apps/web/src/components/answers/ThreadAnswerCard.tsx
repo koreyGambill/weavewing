@@ -1,6 +1,7 @@
 import { type ScopedThreadRef, type TrackedAnswer, type TrackedAsk } from "@t3tools/contracts";
 import { useRef, useState } from "react";
 import { cn } from "../../lib/utils";
+import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import ChatMarkdown from "../ChatMarkdown";
 import { findRevealRef } from "../chat/markdownFindContext";
 import { useTallEnoughToFold } from "../chat/useTallEnoughToFold";
@@ -18,6 +19,8 @@ function answerCardElementId(id: string) {
   return `thread-answer-${id}`;
 }
 
+const ARTIFACT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
 export function TrackedAnswerBody({
   answer,
   threadRef,
@@ -28,6 +31,12 @@ export function TrackedAnswerBody({
   readonly cwd?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const more = answer.more?.trim();
+  const artifactId = more?.startsWith("artifact:")
+    ? more.slice("artifact:".length).trim()
+    : more && ARTIFACT_ID.test(more)
+      ? more
+      : null;
   const { ref: contentRef, tallEnough } = useTallEnoughToFold(true, 20);
   const clamped = tallEnough && !expanded;
   const reveal = findRevealRef(() => setExpanded(true));
@@ -57,11 +66,28 @@ export function TrackedAnswerBody({
           {expanded ? "Show less" : "Show all"}
         </Button>
       ) : null}
-      {answer.more ? (
+      {more ? (
         <div className="flex items-baseline gap-2 px-1.5 py-1">
           <span className="shrink-0 text-xs text-muted-foreground">More</span>
           <div className="min-w-0 break-words text-xs">
-            <ChatMarkdown text={answer.more} cwd={cwd} threadRef={threadRef} parseRawHtml={false} />
+            {artifactId ? (
+              <div className="min-w-0 [&>button]:max-w-full">
+                <Button
+                  size="xs"
+                  variant="link"
+                  onClick={() =>
+                    useThreadContextSidebarStore.getState().show("artifacts", {
+                      thread: threadRef,
+                      artifactId,
+                    })
+                  }
+                >
+                  <span className="min-w-0 truncate">{artifactId}</span>
+                </Button>
+              </div>
+            ) : (
+              <ChatMarkdown text={more} cwd={cwd} threadRef={threadRef} parseRawHtml={false} />
+            )}
           </div>
         </div>
       ) : null}
