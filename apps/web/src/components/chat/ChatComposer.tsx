@@ -3438,6 +3438,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const mod = isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey;
         if (
           showTrackAnswer &&
+          pendingPrimaryAction === null &&
           canOperateThread &&
           mod &&
           event.shiftKey &&
@@ -3895,14 +3896,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onCompact={compactThreadContextStable}
                     />
                   ) : null}
-                  {showTrackAnswer && !dictationTakesFooter ? (
-                    <TrackAnswerToggle
-                      pressed={answerDraft.track}
-                      compact={isComposerFooterCompact}
-                      disabled={!canOperateThread}
-                      onToggle={toggleTrackAnswer}
-                    />
-                  ) : null}
                   <ComposerFooterPrimaryActions
                     // Stop state belongs to one thread; the composer stays mounted across threads.
                     key={`${environmentId}:${activeThreadId ?? "new"}`}
@@ -3985,6 +3978,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onCancelDownload={() => void speechInput.setup.cancelDownload()}
                       onStartRecording={() => void speechInput.setup.startRecording()}
                     />
+                    {showTrackAnswer && pendingPrimaryAction === null && !dictationTakesFooter ? (
+                      <TrackAnswerToggle
+                        pressed={answerDraft.track}
+                        compact={isComposerFooterCompact}
+                        disabled={!canOperateThread}
+                        onToggle={toggleTrackAnswer}
+                      />
+                    ) : null}
                   </ComposerFooterPrimaryActions>
                 </div>
               </div>

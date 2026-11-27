@@ -25,7 +25,7 @@ import { useTrackedAsks, useUpdateTrackedAsk } from "./trackedAnswers-web-state"
 const asksRead = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "answers:history",
   tag: WS_METHODS.threadAsksRead,
-  staleTimeMs: 0,
+  staleTimeMs: 2_000,
   idleTtlMs: 0,
 });
 type Entry = TrackedAnswersPage["entries"][number];
