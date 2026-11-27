@@ -11,7 +11,7 @@ import {
   parseTaskList,
   receiptFor,
   recordReceipt,
-  requireFreshEvidence,
+  claimEvidence,
   suiteRan,
   suiteRoot,
   testedTree,
@@ -124,12 +124,13 @@ test("a suite counts as run only when vitest ran test files in the log of each o
   }
 });
 
-test("a suite run refuses an evidence directory an earlier run used", () => {
+test("a suite run claims a new evidence directory and refuses one that exists", () => {
   const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "suite-evidence-"));
   try {
-    requireFreshEvidence(dir);
-    FS.writeFileSync(Path.join(dir, "test-web.log"), " Test Files  3 passed (3)\n");
-    assert.throws(() => requireFreshEvidence(dir), /fresh evidence directory/);
+    const claimed = Path.join(dir, "runs/suite");
+    claimEvidence(claimed);
+    assert.throws(() => claimEvidence(claimed), /already exists/, "a second run given the same directory");
+    assert.throws(() => claimEvidence(dir), /already exists/, "an existing directory, even an empty one");
   } finally {
     FS.rmSync(dir, { recursive: true, force: true });
   }

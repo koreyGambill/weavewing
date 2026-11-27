@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 
 import { type Context, definePipeline, workDir } from "@sparkwing/sdk";
 
-import { type Checkout, checkoutArgs, checkoutAt, evidenceDir, git } from "../lib/checkout.ts";
+import { type Checkout, checkoutArgs, checkoutAt, evidencePath, git } from "../lib/checkout.ts";
 import {
   everySuite,
   isSuiteName,
@@ -12,7 +12,7 @@ import {
   recordReceipt,
   SUITES,
   type SuiteName,
-  requireFreshEvidence,
+  claimEvidence,
   suiteRoot,
   testedTree,
 } from "../lib/suites.ts";
@@ -66,8 +66,8 @@ definePipeline({
     p.job("suite", async (ctx) => {
       if (full === Boolean(name)) throw new Error("Pass either --suite web|server|packages or --full");
       if (!full && !suite) throw new Error(`--suite must be web, server or packages, got "${name}"`);
-      // Classification reads only this run's logs, so the directory must start empty.
-      requireFreshEvidence(evidenceDir(ctx));
+      // Classification reads only this run's logs, so the run claims a directory of its own.
+      claimEvidence(evidencePath(ctx));
       const co = await suiteCheckout(ctx);
       const commit = git(co.root, "rev-parse", "HEAD");
       const tree = git(co.root, "rev-parse", "HEAD^{tree}");

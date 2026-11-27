@@ -242,7 +242,9 @@ stops when a receipt from `suite --full` already records that commit or tree (pa
 run anyway). Otherwise it runs `suite --full` as batch work in a fresh checkout of `origin/main`
 that Sparkwing makes, which installs itself, and appends any failing files to the known-failures
 list. Only a `suite --full` run in a checkout Sparkwing made for a branch writes a receipt; a run
-on `--worktree` reports but confirms nothing, because ignored files there can change a result. The
+on `--worktree` reports but confirms nothing, because ignored files there can change a result. Never
+set `install` as a default argument in `.sparkwing/sparkwing.yaml`: it lets `suite` install into its
+own checkout, so only the run that asks for it should pass it. The
 daily 02:00 schedule fires only after `sparkwing schedules install` arms it on a machine.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB

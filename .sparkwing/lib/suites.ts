@@ -224,7 +224,8 @@ export function failingTestFiles(dir: string): Array<{ readonly log: string; rea
 
 /**
  * The checkout to test: --worktree as it is, or with --install this run's own checkout, which must
- * be one Sparkwing made for a branch. Nothing else is ever installed into.
+ * be one Sparkwing made for a branch. Nothing else is ever installed into. Never set install as a
+ * default argument in .sparkwing/sparkwing.yaml: only the run that asks for it may install.
  */
 export function suiteRoot(args: { worktree?: string; install?: string }, own: string): string {
   if (args.install !== "true") {
@@ -237,8 +238,15 @@ export function suiteRoot(args: { worktree?: string; install?: string }, own: st
   return own;
 }
 
-/** Refuses an evidence directory that already holds files, so results come from this run's logs only. */
-export function requireFreshEvidence(dir: string): void {
-  if (NodeFS.readdirSync(dir).length > 0)
-    throw new Error(`${dir} already holds files; each suite run needs a fresh evidence directory`);
+/**
+ * Creates dir for this run alone, failing if it already exists, so results come from this run's
+ * logs only; an exclusive mkdir also settles two runs that are given the same directory at once.
+ */
+export function claimEvidence(dir: string): void {
+  NodeFS.mkdirSync(NodePath.dirname(dir), { recursive: true });
+  try {
+    NodeFS.mkdirSync(dir);
+  } catch (error) {
+    throw new Error(`${dir} already exists; each suite run needs a new evidence directory`, { cause: error });
+  }
 }

@@ -36,11 +36,17 @@ export function checkout(ctx: Context): Checkout {
 
 /** --evidence, or ~/evidence/t3code/sparkwing/runs/<pipeline>/<run id>, created. */
 export function evidenceDir(ctx: Context): string {
+  const evidence = evidencePath(ctx);
+  NodeFS.mkdirSync(evidence, { recursive: true });
+  return evidence;
+}
+
+/** --evidence, or ~/evidence/t3code/sparkwing/runs/<pipeline>/<run id>, not yet created. */
+export function evidencePath(ctx: Context): string {
   const evidence =
     ctx.args.evidence ||
     NodePath.join(NodeOS.homedir(), "evidence/t3code/sparkwing/runs", ctx.run.pipeline, ctx.run.id);
   if (!NodePath.isAbsolute(evidence)) throw new Error(`--evidence must be absolute: ${evidence}`);
-  NodeFS.mkdirSync(evidence, { recursive: true });
   return evidence;
 }
 
