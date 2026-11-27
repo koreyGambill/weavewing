@@ -699,12 +699,12 @@ export const BranchToolbar = memo(function BranchToolbar({
       xwingChooserOffered && canCreateEnvironment
         ? () => setCreateEnvironmentOpen(true)
         : undefined,
-    // The server makes T3 worktrees only, and a thread already in one cannot move again.
+    // A thread already in a worktree or environment cannot move again.
     handoffWorktree:
       isServerThread &&
       showGitControls &&
       activeWorktreePath === null &&
-      worktreeProvider === "t3" &&
+      worktreeProvider !== "off" &&
       canHandoffWorktree
         ? (returnFocus: HTMLElement | null) => openHandoffWorktree(threadRef, returnFocus)
         : undefined,

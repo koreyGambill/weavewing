@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   WorktreeMcpHandoffInput,
+  XwingEnvironmentId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -22,6 +23,8 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ServerConfig from "../config.ts";
@@ -41,6 +44,8 @@ const environmentId = EnvironmentId.make("environment-worktree-test");
 const threadId = ThreadId.make("thread-worktree-test");
 const projectId = ProjectId.make("project-worktree-test");
 const workspaceRoot = "/repo/project";
+const xwingEnvironmentId = XwingEnvironmentId.make("b64c7d2adc5ee9e0");
+const environmentCheckout = "/xwing/envs/7/project";
 
 const makeScope = (
   capabilities: ReadonlySet<McpInvocationContext.McpCapability>,
@@ -117,13 +122,16 @@ interface HarnessOptions {
   readonly createWorktreeGate?: Effect.Effect<void>;
   readonly existsFails?: boolean;
   readonly worktreeProvider?: "t3" | "xwing" | "off";
+  readonly prepareLaunchFails?: boolean;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
   const thread = options.thread === undefined ? {} : options.thread;
   const scope = makeScope(options.capabilities ?? new Set(["preview", "worktree"]));
+  const steps: Array<string> = [];
   const dispatch = vi.fn((_: unknown) =>
-    (options.dispatchGate ?? Effect.void).pipe(
+    Effect.sync(() => steps.push("dispatch")).pipe(
+      Effect.andThen(options.dispatchGate ?? Effect.void),
       Effect.andThen(
         options.dispatchInterrupts
           ? (Effect.failCause(Cause.interrupt()) as never)
@@ -276,6 +284,63 @@ const makeHarness = (options: HarnessOptions = {}) => {
     }
   });
 
+  const prepareLaunch = vi.fn(
+    (
+      _: Parameters<
+        DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["prepareLaunch"]
+      >[0],
+    ) =>
+      options.prepareLaunchFails
+        ? Effect.fail(
+            new DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycleError({
+              operation: "create",
+              reason: "xwing-unavailable",
+            }),
+          )
+        : Effect.sync(() => {
+            steps.push("prepare");
+            return { xwingEnvironmentId, created: true };
+          }),
+  );
+  const discardLaunch = vi.fn(
+    (
+      _: Parameters<
+        DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["discardLaunch"]
+      >[0],
+    ) =>
+      Effect.sync(() => {
+        steps.push("discard");
+      }),
+  );
+  const resolveLaunchWorkspace = vi.fn((input: { readonly xwingEnvironmentId: string }) =>
+    Effect.succeed({
+      workspaceStrategy: {
+        type: "existing_worktree" as const,
+        worktreePath: environmentCheckout,
+        branch: prepareLaunch.mock.calls.at(-1)?.[0].branch ?? "detached",
+      },
+      developmentEnvironment: {
+        xwingEnvironmentId: input.xwingEnvironmentId,
+        repositorySource: workspaceRoot,
+        checkoutPath: environmentCheckout,
+        number: 7,
+        name: "Worktree test thread [t3 1234abcd]",
+      },
+    }),
+  );
+  const holds = vi.fn(
+    (_: Parameters<DevelopmentEnvironments.DevelopmentEnvironments["Service"]["bindLaunch"]>[0]) =>
+      undefined,
+  );
+  const bindLaunch: DevelopmentEnvironments.DevelopmentEnvironments["Service"]["bindLaunch"] = (
+    binding,
+    launch,
+  ) =>
+    Effect.sync(() => {
+      holds(binding);
+      steps.push(`hold ${binding.xwingEnvironmentId}`);
+    }).pipe(Effect.andThen(launch));
+
   const layer = WorktreeMcpService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -317,6 +382,14 @@ const makeHarness = (options: HarnessOptions = {}) => {
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshStatus,
         } satisfies Partial<VcsStatusBroadcaster.VcsStatusBroadcaster["Service"]>),
+        Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({
+          prepareLaunch,
+          discardLaunch,
+        }),
+        Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({
+          resolveLaunchWorkspace,
+          bindLaunch,
+        }),
         NodeServices.layer,
         NodeCrypto.layer,
         options.existsFails
@@ -347,6 +420,10 @@ const makeHarness = (options: HarnessOptions = {}) => {
     deleteLocalBranch,
     localStatus,
     runForThread,
+    steps,
+    prepareLaunch,
+    discardLaunch,
+    holds,
   };
 };
 
@@ -392,6 +469,7 @@ describe("t3_worktree_handoff", () => {
         continuationPrompt: "Keep going.",
       });
       expect(result.continuation).toEqual({ status: "scheduled", delivery: "queued" });
+      expect(harness.prepareLaunch).not.toHaveBeenCalled();
       expect(harness.dispatch).toHaveBeenCalledTimes(1);
       expect(harness.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -471,24 +549,20 @@ describe("t3_worktree_handoff", () => {
     });
   });
 
-  it.effect.each(["xwing", "off"] as const)(
-    "refuses a handoff when worktreeProvider is %s",
-    (worktreeProvider) => {
-      const harness = makeHarness({ worktreeProvider });
-      return Effect.gen(function* () {
-        const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/refused" }));
-        expectTypedFailure(exit, {
-          _tag: "WorktreeMcpFailure",
-          code: "invalid_request",
-          message: expect.stringContaining(
-            `\`worktreeProvider\` server setting (${worktreeProvider})`,
-          ),
-        });
-        expect(harness.createWorktree).not.toHaveBeenCalled();
-        expect(harness.fetchWorktreeBaseCommit).not.toHaveBeenCalled();
+  it.effect("refuses a handoff when worktreeProvider is off", () => {
+    const harness = makeHarness({ worktreeProvider: "off" });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/refused" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "invalid_request",
+        message: expect.stringContaining("`worktreeProvider` server setting (off)"),
       });
-    },
-  );
+      expect(harness.createWorktree).not.toHaveBeenCalled();
+      expect(harness.fetchWorktreeBaseCommit).not.toHaveBeenCalled();
+      expect(harness.prepareLaunch).not.toHaveBeenCalled();
+    });
+  });
 
   it.effect("rejects an existing branch with an actionable error naming its checkout", () => {
     const harness = makeHarness({ existingBranchWorktreePath: "/elsewhere/checkout" });
@@ -750,6 +824,155 @@ describe("t3_worktree_handoff", () => {
       const result = yield* runHandoff(harness, { branch: "feature/setup-dies" });
       expect(result.setupScript).toEqual({ status: "failed", detail: "setup runner defect" });
       expect(harness.dispatch).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("t3_worktree_handoff under worktreeProvider xwing", () => {
+  const handOffThread = (
+    harness: ReturnType<typeof makeHarness>,
+    input: Parameters<WorktreeMcpService.WorktreeMcpService["Service"]["handoffThread"]>[1],
+  ) =>
+    WorktreeMcpService.WorktreeMcpService.pipe(
+      Effect.flatMap((service) => service.handoffThread(threadId, input)),
+      Effect.provide(harness.layer),
+    );
+
+  it.effect("moves the agent's thread into a held Xwing environment with its continuation", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing" });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, {
+        branch: "feature/xwing",
+        continuationPrompt: "Keep going.",
+      });
+      const [binding] = harness.dispatch.mock.calls[0]! as [Record<string, unknown>];
+      expect(harness.prepareLaunch).toHaveBeenCalledWith({
+        projectId,
+        launchKey: binding.commandId,
+        title: "Worktree test thread",
+        branch: "feature/xwing",
+        baseRef: "dev",
+        startFromOrigin: false,
+      });
+      expect(harness.holds).toHaveBeenCalledWith({
+        xwingEnvironmentId,
+        threadId,
+        commandId: binding.commandId,
+        title: "Worktree test thread",
+      });
+      expect(harness.steps).toEqual(["prepare", `hold ${xwingEnvironmentId}`, "dispatch"]);
+      expect(binding).toMatchObject({
+        type: "thread.workspace.select",
+        threadId,
+        expected: { projectId, worktreePath: null, xwingEnvironmentId: null },
+        worktreePath: environmentCheckout,
+        branch: "feature/xwing",
+        developmentEnvironment: { xwingEnvironmentId, checkoutPath: environmentCheckout },
+        workspaceChange: "agent-handoff",
+        continuation: { text: "Keep going." },
+      });
+      expect(result).toMatchObject({
+        worktreePath: environmentCheckout,
+        branch: "feature/xwing",
+        baseRef: "dev",
+        startedFromOrigin: false,
+        setupScript: { status: "skipped" },
+        continuation: { status: "scheduled", delivery: "queued" },
+      });
+      expect(result.note).toContain("Xwing environment");
+      expect(harness.createWorktree).not.toHaveBeenCalled();
+      expect(harness.runForThread).not.toHaveBeenCalled();
+      expect(harness.discardLaunch).not.toHaveBeenCalled();
+    });
+  });
+
+  it.effect("moves a person's stopped thread without claiming an agent handoff", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing" });
+    return Effect.gen(function* () {
+      const result = yield* handOffThread(harness, { branch: "feature/person" });
+      const [binding] = harness.dispatch.mock.calls[0]! as [Record<string, unknown>];
+      expect(binding).toMatchObject({
+        type: "thread.workspace.select",
+        worktreePath: environmentCheckout,
+      });
+      expect(binding).not.toHaveProperty("workspaceChange");
+      expect(binding).not.toHaveProperty("continuation");
+      expect(result.continuation).toEqual({ status: "skipped" });
+      expect(harness.steps).toEqual(["prepare", `hold ${xwingEnvironmentId}`, "dispatch"]);
+    });
+  });
+
+  it.effect("starts the environment from the fetched remote base", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing" });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, {
+        branch: "feature/origin",
+        startFromOrigin: true,
+      });
+      expect(harness.fetchWorktreeBaseCommit).toHaveBeenCalled();
+      expect(harness.prepareLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({ baseRef: "origin/dev", startFromOrigin: false }),
+      );
+      expect(result).toMatchObject({ baseRef: "dev", startedFromOrigin: true });
+    });
+  });
+
+  it.effect("refuses an existing branch before creating any environment", () => {
+    const harness = makeHarness({
+      worktreeProvider: "xwing",
+      existingBranchWorktreePath: null,
+    });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/taken" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "invalid_request",
+        message: expect.stringContaining("already exists"),
+      });
+      expect(harness.prepareLaunch).not.toHaveBeenCalled();
+      expect(harness.dispatch).not.toHaveBeenCalled();
+    });
+  });
+
+  it.effect("discards the new environment when the binding fails", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing", dispatchFails: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/unbound" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "operation_failed",
+        message: expect.stringContaining("Unable to re-point the thread at the Xwing environment"),
+      });
+      const [binding] = harness.dispatch.mock.calls[0]! as [Record<string, unknown>];
+      expect(harness.discardLaunch).toHaveBeenCalledWith({
+        xwingEnvironmentId,
+        hold: { threadId, period: binding.commandId },
+      });
+      expect(harness.steps.at(-1)).toBe("discard");
+    });
+  });
+
+  it.effect("discards the new environment when the thread moved while it was created", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing", threadAttachedOnRecheck: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/raced" }));
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "already_in_worktree" });
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.discardLaunch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.effect("reports a failed environment creation without binding the thread", () => {
+    const harness = makeHarness({ worktreeProvider: "xwing", prepareLaunchFails: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/no-xwing" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "operation_failed",
+        message: expect.stringContaining("Unable to create the Xwing environment"),
+      });
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.discardLaunch).not.toHaveBeenCalled();
     });
   });
 });

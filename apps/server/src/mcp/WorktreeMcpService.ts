@@ -24,7 +24,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
 
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
+import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import type * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
@@ -129,6 +132,37 @@ const asOperationFailed = (prefix: string) =>
     failure("operation_failed", `${prefix}: ${errorMessage(error)}`),
   );
 
+/** Whether the continuation committed with the binding started its run or waits behind one. */
+function continuationStatus(
+  input: WorktreeMcpHandoffInput,
+  bound: Orchestrator.OrchestratorV2DispatchResult,
+): WorktreeMcpContinuationStatus {
+  if (input.continuationPrompt === undefined) return { status: "skipped" };
+  return {
+    status: "scheduled",
+    delivery: bound.storedEvents.some(
+      ({ event }) => event.type === "run.created" && event.payload.status !== "queued",
+    )
+      ? "started"
+      : "queued",
+  };
+}
+
+function handoffNote(
+  continuation: WorktreeMcpContinuationStatus,
+  checkout: "worktree" | "Xwing environment",
+): string {
+  const resume =
+    continuation.status === "scheduled"
+      ? `the queued continuation prompt then starts the next turn inside the ${checkout} with the conversation preserved.`
+      : `the conversation continues inside the ${checkout} when the thread receives its next message. Pass continuationPrompt to resume automatically.`;
+  const lifetime =
+    checkout === "worktree"
+      ? "The worktree is not removed automatically when the thread is deleted."
+      : "The Xwing environment stays until it is cleaned up through T3 or Xwing; deleting the thread does not remove it.";
+  return `Handoff recorded. Changing the workspace detaches this provider session, so the current turn ends shortly after this call; ${resume} ${lifetime}`;
+}
+
 const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -138,6 +172,9 @@ const make = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
   const setupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+  const environmentLifecycle =
+    yield* DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
+  const developmentEnvironments = yield* DevelopmentEnvironments.DevelopmentEnvironments;
 
   // Serialize handoffs per thread to avoid creating two worktrees and orphaning one.
   const handoffThreadsInFlight = new Set<string>();
@@ -217,6 +254,7 @@ const make = Effect.gen(function* () {
   const performHandoff = Effect.fn("WorktreeMcpService.performHandoff")(function* (
     target: HandoffTarget,
     input: WorktreeMcpHandoffInput,
+    worktreeProvider: "t3" | "xwing",
   ) {
     const alreadyInWorktree = (worktreePath: string) =>
       failure(
@@ -287,6 +325,7 @@ const make = Effect.gen(function* () {
 
     let worktreeBaseRef = baseRef;
     let baseRefName = baseRef;
+    let environmentBaseRef = baseRef;
     let startedFromOrigin = false;
     if (startFromOrigin) {
       const resolvedRemoteBase = yield* gitWorkflow
@@ -295,11 +334,133 @@ const make = Effect.gen(function* () {
       if (resolvedRemoteBase !== null) {
         worktreeBaseRef = resolvedRemoteBase.commitSha;
         baseRefName = `refs/remotes/${resolvedRemoteBase.remoteRefName}`;
+        environmentBaseRef = resolvedRemoteBase.remoteRefName;
         startedFromOrigin = true;
       }
     }
 
     const ids = yield* handoffIds(target);
+
+    // A concurrent UI binding may have landed meanwhile; do not orphan a second checkout.
+    const recheck = Effect.fn("WorktreeMcpService.recheck")(function* (checkout: string) {
+      const current = yield* loadThread(target.threadId);
+      if (current.thread.worktreePath !== null) {
+        return yield* alreadyInWorktree(current.thread.worktreePath);
+      }
+      if (current.thread.archivedAt !== null) {
+        return yield* failure(
+          "invalid_request",
+          `Thread '${target.threadId}' was archived while the ${checkout} was being created; the handoff was rolled back.`,
+        );
+      }
+    });
+
+    const asBindFailure = <A, E, R>(dispatch: Effect.Effect<A, E, R>) =>
+      dispatch.pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause as Cause.Cause<never>)
+            : Effect.fail(
+                failure(
+                  "operation_failed",
+                  `Unable to re-point the thread at the ${worktreeProvider === "t3" ? "worktree" : "Xwing environment"}: ${errorMessage(Cause.squash(cause))}`,
+                ),
+              ),
+        ),
+      );
+
+    // Only an agent handing off from its own turn may move a thread that is not stopped. Binding
+    // detaches the session and ends the caller, so the continuation commits with it.
+    const bindingFields = {
+      ...(target.agent ? { workspaceChange: "agent-handoff" as const } : {}),
+      ...(input.continuationPrompt === undefined
+        ? {}
+        : {
+            continuation: {
+              messageId: ids.continuationMessageId,
+              text: input.continuationPrompt,
+            },
+          }),
+    };
+
+    if (worktreeProvider === "xwing") {
+      return yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const prepared = yield* restore(
+            environmentLifecycle.prepareLaunch({
+              projectId: project.id,
+              launchKey: ids.commandId,
+              title: projection.thread.title,
+              branch: input.branch,
+              // Already the fetched remote-tracking ref when starting from origin.
+              baseRef: environmentBaseRef,
+              startFromOrigin: false,
+            }),
+          ).pipe(asOperationFailed("Unable to create the Xwing environment"));
+          const hold = { threadId: target.threadId, period: ids.commandId };
+          const bound = yield* Effect.gen(function* () {
+            const workspace = yield* developmentEnvironments
+              .resolveLaunchWorkspace({
+                projectId: project.id,
+                xwingEnvironmentId: prepared.xwingEnvironmentId,
+              })
+              .pipe(asOperationFailed("Unable to resolve the Xwing environment's checkout"));
+            yield* recheck("Xwing environment");
+            const dispatched = yield* developmentEnvironments
+              .bindLaunch(
+                {
+                  xwingEnvironmentId: prepared.xwingEnvironmentId,
+                  threadId: target.threadId,
+                  commandId: ids.commandId,
+                  title: projection.thread.title,
+                },
+                threadManagement.dispatch({
+                  type: "thread.workspace.select",
+                  commandId: ids.commandId,
+                  threadId: target.threadId,
+                  expected: {
+                    projectId: project.id,
+                    worktreePath: null,
+                    xwingEnvironmentId:
+                      projection.thread.developmentEnvironment?.xwingEnvironmentId ?? null,
+                  },
+                  worktreePath: workspace.workspaceStrategy.worktreePath,
+                  branch: workspace.workspaceStrategy.branch ?? input.branch,
+                  developmentEnvironment: workspace.developmentEnvironment,
+                  ...bindingFields,
+                }),
+              )
+              .pipe(asBindFailure);
+            return { workspace, dispatched };
+          }).pipe(
+            Effect.tapCause((cause) =>
+              prepared.created && !Cause.hasInterruptsOnly(cause)
+                ? environmentLifecycle.discardLaunch({
+                    xwingEnvironmentId: prepared.xwingEnvironmentId,
+                    hold,
+                  })
+                : Effect.void,
+            ),
+          );
+          const worktreePath = bound.workspace.workspaceStrategy.worktreePath;
+          yield* vcsStatusBroadcaster
+            .refreshStatus(worktreePath)
+            .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
+          const continuation = continuationStatus(input, bound.dispatched);
+          const result: WorktreeMcpHandoffResult = {
+            worktreePath,
+            branch: bound.workspace.workspaceStrategy.branch ?? input.branch,
+            baseRef,
+            startedFromOrigin,
+            // Xwing runs the environment's installs, so T3's setup script does not run here.
+            setupScript: { status: "skipped" },
+            continuation,
+            note: handoffNote(continuation, "Xwing environment"),
+          };
+          return result;
+        }),
+      );
+    }
 
     // Mask interruption after worktree creation through setup; binding can detach and interrupt the caller.
     return yield* Effect.uninterruptibleMask((restore) =>
@@ -371,68 +532,27 @@ const make = Effect.gen(function* () {
           ),
         );
 
-        const recheckAndBind = Effect.gen(function* () {
-          // A concurrent UI binding may have landed during git work; do not orphan a second worktree.
-          const recheck = yield* loadThread(target.threadId);
-          if (recheck.thread.worktreePath !== null) {
-            return yield* alreadyInWorktree(recheck.thread.worktreePath);
-          }
-          if (recheck.thread.archivedAt !== null) {
-            return yield* failure(
-              "invalid_request",
-              `Thread '${target.threadId}' was archived while the worktree was being created; the handoff was rolled back.`,
-            );
-          }
-          return yield* threadManagement
-            .dispatch({
-              type: "thread.metadata.update",
-              commandId: ids.commandId,
-              threadId: target.threadId,
-              branch: worktree.worktree.refName,
-              worktreePath,
-              expectedWorktreePath: null,
-              // Only an agent handing off from its own turn may move a thread that is not stopped.
-              ...(target.agent ? { workspaceChange: "agent-handoff" as const } : {}),
-              // Binding detaches the session and ends the caller; a later send could lose the race.
-              ...(input.continuationPrompt === undefined
-                ? {}
-                : {
-                    continuation: {
-                      messageId: ids.continuationMessageId,
-                      text: input.continuationPrompt,
-                    },
-                  }),
-            })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause as Cause.Cause<never>)
-                  : Effect.fail(
-                      failure(
-                        "operation_failed",
-                        `Unable to re-point the thread at the worktree: ${errorMessage(Cause.squash(cause))}`,
-                      ),
-                    ),
-              ),
-            );
-        }).pipe(
+        const recheckAndBind = recheck("worktree").pipe(
+          Effect.andThen(() =>
+            threadManagement
+              .dispatch({
+                type: "thread.metadata.update",
+                commandId: ids.commandId,
+                threadId: target.threadId,
+                branch: worktree.worktree.refName,
+                worktreePath,
+                expectedWorktreePath: null,
+                ...bindingFields,
+              })
+              .pipe(asBindFailure),
+          ),
           undoOnFailure(removeCreatedWorktree, () =>
             leftovers(worktreePath, worktree.worktree.refName),
           ),
         );
 
         const bound = yield* recheckAndBind;
-        const continuation: WorktreeMcpContinuationStatus =
-          input.continuationPrompt === undefined
-            ? { status: "skipped" }
-            : {
-                status: "scheduled",
-                delivery: bound.storedEvents.some(
-                  ({ event }) => event.type === "run.created" && event.payload.status !== "queued",
-                )
-                  ? "started"
-                  : "queued",
-              };
+        const continuation = continuationStatus(input, bound);
 
         yield* vcsStatusBroadcaster
           .refreshStatus(worktreePath)
@@ -475,23 +595,20 @@ const make = Effect.gen(function* () {
           startedFromOrigin,
           setupScript,
           continuation,
-          note:
-            continuation.status === "scheduled"
-              ? "Handoff recorded. Changing the workspace detaches this provider session, so the current turn ends shortly after this call; the queued continuation prompt then starts the next turn inside the worktree with the conversation preserved. The worktree is not removed automatically when the thread is deleted."
-              : "Handoff recorded. Changing the workspace detaches this provider session, so the current turn ends shortly after this call; the conversation continues inside the worktree when the thread receives its next message. Pass continuationPrompt to resume automatically. The worktree is not removed automatically when the thread is deleted.",
+          note: handoffNote(continuation, "worktree"),
         };
         return result;
       }),
     );
   });
 
-  // Serialize per thread and refuse a non-T3 worktree provider, for both callers.
+  // Serialize per thread and refuse when the server allows no isolated checkouts, for both callers.
   const runHandoff = Effect.fn("WorktreeMcpService.runHandoff")(function* (
     target: HandoffTarget,
     input: WorktreeMcpHandoffInput,
   ) {
     const worktreeProvider = yield* readWorktreeProvider(serverSettings);
-    if (worktreeProvider !== "t3") {
+    if (worktreeProvider === "off") {
       return yield* failure("invalid_request", worktreeProviderRefusal(worktreeProvider));
     }
     // Acquire and register cleanup atomically so cancellation cannot strand the guard until restart.
@@ -506,7 +623,7 @@ const make = Effect.gen(function* () {
           );
         }
         handoffThreadsInFlight.add(target.threadId);
-        return restore(performHandoff(target, input)).pipe(
+        return restore(performHandoff(target, input, worktreeProvider)).pipe(
           Effect.ensuring(Effect.sync(() => handoffThreadsInFlight.delete(target.threadId))),
         );
       }),
@@ -579,4 +696,6 @@ export const layer: Layer.Layer<
   | GitWorkflowService.GitWorkflowService
   | ProjectSetupScriptRunner.ProjectSetupScriptRunner
   | VcsStatusBroadcaster.VcsStatusBroadcaster
+  | DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle
+  | DevelopmentEnvironments.DevelopmentEnvironments
 > = Layer.effect(WorktreeMcpService, make);
