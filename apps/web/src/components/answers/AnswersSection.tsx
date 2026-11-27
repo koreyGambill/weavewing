@@ -1,7 +1,7 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { WS_METHODS, type ScopedThreadRef, type TrackedAnswersPage } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -9,7 +9,8 @@ import { connectionAtomRuntime } from "../../connection/runtime";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useEnvironmentQuery } from "../../state/query";
-import { buildThreadRouteParams } from "../../threadRoutes";
+import { buildThreadRouteParams, resolveThreadRouteTarget } from "../../threadRoutes";
+import { focusThreadDraft, showThreadConversation } from "../../lib/sideChatPane";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CardStatusBadge } from "../questions/QuestionStatusBadge";
 import { revealAnswerInChat, revealTrackedMessageInChat } from "../questions/questionReveal";
@@ -18,7 +19,6 @@ import { observeIntersection } from "../../lib/observeIntersection";
 import { useThreadTrackedAsks } from "../../state/threads";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { focusNearestComposer } from "../waiting/waitingItemComposer";
 import { TrackedAnswerBody } from "./ThreadAnswerCard";
 import { TrackedAskActions } from "./TrackedAskActions";
 import { useTrackedAnswerDraftStore } from "./trackedAnswerDraft";
@@ -160,6 +160,7 @@ function AnswerListRow({
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  const route = resolveThreadRouteTarget(useParams({ strict: false }));
   const { canUpdate, submit } = useUpdateTrackedAsk(target);
   const answer = ask.answers.at(-1);
   const key = scopedThreadKey(target);
@@ -167,8 +168,9 @@ function AnswerListRow({
     (state) => state.drafts[key]?.discuss.some((item) => item.id === ask.id) ?? false,
   );
   const navigateToThread = async () => {
-    if (target.threadId !== current.threadId)
+    if (route?.kind !== "server" || scopedThreadKey(route.threadRef) !== key)
       await navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(target) });
+    showThreadConversation(target);
   };
   const showInChat = async () => {
     await navigateToThread();
@@ -253,10 +255,9 @@ function AnswerListRow({
                   variant="contrast-outline"
                   disabled={!canUpdate}
                   aria-pressed={discussed}
-                  onClick={(event) => {
-                    const from = event.currentTarget;
+                  onClick={() => {
                     useTrackedAnswerDraftStore.getState().toggleDiscuss(key, ask);
-                    if (!discussed) void navigateToThread().then(() => focusNearestComposer(from));
+                    if (!discussed) void navigateToThread().then(() => focusThreadDraft(target));
                   }}
                 >
                   Discuss

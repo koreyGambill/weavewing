@@ -160,8 +160,12 @@ export function useMountedTrackedAnswerTimeline(
   useLayoutEffect(() => {
     if (key === null) return;
     const count = trackedAnswerTimelineCount(key);
+    const release = appAtomRegistry.mount(count);
     appAtomRegistry.set(count, appAtomRegistry.get(count) + 1);
-    return () => appAtomRegistry.set(count, appAtomRegistry.get(count) - 1);
+    return () => {
+      appAtomRegistry.set(count, appAtomRegistry.get(count) - 1);
+      release();
+    };
   }, [key]);
 }
 

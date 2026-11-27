@@ -1001,6 +1001,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     trackedAnswerScope === null
       ? Stream.empty
       : AtomRegistry.toStream(trackedAnswerScope.registry, trackedAnswerScope.atom).pipe(
+          Stream.filter((visible) => visible === wantsTrackedAnswers()),
+          Stream.changes,
           Stream.filter(
             (visible) =>
               requestedTrackedAnswers !== undefined && visible !== requestedTrackedAnswers,
