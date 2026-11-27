@@ -8,31 +8,23 @@ import { acquireLock, assertNoNodeTracing, developerIdProof, type CheckResult, s
 import { assertCleanBundle, assertUpdaterConfig, buildEnvironment, MACOS_BUNDLE_ID, macAssetDigests, macSignedAssets, releaseInputs } from "./release.ts";
 
 assertNoNodeTracing(process.env);
-let payload = "";
-for await (const chunk of process.stdin) payload += chunk;
-const { version, channel, runId, secrets } = JSON.parse(payload) as { version: string; channel: string; runId: string; secrets: Record<string, string> };
-const release = releaseInputs(version, "mac", channel);
-if (!/^[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid release inputs");
+const runId = process.argv[2] ?? "";
+if (!/^run-[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid Mac run id");
 const workspace = Path.join(OS.homedir(), "weavewing-release");
 const root = Path.join(workspace, runId);
-if (process.cwd() !== Path.join(root, "source")) throw new Error("Unexpected Mac source directory");
-const nodeVersion = JSON.parse(FS.readFileSync("package.json", "utf8")).engines.node;
-const path = `${OS.homedir()}/.vite-plus/js_runtime/node/${nodeVersion}/bin:${OS.homedir()}/.cargo/bin:${OS.homedir()}/.vite-plus/bin:${process.env.PATH}`;
-const env = buildEnvironment(path, OS.homedir(), Path.join(root, "tmp"), release.channel);
-env.LANG = "en_US.UTF-8";
-const keychain = Path.join(root, "signing.keychain-db");
-const certificate = Path.join(root, "certificate.p12");
-const apiKey = Path.join(root, "AuthKey.p8");
-const pidFile = Path.join(root, "build.pid");
-const signed = Boolean(secrets.APPLE_CSC_LINK);
-const teamId = secrets.APPLE_TEAM_ID ?? "";
-if (signed && !/^[A-Z0-9]{10}$/.test(teamId)) throw new Error("APPLE_TEAM_ID must be the 10-character Apple Developer Team ID");
-const assets = Path.join(root, "assets");
-const cliArchive = Path.join(assets, `t3-${version}-darwin-arm64.tar.gz`);
+const source = Path.join(root, "source");
+if (process.cwd() !== source) throw new Error("Unexpected Mac source directory");
 
-// Registered before either credential file exists; it also runs when an uncaught error ends the process.
+// This process can outlive the controller's SSH connection.
 process.on("exit", () => {
-  for (const file of [certificate, apiKey]) FS.rmSync(file, { force: true });
+  try {
+    process.chdir(root);
+    for (const dir of [source, Path.join(root, "tmp")])
+      if (FS.existsSync(dir)) FS.rmSync(dir, { recursive: true });
+  } catch (error) {
+    console.error("Mac build source cleanup failed:", error);
+    process.exitCode = 1;
+  }
 });
 // A lost SSH connection must not crash this process before cleanup; children see the closed pipe and exit.
 for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
@@ -48,6 +40,27 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
       // The group already exited; its close event settles the command.
     }
   });
+let payload = "";
+for await (const chunk of process.stdin) payload += chunk;
+const { version, channel, secrets } = JSON.parse(payload) as { version: string; channel: string; secrets: Record<string, string> };
+const release = releaseInputs(version, "mac", channel);
+const nodeVersion = JSON.parse(FS.readFileSync("package.json", "utf8")).engines.node;
+const path = `${OS.homedir()}/.vite-plus/js_runtime/node/${nodeVersion}/bin:${OS.homedir()}/.cargo/bin:${OS.homedir()}/.vite-plus/bin:${process.env.PATH}`;
+const env = buildEnvironment(path, OS.homedir(), Path.join(root, "tmp"), release.channel);
+env.LANG = "en_US.UTF-8";
+const keychain = Path.join(root, "signing.keychain-db");
+const certificate = Path.join(root, "certificate.p12");
+const apiKey = Path.join(root, "AuthKey.p8");
+const signed = Boolean(secrets.APPLE_CSC_LINK);
+const teamId = secrets.APPLE_TEAM_ID ?? "";
+if (signed && !/^[A-Z0-9]{10}$/.test(teamId)) throw new Error("APPLE_TEAM_ID must be the 10-character Apple Developer Team ID");
+const assets = Path.join(root, "assets");
+const cliArchive = Path.join(assets, `t3-${version}-darwin-arm64.tar.gz`);
+
+// Registered before either credential file exists; it also runs when an uncaught error ends the process.
+process.on("exit", () => {
+  for (const file of [certificate, apiKey]) FS.rmSync(file, { force: true });
+});
 const run = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
   if (stopped) return reject(new Error(`Mac build stopped by ${stopped}`));
   // Its own process group lets a stop reach grandchildren that vp does not forward signals to.
@@ -61,9 +74,6 @@ const run = (command: string, args: string[]) => new Promise<void>((resolve, rej
   });
 });
 
-// The marker stays after exit so the next startup sweep can confirm this process is gone; a rename keeps it never empty.
-FS.writeFileSync(`${pidFile}.tmp`, String(process.pid));
-FS.renameSync(`${pidFile}.tmp`, pidFile);
 let mount: string | undefined;
 let failure: unknown;
 try {

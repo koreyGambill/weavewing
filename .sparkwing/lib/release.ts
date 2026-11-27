@@ -88,7 +88,24 @@ for old in "$HOME"/weavewing-release/run-*; do
   if test -f "$old/signing.keychain-db"; then security delete-keychain "$old/signing.keychain-db" || echo "warning: could not delete $old/signing.keychain-db" >&2; fi
   rm -rf "$old" || echo "warning: could not remove $old" >&2
 done
-mkdir -p "$HOME/weavewing-release/${runId}/source" "$HOME/weavewing-release/${runId}/assets" "$HOME/weavewing-release/${runId}/tmp"`;
+mkdir "$HOME/weavewing-release/${runId}"
+mkdir "$HOME/weavewing-release/${runId}/source" "$HOME/weavewing-release/${runId}/assets" "$HOME/weavewing-release/${runId}/tmp"`;
+}
+
+export function macCleanup(runId: string) {
+  if (!/^run-[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid Mac run id");
+  return `set -eu
+root="$HOME/weavewing-release/${runId}"
+test -d "$root" || exit 0
+pid=$(cat "$root/build.pid" 2>/dev/null || true)
+case "$pid" in
+  ''|*[!0-9]*) ;;
+  *) if kill -0 "$pid" 2>/dev/null; then
+    echo "Mac release workspace is still in use: $root" >&2
+    exit 1
+  fi ;;
+esac
+rm -R "$root"`;
 }
 
 export type ReleaseChannel = "stable" | "test";
@@ -135,10 +152,11 @@ export function normalizeArtifacts(dir: string, platform: Platform, version: str
   }
   if (platform === "win" && FS.existsSync(Path.join(dir, `${feed}-win-x64.yml`)))
     FS.renameSync(Path.join(dir, `${feed}-win-x64.yml`), Path.join(dir, `${feed}.yml`));
-  for (const name of FS.readdirSync(dir).filter((name) => name.startsWith("builder-"))) {
+  for (const entry of FS.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.startsWith("builder-")) continue;
     const metadata = Path.join(Path.dirname(dir), "build-metadata", platform);
     FS.mkdirSync(metadata, { recursive: true });
-    FS.renameSync(Path.join(dir, name), Path.join(metadata, name));
+    FS.renameSync(Path.join(dir, entry.name), Path.join(metadata, entry.name));
   }
 }
 

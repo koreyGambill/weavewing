@@ -4,7 +4,7 @@ import * as Path from "node:path";
 import { parseArgs } from "node:util";
 
 import { assertNoNodeTracing } from "./release-mac-signing.ts";
-import { APPLE_SIGNING_SECRETS, macHost, macStartup, normalizeArtifacts, recordMacSigning, releaseInputs } from "./release.ts";
+import { APPLE_SIGNING_SECRETS, macCleanup, macHost, macStartup, normalizeArtifacts, recordMacSigning, releaseInputs } from "./release.ts";
 
 assertNoNodeTracing(process.env);
 const { values } = parseArgs({ options: Object.fromEntries(["worktree", "commit", "version", "channel", "run", "evidence", "host"].map((name) => [name, { type: "string" as const }])) });
@@ -17,23 +17,31 @@ const ssh = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host];
 const run = (command: string, args: string[], input?: string) => CP.execFileSync(command, args, { input, stdio: [input === undefined ? "ignore" : "pipe", "inherit", "inherit"], maxBuffer: 1024 * 1024 });
 const present = APPLE_SIGNING_SECRETS.filter((name) => process.env[name]);
 if (present.length && present.length !== APPLE_SIGNING_SECRETS.length) throw new Error("Apple signing is partially configured. Supply all six secrets or none.");
+// The remote process owns the marker until it finishes, even if the local ssh is gone.
+const markProcess = `set -eu; root="$HOME/${remote}"; test -d "$root/source"; printf '%s\\n' "$$" > "$root/build.pid.tmp"; mv "$root/build.pid.tmp" "$root/build.pid";`;
 let failure: unknown;
 let buildMayRun = false;
 try {
   run("ssh", [...ssh, "sh -s"], macStartup(runId));
   const archive = CP.spawn("git", ["-C", worktree, "archive", commit], { stdio: ["ignore", "pipe", "inherit"] });
-  const extract = CP.spawn("ssh", [...ssh, `tar -x -C ~/${remote}/source`], { stdio: ["pipe", "inherit", "inherit"] });
+  const extract = CP.spawn("ssh", [...ssh, `${markProcess}
+trap 'rm -R "$root/source"' EXIT
+trap 'exit 1' HUP INT TERM
+tar -x -C "$root/source"
+trap - EXIT`], { stdio: ["pipe", "inherit", "inherit"] });
+  extract.stdin.on("error", () => archive.stdout.destroy());
   archive.stdout.pipe(extract.stdin);
   const exited = (child: CP.ChildProcess) => new Promise<void>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`Source transfer exited ${code}`)));
   });
-  await Promise.all([exited(archive), exited(extract)]);
+  const transfer = await Promise.allSettled([exited(archive), exited(extract)]);
+  for (const result of transfer) if (result.status === "rejected") throw result.reason;
   // The remote helper reads the JSON payload on stdin; secrets never become ssh arguments.
-  const nodeVersion = JSON.parse(FS.readFileSync(Path.join(worktree, "package.json"), "utf8")).engines.node;
+  const nodeVersion = JSON.parse(CP.execFileSync("git", ["-C", worktree, "show", `${commit}:package.json`], { encoding: "utf8" })).engines.node;
   if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) throw new Error("Invalid managed Node version");
   try {
-    run("ssh", [...ssh, `set -eu; vpPath=$(env sh -c 'command -v vp'); node="$(dirname "$(dirname "$vpPath")")/js_runtime/node/${nodeVersion}/bin/node"; exec env -u NODE_DEBUG -u NODE_DEBUG_NATIVE -u NODE_OPTIONS -C ~/${remote}/source "$node" .sparkwing/lib/release-mac-build.ts`], JSON.stringify({ version, channel, runId, secrets: Object.fromEntries(APPLE_SIGNING_SECRETS.map((name) => [name, process.env[name] ?? ""])) }));
+    run("ssh", [...ssh, `${markProcess} vpPath=$(env sh -c 'command -v vp'); node="$(dirname "$(dirname "$vpPath")")/js_runtime/node/${nodeVersion}/bin/node"; exec env -u NODE_DEBUG -u NODE_DEBUG_NATIVE -u NODE_OPTIONS -C ~/${remote}/source "$node" .sparkwing/lib/release-mac-build.ts "${runId}"`], JSON.stringify({ version, channel, secrets: Object.fromEntries(APPLE_SIGNING_SECRETS.map((name) => [name, process.env[name] ?? ""])) }));
   } catch (error) {
     // ssh exits 255 for its own failures; only then may the Mac build outlive the connection.
     const status = (error as { status?: number | null }).status;
@@ -44,7 +52,7 @@ try {
   failure = error;
 }
 if (buildMayRun)
-  throw new Error(`Lost the SSH connection to ${host} while the Mac build may still be running. It removes its own credentials when it exits, and the next run's startup removes ~/${remote} once that build has exited.`, { cause: failure });
+  throw new Error(`Lost the SSH connection to ${host} while the Mac build may still be running. The remote build removes its credentials and source when it exits. The next run can reclaim ~/${remote} after its process exits.`, { cause: failure });
 try {
   FS.mkdirSync(Path.join(evidence, "assets"), { recursive: true });
   run("scp", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", `${host}:${remote}/assets/*`, Path.join(evidence, "assets/")]);
@@ -59,7 +67,7 @@ try {
   failure ??= error;
 }
 try {
-  run("ssh", [...ssh, `rm -rf ~/${remote}`]);
+  run("ssh", [...ssh, macCleanup(runId)]);
 } catch (error) {
   if (!failure) throw error;
   // The next run's startup sweeps the directory, but a failed removal must not hide either error.

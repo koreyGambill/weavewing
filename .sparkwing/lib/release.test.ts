@@ -217,6 +217,51 @@ test("Mac job startup removes only runs whose build process has exited and repor
   }
 });
 
+test("Mac job cleanup removes only its own inactive workspace", () => {
+  const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-cleanup-"));
+  try {
+    const root = Path.join(home, "weavewing-release", "run-current");
+    const other = Path.join(home, "weavewing-release", "run-other");
+    FS.mkdirSync(Path.join(root, "source"), { recursive: true });
+    FS.mkdirSync(other);
+    const marker = Path.join(root, "build.pid");
+    const cleanup = () => CP.spawnSync("/bin/sh", ["-c", Release.macCleanup("run-current")], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+    FS.writeFileSync(marker, String(process.pid));
+    assert.equal(cleanup().status, 1);
+    assert.equal(FS.existsSync(Path.join(root, "source")), true);
+    FS.writeFileSync(marker, String(CP.spawnSync("true").pid));
+    assert.equal(cleanup().status, 0);
+    assert.equal(FS.existsSync(root), false);
+    assert.equal(FS.existsSync(other), true);
+    assert.equal(cleanup().status, 0);
+  } finally {
+    FS.rmSync(home, { recursive: true });
+  }
+});
+
+test("the remote Mac helper discards source and scratch after a broken payload", () => {
+  const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-payload-"));
+  try {
+    const root = Path.join(home, "weavewing-release", "run-current");
+    const source = Path.join(root, "source");
+    const scratch = Path.join(root, "tmp");
+    FS.mkdirSync(Path.join(source, "node_modules"), { recursive: true });
+    FS.mkdirSync(scratch);
+    FS.writeFileSync(Path.join(root, "mac-proof.json"), "fixture evidence");
+    const build = Path.join(import.meta.dirname, "release-mac-build.ts");
+    const result = CP.spawnSync(process.execPath, [build, "run-current"], {
+      cwd: source, env: { HOME: home, PATH: "/usr/bin:/bin" }, input: "{", encoding: "utf8",
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /SyntaxError/);
+    assert.equal(FS.existsSync(source), false);
+    assert.equal(FS.existsSync(scratch), false);
+    assert.equal(FS.readFileSync(Path.join(root, "mac-proof.json"), "utf8"), "fixture evidence");
+  } finally {
+    FS.rmSync(home, { recursive: true });
+  }
+});
+
 test("promotion checksums reject missing assets, duplicates and modified bytes", () => {
   const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-checksums-"));
   try {

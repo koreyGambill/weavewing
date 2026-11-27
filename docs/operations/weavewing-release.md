@@ -13,7 +13,8 @@ Windows also embeds the Linux CLI archive as its WSL runtime.
 
 Use a clean release worktree with no `.env` or `.env.local`. For draft and
 promote, its commit must already be pushed to `origin/main`. Version alignment
-happens in an archived source tree, leaving the release checkout unchanged.
+happens in an archive of the preflight commit. Sparkwing owns the temporary local
+build workspace and removes it when the build run ends.
 The Rust version is pinned in `rust-toolchain.toml`. Install rustup user-locally
 on both hosts. Linux also needs a C toolchain, pkg-config, libsecret development
 headers, ImageMagick, patchelf and zip. Windows also needs Clang, LLD and LLVM.
@@ -94,12 +95,13 @@ Edit the draft notes before promoting if needed, but leave the section between t
 `<!-- weavewing:macos-signing -->` markers to the pipeline. First-release generated notes list
 at most 40 first-parent merge subjects since the fork point and link to the full comparison.
 
-Artifacts, checksums, notes, source provenance and command logs live below
+Artifacts, checksums, notes, commit and tree IDs, signing records and command logs live below
 `~/evidence/t3code/sparkwing/runs/release/<run id>/`. `--evidence` selects another
 absolute directory. Keep the generated `release.json` and `artifacts.json` with
 the release evidence, including `assets/SHA256SUMS` and the original assets needed
-for promotion. Choose a fresh evidence directory for each run so an old
-source archive cannot leave stale files in the build. Windows native checks copy the NSIS staging payload to a
+for promotion. Choose a fresh evidence directory for each run so its files describe
+one build. Source, installed dependencies and staging files live in the temporary
+build workspace. Windows native checks copy the NSIS staging payload to a
 new Windows temporary directory and run its native probes and CLI smoke there.
 They do not execute NSIS registration because it could replace an existing app.
 

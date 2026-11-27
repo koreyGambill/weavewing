@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { Git, Plan } from "@sparkwing/sdk";
 
-import { releasePipeline } from "./release.ts";
+import { releaseBuildPipeline, releasePipeline } from "./release.ts";
 
 test("channel policy gates builds on full CI only when required and promotion reuses drafts", async () => {
   const context = {
@@ -13,11 +13,11 @@ test("channel policy gates builds on full CI only when required and promotion re
   };
   const plan = new Plan();
   await releasePipeline.plan(plan, context);
-  const inspect = (value: Plan) => (value as Plan & { toDoc(): { jobs: { id: string; deps?: string[]; children?: unknown }[] } }).toDoc();
+  const inspect = (value: Plan) => (value as Plan & { toDoc(): { jobs: { id: string; deps?: string[]; children?: unknown; steps?: { id: string; needs?: string[] }[] }[] } }).toDoc();
   const jobs = inspect(plan).jobs;
   assert.deepEqual(jobs.find((job) => job.id === "mac")?.deps, ["preflight", "ci"]);
-  assert.deepEqual(jobs.find((job) => job.id === "bundle")?.deps, ["preflight", "ci"]);
-  assert.ok(jobs.find((job) => job.id === "win-x64")?.deps?.includes("linux-x64"));
+  assert.deepEqual(jobs.find((job) => job.id === "build")?.deps, ["preflight", "ci"]);
+  assert.ok(jobs.find((job) => job.id === "publish-draft")?.deps?.includes("build"));
   // Sparkwing only lets a job read outputs of jobs it depends on; publish-draft reads ci's.
   assert.ok(jobs.find((job) => job.id === "publish-draft")?.deps?.includes("ci"));
   const smoke = new Plan();
@@ -25,9 +25,15 @@ test("channel policy gates builds on full CI only when required and promotion re
   await releasePipeline.plan(smoke, { ...context, args: nightlyArgs });
   assert.equal(inspect(smoke).jobs.some((job) => job.id === "ci"), false);
   assert.deepEqual(inspect(smoke).jobs.find((job) => job.id === "mac")?.deps, ["preflight"]);
-  assert.deepEqual(inspect(smoke).jobs.find((job) => job.id === "bundle")?.deps, ["preflight"]);
-  for (const id of ["linux-x64", "win-x64", "mac", "assert-clean-bundle", "publish-draft"])
+  assert.deepEqual(inspect(smoke).jobs.find((job) => job.id === "build")?.deps, ["preflight"]);
+  for (const id of ["build", "mac", "publish-draft"])
     assert.ok(inspect(smoke).jobs.some((job) => job.id === id));
+  const build = new Plan();
+  await releaseBuildPipeline.plan(build, { ...context, args: nightlyArgs });
+  const buildSteps = inspect(build).jobs.find((job) => job.id === "build")?.steps;
+  assert.deepEqual(buildSteps?.find((step) => step.id === "assert-clean-bundle")?.needs, ["bundle"]);
+  assert.deepEqual(buildSteps?.find((step) => step.id === "linux-x64")?.needs, ["bundle", "assert-clean-bundle"]);
+  assert.deepEqual(buildSteps?.find((step) => step.id === "win-x64")?.needs, ["bundle", "linux-x64", "assert-clean-bundle"]);
   const forced = new Plan();
   await releasePipeline.plan(forced, { ...context, args: { ...nightlyArgs, "force-ci": "true" } });
   assert.ok(inspect(forced).jobs.some((job) => job.id === "ci"));
