@@ -344,8 +344,11 @@ you used, or closes it when a thread view is showing.
 
 ## Side panel
 
-On web and desktop, `mod+alt+shift+b` opens and closes the side panel, as does
-**Toggle side panel** in the command palette. When focus is in the panel, Escape
-restores a maximized panel, then closes it, and returns focus to where you opened
-it. Elsewhere, Escape closes an unpinned panel unless a text field or terminal has
-focus. A pinned panel stays open until you close it.
+On web and desktop, `mod+alt+shift+b` does the same as **Toggle side panel** in the
+command palette. On wide screens it shows or hides the strip of view icons on
+the right. Hiding the strip also closes the open view. On narrow screens the
+shortcut opens or closes the panel directly.
+
+When focus is in the panel, Escape closes it and returns focus to the view icon
+on wide screens, or to the control that opened it on narrow screens. Elsewhere,
+Escape closes an unpinned panel unless a text field or terminal has focus.
