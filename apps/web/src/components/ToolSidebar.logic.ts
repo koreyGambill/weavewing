@@ -64,6 +64,7 @@ export function resolveViewLayout(
 const PersistedSideArea = Schema.Struct({
   open: Schema.Boolean,
   view: Schema.String,
+  selectedView: Schema.optionalKey(Schema.String),
   width: Schema.Finite,
   pinned: Schema.Boolean,
   locked: Schema.NullOr(ScopedThreadRef),
@@ -181,7 +182,8 @@ export function restoreSideArea(value: unknown): SideAreaState {
   const current = decodePersistedSideArea(value);
   if (current._tag === "Some") {
     const { open, width, pinned, locked } = current.value;
-    const shown = migrateViewTarget(current.value.view);
+    const shown =
+      migrateViewTarget(current.value.selectedView) ?? migrateViewTarget(current.value.view);
     if (shown === null) return INITIAL_SIDE_AREA;
     const { view } = shown;
     const remembered = migrateViewTarget(current.value.threadView);
@@ -273,6 +275,13 @@ export function storedViewId(view: ViewId, section: ViewSectionId | null = null)
     default:
       return view;
   }
+}
+
+/** Older builds open Inbox when they read a panel saved on Waiting on you. */
+export function storedSideAreaView(view: ViewId, section: ViewSectionId | null) {
+  return view === "waiting"
+    ? { view: "inbox", selectedView: view }
+    : { view: storedViewId(view, section) };
 }
 
 /** The current view for a view id stored by any earlier version, or null; see `migrateViewTarget`. */

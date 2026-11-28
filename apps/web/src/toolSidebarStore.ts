@@ -6,6 +6,7 @@ import {
   SIDE_AREA_WIDE_MEDIA_QUERY,
   adoptRetiredRail,
   restoreSideArea,
+  storedSideAreaView,
   storedViewId,
   type RetiredRailSelection,
   transitionSideArea,
@@ -178,7 +179,7 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       }) => ({
         open,
         stripVisible,
-        view: storedViewId(view, revealSection),
+        ...storedSideAreaView(view, revealSection),
         width,
         pinned,
         hidden,

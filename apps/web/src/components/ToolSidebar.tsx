@@ -88,6 +88,7 @@ import {
 import { useMobileSidebarSheetMounted, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
+import { observeSideAreaComposerClearance } from "./sideAreaComposerClearance";
 
 /** A thread view starts its requests once the selection has rested this long. */
 export const SIDE_AREA_SETTLE_MS = 250;
@@ -441,6 +442,11 @@ function SideArea({
     };
   }, [panel, wide]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The floating surface follows the live geometry of composers in the workspace.
+  useLayoutEffect(() => {
+    if (panel && wide && !maximized) return observeSideAreaComposerClearance(panel);
+  }, [panel, wide, maximized]);
+
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     const pane = event.currentTarget.parentElement;
     if (!pane || maximized || !wide) return null;
@@ -481,9 +487,11 @@ function SideArea({
       {...workspaceAreaProps("tools", 5)}
       onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
-        "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col border-l bg-background shadow-xl",
+        "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col",
+        wide && !maximized
+          ? "dropdown-glass popover-elevation rounded-bl-lg border-l-foreground/25 bottom-(--side-area-composer-clearance)"
+          : "border-l bg-background",
         besideStrip && "right-11",
-        maximized && "shadow-none",
         // The tiles under the panel take a view dragged from its grip.
         viewDragging && "pointer-events-none opacity-30",
       )}
@@ -821,7 +829,7 @@ function SideAreaStrip() {
                           aria-label={entry.title}
                           aria-pressed={active === entry.id}
                           size="icon-sm"
-                          variant={active === entry.id ? "secondary" : "ghost"}
+                          variant="ghost-toggle"
                           draggable={draggable}
                           onClick={() => dispatch({ type: "pressStripView", view: entry.id })}
                           onDragStart={(event) => {

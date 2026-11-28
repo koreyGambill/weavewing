@@ -1,4 +1,5 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import {
   adoptRetiredRail,
@@ -11,6 +12,7 @@ import {
   resolveSideAreaWidth,
   resolveViewLayout,
   restoreSideArea,
+  storedSideAreaView,
   transitionSideArea,
   VIEW_IDS,
   type SideAreaAction,
@@ -23,7 +25,47 @@ const threadB = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.m
 const run = (state: SideAreaState, ...actions: SideAreaAction[]) =>
   actions.reduce(transitionSideArea, state);
 
+const decodeBasePanel = Schema.decodeUnknownSync(
+  Schema.Struct({
+    open: Schema.Boolean,
+    view: Schema.String,
+    width: Schema.Finite,
+    pinned: Schema.Boolean,
+    locked: Schema.NullOr(ScopedThreadRef),
+    threadView: Schema.optionalKey(Schema.String),
+    hidden: Schema.optionalKey(Schema.Unknown),
+  }),
+);
+
+const basePanel = {
+  open: true,
+  view: "inbox",
+  width: 480,
+  pinned: true,
+  locked: threadA,
+  threadView: "details",
+  hidden: ["artifacts", "status"],
+};
+
 describe("side area", () => {
+  it("downgrades Waiting on you to Inbox while preserving the base panel settings", () => {
+    const stored = { ...basePanel, ...storedSideAreaView("waiting", null), stripVisible: false };
+    // Inbox is a recognized ID in base, which discards the panel if the ID is unknown.
+    expect(decodeBasePanel(stored)).toEqual(basePanel);
+    expect(restoreSideArea(stored)).toMatchObject({
+      ...basePanel,
+      view: "waiting",
+      stripVisible: false,
+    });
+  });
+
+  it("opens a base panel with its pinned, locked, resized and hidden settings intact", () => {
+    expect(restoreSideArea(decodeBasePanel(basePanel))).toMatchObject({
+      ...basePanel,
+      stripVisible: true,
+    });
+  });
+
   it("keeps the strip open independently of its floating view", () => {
     const initial = INITIAL_SIDE_AREA;
     expect(initial).toMatchObject({ open: false, stripVisible: true });

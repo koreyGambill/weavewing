@@ -27,7 +27,9 @@ import { useToolSidebarStore } from "~/toolSidebarStore";
 import { SIDE_AREA_SETTLE_MS } from "./ToolSidebar";
 import {
   ENVIRONMENT_ID,
+  acknowledgePendingCommand,
   answerRpc,
+  dispatchedCommands,
   installFakeEnvironment,
   threadWithHistory,
   type FakeDriver,
@@ -189,6 +191,35 @@ it("covers the chat without changing the chat's or the thread list's width", asy
   await userEvent.click(panel.getByRole("button", { name: "Close side panel" }));
   await expect.element(panel).not.toBeInTheDocument();
   expect(widths()).toEqual(before);
+});
+
+it("leaves the full composer reachable and sends with Enter while pinned", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("send-with-panel", 1)], 1280);
+  await using _app = stack;
+  const toolbar = screen.getByRole("toolbar", { name: "Side panel views" });
+  const waiting = toolbar.getByRole("button", { name: "Waiting on you", exact: true });
+  await userEvent.click(waiting);
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  const composer = document.querySelector("[data-chat-composer-stack]")!;
+  const before = composer.getBoundingClientRect();
+  await expect.element(waiting).toHaveAttribute("aria-pressed", "true");
+  await vi.waitFor(() => {
+    const bounds = panel.element().getBoundingClientRect();
+    expect(bounds.left).toBeLessThan(before.right);
+    expect(bounds.bottom).toBeLessThan(before.top);
+  });
+  await userEvent.click(panel.getByRole("button", { name: "Pin side panel" }));
+  await vi.waitFor(() =>
+    expect(dispatchedCommands().map((command) => command.type)).toContain("thread.visit"),
+  );
+  await acknowledgePendingCommand();
+  await userEvent.click(page.getByTestId("composer-editor"));
+  await expect.element(panel).toBeVisible();
+  await userEvent.keyboard("Check the report{Enter}");
+  await vi.waitFor(() =>
+    expect(dispatchedCommands().map((command) => command.type)).toContain("message.dispatch"),
+  );
+  await expect.element(panel).toBeVisible();
 });
 
 it("gives the thread list the whole left sidebar and opens thread views on the right", async () => {

@@ -109,7 +109,7 @@ picker in its header.
 
 `Cmd+Alt+I` on macOS or `Ctrl+Alt+I` on Windows and Linux opens the last thread
 view you used, or closes the panel when a thread view is showing. The panel
-floats over the chat and shows the
+floats over the chat above the composer and shows the
 selected thread. It closes when you press Escape, click outside it or switch
 threads. **Pin** keeps it open while you move between threads, and its views
 follow the thread you select. **Lock to thread** keeps showing one thread while
