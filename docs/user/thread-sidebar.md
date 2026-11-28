@@ -135,7 +135,9 @@ a tab. A thread view in a tile keeps showing that thread. When you move a view
 from a panel locked to another thread, its tab names that thread, as in
 "Links · Release notes". To send a view back, choose **Move to side panel** from
 the tile's actions menu. A narrow tile shows a view's compact layout with
-**Open full size**, which maximizes the tile. Saved tile layouts keep views of
+**Open full size**, which maximizes the tile. Use the command palette to save,
+apply, replace or manage tile layouts and choose where links and previews open.
+Saved tile layouts keep views of
 the thread itself and global views; a view locked to another thread is left out.
 
 Calendar, Status and Pull requests also open as full pages beside the thread list.

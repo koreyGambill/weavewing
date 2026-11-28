@@ -131,7 +131,7 @@ import {
   copyPromptLink,
   promptLinkRepositoryOf,
 } from "./promptLinks/copyPromptLink";
-import { useClientSettings, usePrimarySettings } from "../hooks/useSettings";
+import { useClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { readLocalApi } from "../localApi";
 import { configuredHostedAppUrl } from "../hostedPairing";
@@ -139,7 +139,7 @@ import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment, useFilesystemReadAccess } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
-import { serverEnvironment } from "../state/server";
+import { primaryServerSettingsAtom, serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -299,7 +299,7 @@ import { settingsForThisPlatform, SETTINGS_SECTION_LABELS } from "./settings/set
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
 import { tileLayoutPaletteItems, tilePaletteItems } from "./chat/tilePaletteItems";
-import { TILE_LAYOUTS_SETTINGS_TARGET } from "./chat/TileLayoutsMenu";
+import { TILE_LAYOUTS_SETTINGS_TARGET } from "./chat/TileLayoutDialog";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -568,7 +568,18 @@ function OpenCommandPaletteDialog(props: {
   const preferredEnvironmentId = usePreferredEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, handleNewThread } = useHandleNewThread();
-  const tileLayouts = usePrimarySettings((settings) => settings.tileLayouts);
+  const layoutEnvironmentId = activeThread?.environmentId ?? activeDraftThread?.environmentId;
+  const layoutSettings = useAtomValue(
+    layoutEnvironmentId
+      ? serverEnvironment.settingsValueAtom(layoutEnvironmentId)
+      : primaryServerSettingsAtom,
+  );
+  const tileLayouts = layoutSettings?.tileLayouts ?? [];
+  const hasLayoutProject = Boolean(
+    (activeThread?.projectId ?? activeDraftThread?.projectId) &&
+    environments.find((environment) => environment.environmentId === layoutEnvironmentId)
+      ?.serverConfig?.environment.capabilities.projectSettingsOverrides,
+  );
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1852,7 +1863,7 @@ function OpenCommandPaletteDialog(props: {
 
   if (activeThread) actionItems.push(...tilePaletteItems(ITEM_ICON_CLASS));
   if (activeThread || activeDraftThread)
-    actionItems.push(...tileLayoutPaletteItems(ITEM_ICON_CLASS, tileLayouts));
+    actionItems.push(...tileLayoutPaletteItems(ITEM_ICON_CLASS, tileLayouts, hasLayoutProject));
   actionItems.push({
     kind: "action",
     value: "action:manage-tile-layouts",
