@@ -759,7 +759,7 @@ it("folds tabs that do not fit into a +N list as a tile narrows, keeping the act
   ).toBe(false);
 
   // Controls give way before any tab folds; New tab and tile actions stay.
-  resize(0.45);
+  resize(0.435);
   await vi.waitFor(() => expect(shown("Close tile")).toBe(false));
   expect(shownTabs()).toEqual(["Main chat", "diff", "notes", "New tab"]);
   expect(shown("New tile to the right")).toBe(false);
