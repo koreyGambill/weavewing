@@ -168,7 +168,11 @@ it("covers the chat without changing the chat's or the thread list's width", asy
     threads: widthOf("[data-app-sidebar]"),
   });
   const before = widths();
-  await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
+  await userEvent.click(
+    screen
+      .getByRole("toolbar", { name: "Side panel views" })
+      .getByRole("button", { name: "Details", exact: true }),
+  );
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
   expect(panel.element().getBoundingClientRect().width).toBe(300);
@@ -213,19 +217,14 @@ it("moves focus into the side panel, tabs through it and out while pinned, and r
   const thread = threadWithHistory("focus", 1);
   const { stack, screen } = await mountApp([thread], 1280);
   await using _app = stack;
-  const toggle = screen.getByRole("button", { name: "Toggle side panel", exact: true });
-  await userEvent.click(toggle);
+  const icon = screen
+    .getByRole("toolbar", { name: "Side panel views" })
+    .getByRole("button", { name: "Links", exact: true });
+  icon.element().focus();
+  await userEvent.keyboard("{Enter}");
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  const picker = panel.getByRole("button", { name: /^View: Details/ });
-  await expect.element(picker).toHaveFocus();
-
-  await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByRole("menuitemradio", { name: "Links" })).toBeVisible();
-  await userEvent.keyboard("{ArrowDown}{ArrowDown}");
-  await expect.element(page.getByRole("menuitemradio", { name: "Links" })).toHaveFocus();
-  await userEvent.keyboard("{Enter}");
-  await expect.element(panel.getByRole("button", { name: /^View: Links/ })).toHaveFocus();
-  expect(useToolSidebarStore.getState().view).toBe("links");
+  await expect.element(panel.getByRole("heading", { name: "Links", level: 2 })).toHaveFocus();
+  await expect.element(icon).toHaveAttribute("aria-pressed", "true");
 
   const reached: string[] = [];
   const inPanel = () => document.activeElement?.closest("#side-area") !== null;
@@ -252,7 +251,7 @@ it("moves focus into the side panel, tabs through it and out while pinned, and r
     await userEvent.keyboard("{Escape}");
   }
   await expect.element(panel).not.toBeInTheDocument();
-  await expect.element(toggle).toHaveFocus();
+  await expect.element(icon).toHaveFocus();
 });
 
 it("lets a filter clear on Escape first, then closes the panel on the next Escape", async () => {
@@ -327,7 +326,11 @@ it("closes an unpinned side panel on a click outside it", async () => {
   const thread = threadWithHistory("outside", 1);
   const { stack, screen } = await mountApp([thread], 1280);
   await using _app = stack;
-  await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
+  await userEvent.click(
+    screen
+      .getByRole("toolbar", { name: "Side panel views" })
+      .getByRole("button", { name: "Details", exact: true }),
+  );
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
   await userEvent.click(screen.getByRole("textbox", { name: `Message ${thread.title}` }));
@@ -415,10 +418,10 @@ it("opens a global view as a page from the side panel and hands it back", async 
     dispatch({ type: "show", view: "calendar" });
   });
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await expect.element(panel).toHaveAttribute("data-side-area", "open");
+  await expect.element(panel).toHaveAttribute("data-side-area", "maximized");
   await expect
-    .element(panel.getByRole("button", { name: "Maximize side panel" }))
-    .not.toBeInTheDocument();
+    .element(panel.getByRole("button", { name: "Restore side panel size" }))
+    .toBeVisible();
   await userEvent.click(panel.getByRole("button", { name: "Open Calendar as a page" }));
 
   await vi.waitFor(() => expect(router.state.location.pathname).toBe("/view/calendar"));
@@ -428,11 +431,15 @@ it("opens a global view as a page from the side panel and hands it back", async 
 
   await userEvent.click(screen.getByRole("button", { name: "Open in side panel" }));
   await vi.waitFor(() => expect(router.state.location.pathname).toBe(threadPath));
-  await expect.element(panel.getByRole("button", { name: /^View: Calendar/ })).toHaveFocus();
+  await expect.element(panel.getByRole("heading", { name: "Calendar", level: 2 })).toHaveFocus();
   await userEvent.keyboard("{Escape}");
   await expect.element(panel).not.toBeInTheDocument();
   await expect
-    .element(screen.getByRole("button", { name: "Toggle side panel", exact: true }))
+    .element(
+      screen
+        .getByRole("toolbar", { name: "Side panel views" })
+        .getByRole("button", { name: "Calendar", exact: true }),
+    )
     .toHaveFocus();
 
   await act(() => router.navigate({ to: "/view/$viewId", params: { viewId: "status" } }));
@@ -455,7 +462,10 @@ it.each([1280, 390])(
       expect(router.state.resolvedLocation?.pathname).toBe(`/${ENVIRONMENT_ID}/${thread.id}`),
     );
     const panel = screen.getByRole("complementary", { name: "Side panel" });
-    const picker = panel.getByRole("button", { name: /^View: Calendar/ });
+    const picker =
+      width === 1280
+        ? panel.getByRole("heading", { name: "Calendar", level: 2 })
+        : panel.getByRole("button", { name: /^View: Calendar/ });
     // The composer mounts and asks for focus; at 390 px it sits inert under the panel's sheet.
     await expect
       .element(screen.getByRole("textbox", { name: /^Message/, includeHidden: true }))
@@ -464,7 +474,13 @@ it.each([1280, 390])(
     await userEvent.keyboard("{Escape}");
     await expect.element(panel).not.toBeInTheDocument();
     await expect
-      .element(screen.getByRole("button", { name: "Toggle side panel", exact: true }))
+      .element(
+        width === 1280
+          ? screen
+              .getByRole("toolbar", { name: "Side panel views" })
+              .getByRole("button", { name: "Calendar", exact: true })
+          : screen.getByRole("button", { name: "Toggle side panel", exact: true }),
+      )
       .toHaveFocus();
   },
 );
@@ -479,11 +495,8 @@ it("closes a page view's panel on the first Escape after a thread view was maxim
     dispatch({ type: "show", view: "calendar" });
   });
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await expect.element(panel).toHaveAttribute("data-side-area", "open");
-  panel
-    .getByRole("button", { name: /^View: Calendar/ })
-    .element()
-    .focus();
+  await expect.element(panel).toHaveAttribute("data-side-area", "maximized");
+  panel.getByRole("heading", { name: "Calendar", level: 2 }).element().focus();
   await userEvent.keyboard("{Escape}");
   await expect.element(panel).not.toBeInTheDocument();
 });
@@ -492,8 +505,7 @@ it("keeps a page-only view out of the side panel's picker", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("picker", 1)], 1280);
   await using _app = stack;
   await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "calendar" }));
-  const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await userEvent.click(panel.getByRole("button", { name: /^View: Calendar/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Side panel settings" }));
   await expect.element(page.getByRole("menuitemradio", { name: "Status" })).toBeVisible();
   expect(page.getByRole("menuitemradio", { name: "Pull requests" }).elements()).toHaveLength(0);
   expect(
@@ -652,7 +664,7 @@ it.each([false, true])(
   },
 );
 
-it("counts Checklist and flags Links in the picker from held data only", async () => {
+it("counts Checklist and flags Links on the strip from held data only", async () => {
   const [held, other] = [threadWithHistory("count-held", 1), threadWithHistory("count-other", 1)];
   const requested: string[] = [];
   const item = (id: string, linkStates?: ThreadWorkspace["items"][number]["linkStates"]) => ({
@@ -686,24 +698,26 @@ it("counts Checklist and flags Links in the picker from held data only", async (
   await using _app = stack;
   // The collapsed-sidebar attention dot keeps the selected thread's workspace loaded.
   await vi.waitFor(() => expect(requested).toContain(held.id));
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "links" }));
-  const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await userEvent.click(panel.getByRole("button", { name: /^View: / }));
-  await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*2/ })).toBeVisible();
-  await expect
-    .element(page.getByRole("menuitemradio", { name: /Links.*Needs review/ }))
-    .toBeVisible();
-  await userEvent.keyboard("{Escape}");
+  const toolbar = screen.getByRole("toolbar", { name: "Side panel views" });
+  const checklist = toolbar.getByRole("button", { name: "Checklist", exact: true });
+  const links = toolbar.getByRole("button", { name: "Links", exact: true });
+  await expect.element(checklist.getByText("2")).toBeVisible();
+  await expect.element(links.getByText("Needs review")).toBeInTheDocument();
+  await act(() =>
+    useToolSidebarStore
+      .getState()
+      .dispatch({ type: "setHidden", view: "links", hidden: true, strip: true }),
+  );
+  await expect.element(links).not.toBeInTheDocument();
+  const settings = toolbar.getByRole("button", { name: "Side panel settings" });
+  await expect.element(settings.getByText("Needs review")).toBeInTheDocument();
   requested.length = 0;
   await act(() =>
     useToolSidebarStore
       .getState()
       .dispatch({ type: "lock", thread: scopeThreadRef(ENVIRONMENT_ID, other.id) }),
   );
-  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "status" }));
-  await userEvent.click(panel.getByRole("button", { name: /^View: / }));
-  await expect.element(page.getByRole("menuitemradio", { name: /^Checklist/ })).toBeVisible();
-  expect(page.getByRole("menuitemradio", { name: /Checklist.*2/ }).query()).toBeNull();
+  await expect.element(checklist.getByText("2")).not.toBeInTheDocument();
   expect(requested).not.toContain(other.id);
 });
 
@@ -787,8 +801,14 @@ it("lists bookmark to-dos in Checklist All and keeps plain bookmarks in the thre
     .element(checklist.getByRole("checkbox", { name: "Mark done: Follow up" }))
     .toBeVisible();
   expect(checklist.getByText("Saved only").query()).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: /^View: Checklist/ }));
-  await expect.element(page.getByRole("menuitemradio", { name: /Checklist.*1/ })).toBeVisible();
+  await expect
+    .element(
+      screen
+        .getByRole("toolbar", { name: "Side panel views" })
+        .getByRole("button", { name: "Checklist", exact: true })
+        .getByText("1"),
+    )
+    .toBeVisible();
 });
 
 it("hides any view, opens a hidden view explicitly, and restores it by keyboard", async () => {
@@ -830,7 +850,7 @@ it("hides any view, opens a hidden view explicitly, and restores it by keyboard"
 });
 
 it("explains why the last visible thread view cannot be hidden", async () => {
-  const { stack } = await mountApp([threadWithHistory("last-view", 1)], 1280);
+  const { stack, screen } = await mountApp([threadWithHistory("last-view", 1)], 1280);
   await using _app = stack;
   await act(() => {
     const panel = useToolSidebarStore.getState();
@@ -839,6 +859,7 @@ it("explains why the last visible thread view cannot be hidden", async () => {
     }
     openInbox();
   });
+  screen.getByRole("button", { name: "Side panel settings" }).element().focus();
   await userEvent.keyboard("{Enter}");
   const hideMenu = page.getByRole("menuitem", { name: "Hide a view" });
   await expect.element(hideMenu).toBeVisible();
@@ -848,7 +869,7 @@ it("explains why the last visible thread view cannot be hidden", async () => {
   await expect.element(last).toBeDisabled();
   await expect
     .element(last)
-    .toHaveAccessibleDescription("Keep at least one thread view in the picker.");
+    .toHaveAccessibleDescription("Keep at least one thread view in the strip.");
 });
 
 it("respects a collapsed section when the thread views shortcut reopens its view", async () => {
@@ -930,3 +951,27 @@ it.each([
     await expect.element(heading).toBeInViewport({ ratio: 1 });
   },
 );
+
+it("toggles the strip separately from the floating panel", async () => {
+  const { stack, screen } = await mountApp([threadWithHistory("strip", 1)], 1280);
+  await using _app = stack;
+  const toolbar = screen.getByRole("toolbar", { name: "Side panel views" });
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  const toggle = screen.getByRole("button", { name: "Toggle side panel", exact: true });
+  const links = toolbar.getByRole("button", { name: "Links", exact: true });
+  await expect.element(toolbar).toBeVisible();
+  await expect.element(panel).not.toBeInTheDocument();
+  const narrowWidth = widthOf("[data-thread-tiling]");
+  await userEvent.click(links);
+  await expect.element(panel.getByRole("heading", { name: "Links", level: 2 })).toBeVisible();
+  await userEvent.click(links);
+  await expect.element(panel).not.toBeInTheDocument();
+  await userEvent.click(links);
+  await userEvent.click(toggle);
+  await expect.element(toolbar).not.toBeInTheDocument();
+  await expect.element(panel).not.toBeInTheDocument();
+  expect(widthOf("[data-thread-tiling]")).toBe(narrowWidth + 44);
+  await userEvent.click(toggle);
+  await expect.element(toolbar).toBeVisible();
+  await expect.element(panel).not.toBeInTheDocument();
+});

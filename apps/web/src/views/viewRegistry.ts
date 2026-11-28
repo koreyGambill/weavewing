@@ -20,6 +20,7 @@ import { GlobalViewBody } from "./GlobalViewBody";
 import { VIEW_ICONS } from "./viewIcons";
 import { ThreadViewBody } from "./ThreadViewBody";
 import { ArtifactsCount, ChecklistCount, LinksCount } from "./threadViewCounts";
+import type { ViewCountProps } from "./ViewCount";
 import { viewSupportsHost } from "./viewPage.logic";
 
 export type { ViewId, ViewLayout };
@@ -69,10 +70,9 @@ export interface ViewDefinition {
   /** The narrowest width where the full layout is useful; hosts never place it narrower. */
   readonly minWidthPx: number;
   /**
-   * The view's count in the picker, from data the client already holds, or nothing. The picker
-   * mounts it only while open, and its queries read only what other readers already hold.
+   * The view's attention indicator, from data held by other readers. Hosts defer queries.
    */
-  readonly PickerCount?: ComponentType<{ readonly target: ViewTarget }>;
+  readonly PickerCount?: ComponentType<ViewCountProps>;
   /** The route that shows a global view full size; hosts narrower than `minWidthPx` link to it. */
   readonly page?: ViewPage;
   /**

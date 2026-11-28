@@ -104,6 +104,12 @@ export function completeSideAreaHandoff(route: SideAreaRoute, returnTo: HTMLElem
   return true;
 }
 
+export function toggleSideArea() {
+  useToolSidebarStore.getState().dispatch({
+    type: window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches ? "toggleStrip" : "toggle",
+  });
+}
+
 export const useToolSidebarStore = create<SideAreaStore>()(
   persist(
     (set, get) => ({
@@ -117,14 +123,26 @@ export const useToolSidebarStore = create<SideAreaStore>()(
             : request;
         const wasOpen = get().open;
         const next = transitionSideArea(get(), action);
-        if (action.type === "show" || action.type === "toggleView" || next.open !== wasOpen) {
+        const stripPress = action.type === "pressStripView";
+        if (stripPress && next.open && document.activeElement instanceof HTMLElement) {
+          returnFocus = document.activeElement;
+        }
+        if (
+          action.type === "show" ||
+          action.type === "toggleView" ||
+          stripPress ||
+          next.open !== wasOpen
+        ) {
           openRequests += 1;
         }
-        if (!wasOpen && next.open) {
+        if (!stripPress && !wasOpen && next.open) {
           returnFocus =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
         }
-        if (next.open && (!wasOpen || action.type === "show" || action.type === "toggleView")) {
+        if (
+          next.open &&
+          (!wasOpen || action.type === "show" || action.type === "toggleView" || stripPress)
+        ) {
           focusOnOpen = true;
         }
         // Focus the user moved elsewhere while it was open stays where they put it.
@@ -148,6 +166,7 @@ export const useToolSidebarStore = create<SideAreaStore>()(
       storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
       partialize: ({
         open,
+        stripVisible,
         view,
         width,
         pinned,
@@ -158,6 +177,7 @@ export const useToolSidebarStore = create<SideAreaStore>()(
         revealSection,
       }) => ({
         open,
+        stripVisible,
         view: storedViewId(view, revealSection),
         width,
         pinned,
@@ -200,11 +220,11 @@ export function makeRoomForDropdownTerminal() {
   else if (state.maximized) state.dispatch({ type: "restore" });
 }
 
-/** Moves focus to the side area's view picker once it has rendered. */
+/** Moves focus to the side area's title or view picker once it has rendered. */
 export function focusSideArea() {
   requestAnimationFrame(() =>
     document
-      .querySelector<HTMLElement>("#side-area [data-view-picker]")
+      .querySelector<HTMLElement>("#side-area [data-side-area-picker]")
       ?.focus({ preventScroll: true }),
   );
 }

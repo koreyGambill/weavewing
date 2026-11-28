@@ -71,7 +71,11 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
-import { ThreadToolsAttentionDot, useThreadToolsAttention } from "./ThreadToolsAttention";
+import {
+  SelectedToolSignalsHost,
+  ThreadToolsAttentionDot,
+  useThreadToolsAttention,
+} from "./ThreadToolsAttention";
 import { ThreadToolsHost } from "./threadToolsHost";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -545,10 +549,12 @@ export function AppSidebarLayout({
               </Sidebar>
             </>
           ) : null}
-          <ToolSidebarLayout>{children}</ToolSidebarLayout>
-          {/* Electron resolves app-region rects in DOM order, so a later drag-region header
+          <SelectedToolSignalsHost>
+            <ToolSidebarLayout>{children}</ToolSidebarLayout>
+            {/* Electron resolves app-region rects in DOM order, so a later drag-region header
               would swallow clicks on this fixed cluster. It must follow every titlebar. */}
-          <SidebarControl showSidebar={showSidebar} />
+            <SidebarControl showSidebar={showSidebar} />
+          </SelectedToolSignalsHost>
           <BackgroundThreadAnnouncer />
           {isElectron ? <HistorySwipeNavigation /> : null}
         </SidebarProvider>

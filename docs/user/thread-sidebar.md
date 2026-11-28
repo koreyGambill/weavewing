@@ -99,15 +99,17 @@ Inbox, Evidence, Automations, Calendar and Status span threads and open in the s
 panel. The left sidebar holds only your threads. A view with several parts shows
 each under its own heading; click a heading to collapse that part, and it stays
 collapsed on this device. A part loads when you scroll to it. Open the
-panel with the panel button at the right of the titlebar, with `Cmd+Alt+Shift+B` on
-macOS or `Ctrl+Alt+Shift+B` on Windows and Linux, or on a thread's details with the
-panel button at the right end of the row under the composer. `Cmd+Alt+I` on macOS or
-`Ctrl+Alt+I` on Windows and Linux opens the panel on the last thread view you used,
-or closes it when a thread view is showing. Choose a view from the menu at the top
-left of the panel: **This thread** lists the thread views and **Everywhere** the rest. The menu counts
-Checklist's open agent items and follow-up flags and Artifacts' unanswered questions, and
-marks Links when the ticket needs review; hover a view for what it shows.
-The panel covers the right edge of the chat instead of narrowing it, and shows the
+panel by clicking a view on the right edge of the window. Click that icon again to
+close the panel, or click another icon to switch views. The strip takes a small
+amount of space beside the tiles. **Toggle side panel** in the title bar or command
+palette hides the strip and closes any open view. Press `Cmd+Alt+Shift+B` on macOS
+or `Ctrl+Alt+Shift+B` on Windows and Linux to do the same. Toggle it again to show
+the strip. On narrow screens the toggle opens the panel directly, with a view
+picker in its header.
+
+`Cmd+Alt+I` on macOS or `Ctrl+Alt+I` on Windows and Linux opens the last thread
+view you used, or closes the panel when a thread view is showing. The panel
+floats over the chat and shows the
 selected thread. It closes when you press Escape, click outside it or switch
 threads. **Pin** keeps it open while you move between threads, and its views
 follow the thread you select. **Lock to thread** keeps showing one thread while
@@ -118,12 +120,16 @@ conversation and names it. **Automations** opened from a thread lists that threa
 automations; remove the **This thread** chip to list them all. Drag the panel's left edge to resize it; double-click the edge to
 reset it. On narrow screens the panel opens over the conversation.
 
-In the picker, open **Hide a view** and choose the view to hide. Use **Show** under **Hidden views** to put it
-back. Shortcuts and links still open hidden views. At least one thread view
-stays in the picker. These choices are saved in this browser.
+Open **Side panel settings** at the bottom of the strip to open any view.
+Choose **Hide a view** to remove an icon, or **Show** under **Hidden views**
+to put it back. Shortcuts and links still open hidden views. At least one
+thread view stays on the strip. The strip shows counts and attention marks
+for views with updates, and settings shows a dot when a hidden view needs
+attention. The browser remembers which views you hide and whether the strip
+is visible.
 
 To keep a view open without the panel covering the chat, make it a tile: choose
-**Open as tile** in the panel's header, or drag the grip at the header's left edge
+**Open as tile** in the panel's header, or drag its icon from the strip
 onto a tile. Dropping on a tile's edge splits it; dropping on its tab strip adds
 a tab. A thread view in a tile keeps showing that thread. When you move a view
 from a panel locked to another thread, its tab names that thread, as in
@@ -133,8 +139,8 @@ the tile's actions menu. A narrow tile shows a view's compact layout with
 the thread itself and global views; a view locked to another thread is left out.
 
 Calendar, Status and Pull requests also open as full pages beside the thread list.
-In the side panel, the expand button opens Calendar or Status as a page. For
-a thread view, it maximizes the panel. The command palette offers
+**Maximize side panel** expands any view below the title bar. Calendar and
+Status also have an **Open as page** button. The command palette offers
 **Open Calendar as a page** and **Open Status as a page**, and **Open pull requests**
 as before. On the Calendar and Status pages, **Open in side panel** moves the view back
 into the panel and returns you to where you were. Pull requests opens only on its own

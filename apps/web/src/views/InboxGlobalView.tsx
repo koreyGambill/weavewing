@@ -1,5 +1,5 @@
 import { InboxView } from "../components/inbox/InboxView";
-import { MenuItemDetail } from "../components/ui/menu";
+import { ViewCount, type ViewCountProps } from "./ViewCount";
 import { useInboxSignal } from "../state/inbox";
 
 /** The Inbox as a view that spans threads: its tabs, rows and detail, unchanged. */
@@ -12,7 +12,7 @@ export function InboxGlobalView({ actions }: { actions: HTMLDivElement | null })
 }
 
 /** Unread notifications, from the inbox stream the app already reads. */
-export function InboxUnreadCount() {
+export function InboxUnreadCount({ mark }: ViewCountProps) {
   const { unread } = useInboxSignal();
-  return unread === 0 ? null : <MenuItemDetail>{unread}</MenuItemDetail>;
+  return unread === 0 ? null : <ViewCount mark={mark}>{unread}</ViewCount>;
 }

@@ -60,6 +60,7 @@ const PersistedSideArea = Schema.Struct({
   pinned: Schema.Boolean,
   locked: Schema.NullOr(ScopedThreadRef),
   threadView: Schema.optionalKey(Schema.String),
+  stripVisible: Schema.optionalKey(Schema.Boolean),
   hidden: Schema.optionalKey(Schema.Unknown),
 });
 
@@ -72,6 +73,7 @@ const LegacyToolSidebar = Schema.Struct({
 
 export interface SideAreaState {
   readonly open: boolean;
+  readonly stripVisible: boolean;
   readonly view: ViewId;
   readonly width: number;
   /** Stays open through thread switches and outside clicks; the content still follows. */
@@ -92,6 +94,7 @@ export interface SideAreaState {
 
 export const INITIAL_SIDE_AREA: SideAreaState = {
   open: false,
+  stripVisible: true,
   view: "details",
   width: 300,
   pinned: false,
@@ -112,6 +115,8 @@ export interface SideAreaContext {
 
 export type SideAreaAction =
   | { type: "toggle" }
+  | { type: "toggleStrip" }
+  | { type: "pressStripView"; view: ViewId }
   /**
    * Opens on `view`. A request with `thread` follows that thread when it is already selected
    * and locks the panel to it otherwise.
@@ -135,7 +140,7 @@ export type SideAreaAction =
   | { type: "close" }
   /** An outside click, Escape outside the side area or a thread switch: closes unless pinned. */
   | { type: "dismiss" }
-  | { type: "setHidden"; view: ViewId; hidden: boolean }
+  | { type: "setHidden"; view: ViewId; hidden: boolean; strip?: true }
   | { type: "pin" }
   | { type: "lock"; thread: ScopedThreadRef | null }
   | { type: "maximize" }
@@ -175,6 +180,7 @@ export function restoreSideArea(value: unknown): SideAreaState {
     const last = remembered && isThreadViewId(remembered.view) ? remembered : shown;
     return {
       open,
+      stripVisible: current.value.stripVisible ?? INITIAL_SIDE_AREA.stripVisible,
       view,
       width: clampSideAreaWidth(width),
       pinned,
@@ -358,6 +364,12 @@ function withView(
 
 export function transitionSideArea(state: SideAreaState, action: SideAreaAction): SideAreaState {
   switch (action.type) {
+    case "toggleStrip":
+      return { ...state, stripVisible: !state.stripVisible, open: false, maximized: false };
+    case "pressStripView":
+      return state.open && state.view === action.view
+        ? { ...state, stripVisible: true, open: false, maximized: false }
+        : { ...withView(state, action.view), stripVisible: true, open: true };
     case "toggle":
       return { ...state, open: !state.open, maximized: false };
     case "show": {
@@ -412,6 +424,7 @@ export function transitionSideArea(state: SideAreaState, action: SideAreaAction)
       if (!hidden) return { ...state, hidden: state.hidden.filter((id) => id !== view) };
       if (state.hidden.includes(view) || !canHideView(view, state.hidden)) return state;
       const nextHidden = [...state.hidden, view];
+      if (action.strip) return { ...state, hidden: nextHidden };
       const fallback = THREAD_VIEW_IDS.find((id) => !nextHidden.includes(id)) ?? THREAD_VIEW_IDS[0];
       if (view === state.view) return { ...withView(state, fallback), hidden: nextHidden };
       return {

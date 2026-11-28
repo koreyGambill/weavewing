@@ -3,7 +3,7 @@ import { Settings2Icon } from "lucide-react";
 
 import { StatusSourcesList, useStatusSignal } from "../components/statusSources/StatusSources";
 import { Button } from "../components/ui/button";
-import { MenuItemDetail } from "../components/ui/menu";
+import { ViewCount, type ViewCountProps } from "./ViewCount";
 
 export function StatusView() {
   const { groups } = useStatusSignal();
@@ -30,10 +30,10 @@ export function StatusView() {
 }
 
 /** Sources failing or warning, from the status stream the titlebar toggle already reads. */
-export function StatusAlertCount() {
+export function StatusAlertCount({ mark }: ViewCountProps) {
   const { groups } = useStatusSignal();
   const count = groups
     .flatMap((group) => group.sources ?? [])
     .filter((source) => source.latest.state === "fail" || source.latest.state === "warn").length;
-  return count === 0 ? null : <MenuItemDetail>{count}</MenuItemDetail>;
+  return count === 0 ? null : <ViewCount mark={mark}>{count}</ViewCount>;
 }

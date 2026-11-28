@@ -1,57 +1,19 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { GripVertical, Maximize2 } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { observeResize } from "../../lib/observeResize";
 import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
 import { DeferEnvironmentQueries } from "../../state/query";
 import { getTileGroups } from "../../threadTileLayout";
-import { useViewDragStore, VIEW_DRAG_TYPE } from "../../views/viewDragStore";
 import { viewDefinition } from "../../views/viewRegistry";
 import { viewTileThread, type ViewSurface } from "../../views/viewTiles.logic";
 import { useTileDetailsSetter } from "../threadToolsHost";
 import { LockedThreadBar, useLockedThreadState } from "../ToolSidebar";
-import { resolveViewLayout, SIDE_AREA_WIDE_MEDIA_QUERY, type ViewId } from "../ToolSidebar.logic";
+import { resolveViewLayout, SIDE_AREA_WIDE_MEDIA_QUERY } from "../ToolSidebar.logic";
 import { SIDE_AREA_SETTLE_MS } from "../ToolSidebar";
 import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-
-/** The side panel header's grip: dragging it onto the tiles opens the view there. */
-export function ViewDragGrip({
-  viewId,
-  thread,
-}: {
-  viewId: ViewId;
-  thread: ScopedThreadRef | null;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          // The Open as tile button is the keyboard route, so the grip takes no tab stop.
-          <div
-            aria-hidden
-            draggable
-            data-view-drag-grip
-            className="flex h-7 w-3.5 shrink-0 cursor-grab items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
-            onDragStart={(event) => {
-              event.dataTransfer.setData(VIEW_DRAG_TYPE, viewId);
-              event.dataTransfer.effectAllowed = "move";
-              const header = event.currentTarget.closest("header");
-              if (header) event.dataTransfer.setDragImage(header, 12, 16);
-              useViewDragStore.setState({ drag: { viewId, thread } });
-            }}
-            onDragEnd={() => useViewDragStore.setState({ drag: null })}
-          />
-        }
-      >
-        <GripVertical className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup>Drag onto a tile to open this view there</TooltipPopup>
-    </Tooltip>
-  );
-}
 
 // The workspace whose selection last rested; a view tile in it loads at once.
 let settledWorkspaceKey: string | null = null;

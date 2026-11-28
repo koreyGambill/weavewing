@@ -1,4 +1,5 @@
 import { AuthOrchestrationReadScope, type ScopedThreadRef } from "@t3tools/contracts";
+import { createContext, use, type ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "../state/session";
@@ -11,8 +12,12 @@ import {
 } from "../threadContextSidebar";
 import { useSelectedThreadRef } from "./threadToolsHost";
 
-/** The selected thread's counts from its workspace, which the attention dot keeps loaded. */
-export function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
+const SelectedToolSignals = createContext<{
+  threadRef: ScopedThreadRef | null;
+  signals: ReturnType<typeof summarizeThreadTools>;
+} | null>(null);
+
+function useWorkspaceToolSignals(threadRef: ScopedThreadRef | null) {
   const canRead = useEnvironmentScope(threadRef?.environmentId ?? null, AuthOrchestrationReadScope);
   const workspace = useEnvironmentQuery(
     threadRef && canRead
@@ -25,6 +30,22 @@ export function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
   return summarizeThreadTools(workspace.data ?? null);
 }
 
+/** Shares the workspace already loaded for the collapsed sidebar's attention mark. */
+export function SelectedToolSignalsHost({ children }: { children: ReactNode }) {
+  const threadRef = useSelectedThreadRef();
+  const signals = useWorkspaceToolSignals(threadRef);
+  return <SelectedToolSignals value={{ threadRef, signals }}>{children}</SelectedToolSignals>;
+}
+
+export function useThreadToolSignals(threadRef: ScopedThreadRef | null) {
+  const selected = use(SelectedToolSignals);
+  const sameThread =
+    selected !== null &&
+    selected.threadRef?.threadId === threadRef?.threadId &&
+    selected.threadRef?.environmentId === threadRef?.environmentId;
+  const other = useWorkspaceToolSignals(sameThread ? null : threadRef);
+  return sameThread ? selected.signals : other;
+}
 const attentionToneClass: Record<ThreadToolsAttentionTone, string> = {
   alert: "bg-destructive",
   question: "bg-primary",

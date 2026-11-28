@@ -24,6 +24,31 @@ const run = (state: SideAreaState, ...actions: SideAreaAction[]) =>
   actions.reduce(transitionSideArea, state);
 
 describe("side area", () => {
+  it("keeps the strip open independently of its floating view", () => {
+    const initial = INITIAL_SIDE_AREA;
+    expect(initial).toMatchObject({ open: false, stripVisible: true });
+    const links = { type: "pressStripView", view: "links" } as const;
+    const activity = { type: "pressStripView", view: "activity" } as const;
+    const opened = run(initial, links);
+    expect(opened).toMatchObject({ open: true, view: "links", stripVisible: true });
+    expect(run(opened, links)).toMatchObject({ open: false, stripVisible: true });
+    const switched = run(opened, activity);
+    expect(switched).toMatchObject({ open: true, view: "activity", stripVisible: true });
+    const maximized = run(switched, { type: "maximize" });
+    expect(maximized.maximized).toBe(true);
+    expect(run(maximized, { type: "maximize" }).maximized).toBe(false);
+    const hidden = run(maximized, { type: "toggleStrip" });
+    expect(hidden).toMatchObject({ open: false, stripVisible: false, maximized: false });
+    expect(run(hidden, { type: "toggleStrip" })).toMatchObject({ open: false, stripVisible: true });
+    expect(restoreSideArea(hidden).stripVisible).toBe(false);
+  });
+
+  it("hides an icon while keeping its view open and accessible", () => {
+    const shown = run(INITIAL_SIDE_AREA, { type: "pressStripView", view: "links" });
+    const hidden = run(shown, { type: "setHidden", view: "links", hidden: true, strip: true });
+    expect(hidden).toMatchObject({ open: true, view: "links", hidden: ["links"] });
+    expect(run(hidden, { type: "setHidden", view: "links", hidden: false }).hidden).toEqual([]);
+  });
   it("lists five thread views, then the views that span threads", () => {
     expect(VIEW_IDS).toEqual([
       "checklist",
@@ -179,6 +204,7 @@ describe("side area", () => {
     const stored = { open: true, view: "links", width: 900, pinned: true, locked: threadA };
     expect(restoreSideArea({ ...stored, maximized: true })).toEqual({
       ...stored,
+      stripVisible: true,
       width: 640,
       maximized: false,
       threadView: "links",

@@ -11,7 +11,9 @@ import {
   Minimize2,
   PanelRight,
   PinIcon,
-  Columns2,
+  SquarePlus,
+  Settings2Icon,
+  ExternalLink,
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -38,6 +40,7 @@ import {
   provideSideAreaContext,
   sideAreaOpenRequests,
   takeSideAreaFocusRequest,
+  toggleSideArea,
   useToolSidebarStore,
 } from "../toolSidebarStore";
 import { HostedView, useOpenViewPage } from "../views/ViewPageHost";
@@ -49,8 +52,7 @@ import {
   type ViewSlots,
   type ViewTarget,
 } from "../views/viewRegistry";
-import { useViewDragStore } from "../views/viewDragStore";
-import { ViewDragGrip } from "./chat/ViewTile";
+import { useViewDragStore, VIEW_DRAG_TYPE } from "../views/viewDragStore";
 import { promoteViewToTile } from "./chat/viewTileActions";
 import { DropdownTerminalButton } from "./DropdownTerminal";
 import { useStatusSignal } from "./statusSources/StatusSources";
@@ -93,7 +95,7 @@ const SIDE_AREA_COVER_VARIABLE = "--side-area-cover-right";
 // Popups and dialogs portal outside the side area, and the drop-down terminal sits beside it;
 // using any of them is not a click outside it.
 const LAYER_SELECTOR =
-  '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle], [data-dropdown-terminal], [data-dropdown-terminal-toggle]';
+  '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [data-context-menu], [data-side-area-toggle], [data-side-area-strip], [data-dropdown-terminal], [data-dropdown-terminal-toggle]';
 
 function sideAreaRoute({ pathname, state }: ParsedLocation) {
   return { pathname, key: state.__TSR_key, index: state.__TSR_index };
@@ -124,11 +126,6 @@ function openLayerVisible() {
   ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }));
 }
 
-/** Whether the side area shows maximized: a view with a page opens its page instead. */
-function shownMaximized(state: { readonly maximized: boolean; readonly view: ViewId }) {
-  return state.maximized && !viewDefinition(state.view).page;
-}
-
 /**
  * The side area: one view at a time on the right, covering the content instead of resizing it.
  * Its thread views follow the selected thread unless locked; Pin keeps it open.
@@ -136,7 +133,9 @@ function shownMaximized(state: { readonly maximized: boolean; readonly view: Vie
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const open = useToolSidebarStore((state) => state.open);
   const width = useToolSidebarStore((state) => state.width);
-  const maximized = useToolSidebarStore(shownMaximized);
+  const maximized = useToolSidebarStore((state) => state.maximized);
+  const stripVisible = useToolSidebarStore((state) => state.stripVisible);
+  const dragging = useViewDragStore((state) => state.drag !== null);
   const pinned = useToolSidebarStore((state) => state.pinned);
   const { state: statusState } = useStatusSignal();
   const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
@@ -147,9 +146,10 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const [titlebarControlsHost, setTitlebarControlsHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
-  const coversContent = maximized && isWide && open;
+  const coversContent = maximized && isWide && open && !dragging;
+  const stripWidth = isWide && stripVisible ? 44 : 0;
   const panelWidth = isWide
-    ? resolveSideAreaWidth(width, availableWidth)
+    ? resolveSideAreaWidth(width, availableWidth - stripWidth)
     : availableWidth < 640
       ? availableWidth
       : Math.min(width, availableWidth);
@@ -207,7 +207,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       requests = sideAreaOpenRequests();
       if (state.open && requested) closeDrawer(node);
     });
-    const toggle = () => useToolSidebarStore.getState().dispatch({ type: "toggle" });
+    const toggle = toggleSideArea;
     const stopMenu = registerMenuAction("toolSidebar.toggle", toggle);
     const stopCommands = registerCommands(
       {
@@ -241,12 +241,14 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           // Inside it, a field that uses Escape (clearing a filter) consumes it before it gets here.
           if (inside && isEditorTarget(event.target)) return false;
           if (openLayerVisible()) return false;
-          state.dispatch({
-            type:
-              shownMaximized(state) && window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches
-                ? "restore"
-                : "close",
-          });
+          state.dispatch({ type: "close" });
+          if (window.matchMedia(SIDE_AREA_WIDE_MEDIA_QUERY).matches) {
+            (
+              node.querySelector<HTMLElement>(`[data-strip-view="${state.view}"]`) ??
+              node.querySelector<HTMLElement>("[data-strip-settings]") ??
+              toggleRef.current
+            )?.focus({ preventScroll: true });
+          }
           event.preventDefault();
           event.stopPropagation();
         },
@@ -271,15 +273,17 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       <div
         ref={setTitlebarHost}
         data-workspace-titlebar
-        inert={coversContent || undefined}
         className={cn(
           "absolute inset-x-0 top-0 z-10 h-[var(--workspace-topbar-height)] bg-background",
           isElectron && "drag-region",
-          coversContent && "[&>*]:invisible",
         )}
       />
       <div
-        className={cn("flex min-h-0 min-w-0 flex-1", coversContent && "invisible")}
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1",
+          isWide && stripVisible && "pr-11",
+          coversContent && "invisible",
+        )}
         inert={coversContent || undefined}
       >
         <WorkspaceTitlebarHost value={titlebarHost}>
@@ -307,11 +311,11 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
                     ? `Toggle side panel (status ${statusAlert === "fail" ? "failing" : "warning"})`
                     : "Toggle side panel"
                 }
-                aria-pressed={open}
-                aria-controls="side-area"
+                aria-pressed={isWide ? stripVisible : open}
+                aria-controls={isWide ? "side-area-strip" : "side-area"}
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => useToolSidebarStore.getState().dispatch({ type: "toggle" })}
+                onClick={toggleSideArea}
               />
             }
           >
@@ -325,13 +329,16 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           </TooltipPopup>
         </Tooltip>
       </div>
+      {isWide && stripVisible ? <SideAreaStrip /> : null}
       {open ? (
         <SideArea
           maximized={isWide && maximized}
           wide={isWide}
           pinned={pinned}
           width={panelWidth}
-          fullWidth={availableWidth}
+          fullWidth={availableWidth - stripWidth}
+          maximizedWidth={document.documentElement.clientWidth - stripWidth}
+          besideStrip={stripWidth > 0}
         />
       ) : null}
     </div>
@@ -344,13 +351,16 @@ function SideArea({
   pinned,
   width,
   fullWidth,
+  maximizedWidth,
+  besideStrip,
 }: {
   maximized: boolean;
   wide: boolean;
   pinned: boolean;
   width: number;
-  /** The content area's width, which a maximized side area fills. */
   fullWidth: number;
+  maximizedWidth: number;
+  besideStrip: boolean;
 }) {
   const view = useToolSidebarStore((state) => state.view);
   const locked = useToolSidebarStore((state) => state.locked);
@@ -370,6 +380,7 @@ function SideArea({
   const lockedState = useLockedThreadState(locked);
   const unlock = () => dispatch({ type: "lock", thread: null });
   const openViewPage = useOpenViewPage();
+  const heading = useSideAreaOpenFocus<HTMLHeadingElement>();
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<HTMLElement | null>(null);
   const insideClicks = useRef(new WeakSet<Event>());
@@ -433,10 +444,7 @@ function SideArea({
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     const pane = event.currentTarget.parentElement;
     if (!pane || maximized || !wide) return null;
-    const max = resolveSideAreaWidth(
-      SIDE_AREA_MAX_WIDTH,
-      pane.closest("[data-tool-sidebar-layout]")?.clientWidth ?? SIDE_AREA_MAX_WIDTH,
-    );
+    const max = resolveSideAreaWidth(SIDE_AREA_MAX_WIDTH, fullWidth);
     return {
       width: pane.getBoundingClientRect().width,
       edge: "left",
@@ -460,7 +468,7 @@ function SideArea({
     definition.scope === "thread" ? { threadRef, draft } : { threadRef, draft: null };
   const layout = resolveViewLayout(definition.compactBelowPx, {
     wide,
-    width: maximized ? fullWidth : width,
+    width: maximized ? maximizedWidth : width,
   });
 
   return (
@@ -474,11 +482,12 @@ function SideArea({
       onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
         "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col border-l bg-background shadow-xl",
-        maximized && "left-0 shadow-none",
+        besideStrip && "right-11",
+        maximized && "shadow-none",
         // The tiles under the panel take a view dragged from its grip.
         viewDragging && "pointer-events-none opacity-30",
       )}
-      style={maximized ? undefined : { width }}
+      style={{ width: maximized ? maximizedWidth : width }}
     >
       {!maximized && wide ? (
         <button
@@ -495,10 +504,18 @@ function SideArea({
         />
       ) : null}
       <header className="flex h-10 shrink-0 items-center gap-1 border-b pr-2 pl-1.5">
-        {wide && !maximized && canPromote && tileOwner ? (
-          <ViewDragGrip viewId={view} thread={viewThread} />
-        ) : null}
-        <ViewPicker definition={definition} target={target} />
+        {wide ? (
+          <h2
+            ref={heading}
+            tabIndex={-1}
+            data-side-area-picker
+            className="min-w-0 truncate pl-1 text-sm font-medium"
+          >
+            {definition.title}
+          </h2>
+        ) : (
+          <ViewPicker definition={definition} target={target} />
+        )}
         <div ref={setActions} className="ms-auto flex min-w-0 items-center" />
         <div
           role="group"
@@ -546,13 +563,9 @@ function SideArea({
                 />
               }
             >
-              <Columns2 />
+              <SquarePlus />
             </TooltipTrigger>
-            <TooltipPopup>
-              {canPromote
-                ? `Open ${definition.title} as a tile beside the chat`
-                : "Open a thread to place this view in its tiles"}
-            </TooltipPopup>
+            <TooltipPopup>Open as tile</TooltipPopup>
           </Tooltip>
           {definition.page ? (
             <Tooltip>
@@ -569,11 +582,12 @@ function SideArea({
                   />
                 }
               >
-                <Maximize2 />
+                <ExternalLink />
               </TooltipTrigger>
               <TooltipPopup>Open {definition.title} as a page</TooltipPopup>
             </Tooltip>
-          ) : wide ? (
+          ) : null}
+          {wide ? (
             <HeaderToggle
               label={maximized ? "Restore side panel size" : "Maximize side panel"}
               hint={maximized ? "Restore side panel size" : "Maximize side panel"}
@@ -615,7 +629,7 @@ function SideArea({
           definition={definition}
           target={target}
           layout={layout}
-          width={maximized ? fullWidth : width}
+          width={maximized ? maximizedWidth : width}
           slots={{ actions, setDetails }}
         />
       )}
@@ -759,53 +773,170 @@ function SideAreaBody({
   );
 }
 
+function SideAreaStrip() {
+  const hidden = useToolSidebarStore((state) => state.hidden);
+  const active = useToolSidebarStore((state) => (state.open ? state.view : null));
+  const dispatch = useToolSidebarStore((state) => state.dispatch);
+  const thread = useSideAreaThreadRef();
+  const tileOwner = useRouterState({
+    select: (state) => resolveThreadRouteRef(state.matches.at(-1)?.params ?? {}),
+  });
+  const groups = (["thread", "global"] as const)
+    .map((scope) =>
+      PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === scope && !hidden.includes(entry.id)),
+    )
+    .filter((entries) => entries.length > 0);
+  return (
+    <div
+      id="side-area-strip"
+      data-side-area-strip
+      role="toolbar"
+      aria-label="Side panel views"
+      aria-orientation="vertical"
+      className="absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex w-11 flex-col items-center border-l bg-background py-1 [-webkit-app-region:no-drag]"
+    >
+      <div className="flex min-h-0 w-full flex-col items-center gap-1 overflow-y-auto py-1 [scrollbar-width:none]">
+        {groups.map((entries, index) => (
+          <Fragment key={entries[0]?.scope}>
+            {index > 0 ? <div role="separator" className="h-px w-5 shrink-0 bg-border" /> : null}
+            {entries.map((entry) => {
+              const viewThread = entry.scope === "thread" ? thread : null;
+              const draggable =
+                tileOwner !== null &&
+                canPromoteToTile(entry) &&
+                (entry.scope === "global" || viewThread !== null);
+              return (
+                <Tooltip key={entry.id}>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        data-strip-view={entry.id}
+                        aria-label={entry.title}
+                        aria-pressed={active === entry.id}
+                        size="icon-sm"
+                        variant={active === entry.id ? "secondary" : "ghost"}
+                        draggable={draggable}
+                        onClick={() => dispatch({ type: "pressStripView", view: entry.id })}
+                        onDragStart={(event) => {
+                          if (!draggable) return;
+                          event.dataTransfer.setData(VIEW_DRAG_TYPE, entry.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          useViewDragStore.setState({
+                            drag: { viewId: entry.id, thread: viewThread },
+                          });
+                        }}
+                        onDragEnd={() => useViewDragStore.setState({ drag: null })}
+                      />
+                    }
+                  >
+                    <span className="relative flex">
+                      <entry.icon />
+                      <StripViewMark entry={entry} target={{ threadRef: thread, draft: null }} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipPopup side="left">{entry.title}</TooltipPopup>
+                </Tooltip>
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+      <div className="mt-auto pt-1">
+        <ViewPicker
+          strip
+          active={active}
+          definition={viewDefinition(active ?? "details")}
+          target={{ threadRef: thread, draft: null }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StripViewMark({
+  entry,
+  target,
+  dot,
+}: {
+  entry: ViewDefinition;
+  target: ViewTarget;
+  dot?: true;
+}) {
+  return entry.PickerCount ? (
+    <DeferEnvironmentQueries value>
+      <entry.PickerCount target={target} mark={dot ? "dot" : "badge"} />
+    </DeferEnvironmentQueries>
+  ) : null;
+}
+
+function useSideAreaOpenFocus<Element extends HTMLElement>() {
+  const drawerMounted = useMobileSidebarSheetMounted();
+  const requests = useToolSidebarStore(sideAreaOpenRequests);
+  const trigger = useRef<Element>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The drawer releases modal focus before the panel takes it.
+  useLayoutEffect(() => {
+    if (trigger.current && !drawerMounted && takeSideAreaFocusRequest(requests))
+      trigger.current.focus({ preventScroll: true });
+  }, [drawerMounted, requests]);
+  return trigger;
+}
+
 function ViewPicker({
   definition,
   target,
+  strip,
+  active,
 }: {
   definition: (typeof PANEL_VIEW_DEFINITIONS)[number];
   target: ViewTarget;
+  strip?: true;
+  active?: ViewId | null;
 }) {
   const [open, setOpen] = useState(false);
-  const drawerMounted = useMobileSidebarSheetMounted();
-  const requests = useToolSidebarStore(sideAreaOpenRequests);
-  const trigger = useRef<HTMLButtonElement>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The drawer releases modal focus before the picker takes it.
-  useLayoutEffect(() => {
-    if (!drawerMounted && takeSideAreaFocusRequest(requests))
-      trigger.current?.focus({ preventScroll: true });
-  }, [drawerMounted, requests]);
+  const trigger = useSideAreaOpenFocus<HTMLButtonElement>();
   const hidden = useToolSidebarStore((state) => state.hidden);
   const dispatch = useToolSidebarStore((state) => state.dispatch);
   const visibleViews = PANEL_VIEW_DEFINITIONS.filter((entry) => !hidden.includes(entry.id));
   const hiddenViews = PANEL_VIEW_DEFINITIONS.filter((entry) => hidden.includes(entry.id));
   const Icon = definition.icon;
+  const menuViews = strip ? PANEL_VIEW_DEFINITIONS : visibleViews;
   const groups = [
-    { label: "This thread", views: visibleViews.filter((entry) => entry.scope === "thread") },
-    { label: "Everywhere", views: visibleViews.filter((entry) => entry.scope === "global") },
+    { label: "This thread", views: menuViews.filter((entry) => entry.scope === "thread") },
+    { label: "Everywhere", views: menuViews.filter((entry) => entry.scope === "global") },
   ];
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger
-        ref={trigger}
-        data-side-area-picker
+        ref={strip ? undefined : trigger}
+        data-side-area-picker={strip ? undefined : true}
+        data-strip-settings={strip}
         render={
           <Button
             variant="ghost"
-            size="sm"
-            className="min-w-0"
-            data-view-picker
-            aria-label={`View: ${definition.title}. Choose a view`}
+            size={strip ? "icon-sm" : "sm"}
+            data-view-picker={strip ? undefined : true}
+            aria-label={strip ? "Side panel settings" : `View: ${definition.title}. Choose a view`}
           />
         }
       >
-        <Icon />
-        <span className="min-w-0 truncate">{definition.title}</span>
-        <ChevronDownIcon className="opacity-60" />
+        {strip ? (
+          <span className="relative flex">
+            <Settings2Icon />
+            {hiddenViews.map((entry) => (
+              <StripViewMark key={entry.id} entry={entry} target={target} dot />
+            ))}
+          </span>
+        ) : (
+          <>
+            <Icon />
+            <span className="min-w-0 truncate">{definition.title}</span>
+            <ChevronDownIcon className="opacity-60" />
+          </>
+        )}
       </MenuTrigger>
-      <MenuPopup align="start" className="w-60">
+      <MenuPopup side={strip ? "left" : "bottom"} align={strip ? "end" : "start"} className="w-60">
         <MenuRadioGroup
-          value={definition.id}
+          value={strip ? (active ?? "") : definition.id}
           onValueChange={(value) => {
             const next = PANEL_VIEW_DEFINITIONS.find((entry) => entry.id === value);
             if (next) dispatch({ type: "show", view: next.id });
@@ -832,7 +963,7 @@ function ViewPicker({
                         <span className="flex items-center gap-2">
                           <entry.icon className="text-muted-foreground" />
                           {entry.title}
-                          {open && entry.PickerCount ? (
+                          {!strip && open && entry.PickerCount ? (
                             <DeferEnvironmentQueries value>
                               <entry.PickerCount target={target} />
                             </DeferEnvironmentQueries>
@@ -860,9 +991,18 @@ function ViewPicker({
                   key={entry.id}
                   disabled={disabled}
                   aria-description={
-                    disabled ? "Keep at least one thread view in the picker." : undefined
+                    disabled
+                      ? `Keep at least one thread view in the ${strip ? "strip" : "picker"}.`
+                      : undefined
                   }
-                  onClick={() => dispatch({ type: "setHidden", view: entry.id, hidden: true })}
+                  onClick={() =>
+                    dispatch({
+                      type: "setHidden",
+                      view: entry.id,
+                      hidden: true,
+                      ...(strip ? { strip } : {}),
+                    })
+                  }
                 >
                   <entry.icon aria-hidden />
                   Hide {entry.title}

@@ -111,9 +111,13 @@ it("promotes the side panel's view by keyboard into a tile beside the chat and f
   const { stack, screen } = await mountApp(THREADS);
   await using _app = stack;
   const before = document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width;
-  await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
+  await userEvent.click(
+    screen
+      .getByRole("toolbar", { name: "Side panel views" })
+      .getByRole("button", { name: "Details", exact: true }),
+  );
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await expect.element(panel.getByRole("button", { name: /^View: Details/ })).toHaveFocus();
+  await expect.element(panel.getByRole("heading", { name: "Details", level: 2 })).toHaveFocus();
   expect(document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width).toBe(
     before,
   );
@@ -154,7 +158,7 @@ it("offers tile controls for global panel views without carrying over the thread
     useToolSidebarStore.getState().dispatch({ type: "lock", thread: refOf(elsewhere) });
   });
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await userEvent.click(panel.getByRole("button", { name: /^View: Links/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Side panel settings" }));
   await expect.element(page.getByRole("menuitemradio", { name: "Inbox" })).toBeVisible();
   expect(page.getByRole("menuitemradio", { name: "Pull requests" }).elements()).toHaveLength(0);
   expect(canPromoteToTile(viewDefinition("pull-requests"))).toBe(false);
@@ -168,10 +172,7 @@ it("offers tile controls for global panel views without carrying over the thread
     await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view }));
     const promote = panel.getByRole("button", { name: "Open as tile" });
     await expect.element(promote).toBeEnabled();
-    expect(panel.element().querySelector("[data-view-drag-grip]")).toHaveProperty(
-      "draggable",
-      true,
-    );
+    expect(document.querySelector(`[data-strip-view="${view}"]`)).toHaveProperty("draggable", true);
     expect(
       panel.getByRole("button", { name: /^(Lock to|Unlock from) thread$/ }).elements(),
     ).toHaveLength(0);
@@ -216,7 +217,7 @@ it("keeps a view promoted from a panel locked elsewhere on that thread, then mov
   expect(
     selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refOf(here)).surfaces,
   ).toEqual([]);
-  await expect.element(panel.getByRole("button", { name: /^View: Links/ })).toHaveFocus();
+  await expect.element(panel.getByRole("heading", { name: "Links", level: 2 })).toHaveFocus();
 });
 
 it("sends nothing for hidden view tabs and cancels a view's requests when its tab hides", async () => {
@@ -280,7 +281,7 @@ it("drops the side panel's view on a tile edge to split it, and cancels a drop e
   await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
-  const grip = panel.element().querySelector<HTMLElement>("[data-view-drag-grip]")!;
+  const grip = document.querySelector<HTMLElement>('[data-strip-view="activity"]')!;
   expect(grip).not.toBeNull();
 
   // Dropping on the thread list changes nothing.
@@ -324,7 +325,7 @@ it("offers no split of a tile too narrow to divide when a view is dragged onto i
   await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "activity" }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
-  const grip = panel.element().querySelector<HTMLElement>("[data-view-drag-grip]")!;
+  const grip = document.querySelector<HTMLElement>('[data-strip-view="activity"]')!;
   const chat = screen.getByRole("region", { name: "Tile: Main chat", exact: true });
   const box = chat.element().getBoundingClientRect();
   await userEvent.dragAndDrop(grip, chat, {

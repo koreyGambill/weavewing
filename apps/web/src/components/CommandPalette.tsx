@@ -4,7 +4,7 @@ import { openCommandPalette } from "~/commandPaletteBus";
 import { lastFocusedTerminalFind } from "~/lib/terminalFocus";
 import { stepThreadBookmark, useThreadBookmarkCount } from "./chat/threadBookmarkActions";
 import { bookmarkInPlaceNavigation } from "./reviews/bookmarks.logic";
-import { useToolSidebarStore } from "../toolSidebarStore";
+import { toggleSideArea, useToolSidebarStore } from "../toolSidebarStore";
 import { viewPagePaletteDefinitions } from "../views/viewPage.logic";
 import { VIEW_DEFINITIONS } from "../views/viewRegistry";
 import { useInboxEnvironments } from "../state/inbox";
@@ -1836,7 +1836,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "toolSidebar.toggle",
       run: async () => {
-        useToolSidebarStore.getState().dispatch({ type: "toggle" });
+        toggleSideArea();
       },
     });
 
