@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BellIcon,
+  TriangleAlertIcon,
   CalendarClockIcon,
   CalendarIcon,
   ChartGanttIcon,
@@ -24,6 +25,7 @@ export const VIEW_ICONS: { readonly [Id in ViewId]: LucideIcon } = {
   activity: ChartGanttIcon,
   details: IdCardIcon,
   automations: CalendarClockIcon,
+  alerts: TriangleAlertIcon,
   waiting: UserRoundIcon,
   inbox: BellIcon,
   calendar: CalendarIcon,

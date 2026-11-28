@@ -31,6 +31,14 @@ export const waitingThreadsAtom = Atom.make((get) => {
     : next;
 }).pipe(Atom.withLabel("web-waiting-threads"));
 
+/** Held inbox items from every connected environment, independent of the waiting-cards setting. */
+export function useAlertInboxes() {
+  return useInboxEnvironments().map(({ environment, inbox }) => ({
+    environmentId: environment.environmentId,
+    items: inbox?.items ?? [],
+  }));
+}
+
 /** What the "Waiting on you" row shows, and whether it and its palette entry show at all. */
 export function useWaitingOnYou() {
   const threads = useAtomValue(waitingThreadsAtom);

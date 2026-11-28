@@ -48,16 +48,19 @@ const basePanel = {
 };
 
 describe("side area", () => {
-  it("downgrades Waiting on you to Inbox while preserving the base panel settings", () => {
-    const stored = { ...basePanel, ...storedSideAreaView("waiting", null), stripVisible: false };
-    // Inbox is a recognized ID in base, which discards the panel if the ID is unknown.
-    expect(decodeBasePanel(stored)).toEqual(basePanel);
-    expect(restoreSideArea(stored)).toMatchObject({
-      ...basePanel,
-      view: "waiting",
-      stripVisible: false,
-    });
-  });
+  it.each(["waiting", "alerts"] as const)(
+    "downgrades %s to Inbox while preserving the base panel settings",
+    (selected) => {
+      const stored = { ...basePanel, ...storedSideAreaView(selected, null), stripVisible: false };
+      // Inbox is a recognized ID in base, which discards the panel if the ID is unknown.
+      expect(decodeBasePanel(stored)).toEqual(basePanel);
+      expect(restoreSideArea(stored)).toMatchObject({
+        ...basePanel,
+        view: selected,
+        stripVisible: false,
+      });
+    },
+  );
 
   it("opens a base panel with its pinned, locked, resized and hidden settings intact", () => {
     expect(restoreSideArea(decodeBasePanel(basePanel))).toMatchObject({
@@ -98,6 +101,7 @@ describe("side area", () => {
       "links",
       "activity",
       "details",
+      "alerts",
       "waiting",
       "inbox",
       "evidence",

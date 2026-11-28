@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   Notification,
+  NotificationSeverity,
   ScopedThreadRef,
   WaitingCounts,
   WaitingItemKind,
@@ -104,28 +105,39 @@ export const WAITING_ALERTS_LIMIT = 5;
 
 /**
  * Unread notifications in the Inbox tab that no thread owns, such as status sources and
- * automation failures, newest first. Thread-owned ones stay in the Inbox, which the list opens.
+ * automation failures, by severity and then newest first. The narrow sheet shows a short list.
  */
 export function selectWaitingAlerts(
-  groups: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly items: ReadonlyArray<Notification>;
-  }>,
+  groups: ReadonlyArray<Pick<WaitingInbox, "environmentId" | "items">>,
   nowMs: number,
+  limit = WAITING_ALERTS_LIMIT,
 ): ReadonlyArray<WaitingAlert> {
   return groups
     .flatMap(({ environmentId, items }) =>
       items
-        .filter(
-          (notification) =>
-            notification.threadId === null &&
-            notification.readAt === null &&
-            notificationTab(notification, nowMs) === "inbox",
-        )
+        .filter((notification) => isUnreadAlert(notification, nowMs))
         .map((notification) => ({ environmentId, notification })),
     )
-    .sort((a, b) => b.notification.updatedAt.localeCompare(a.notification.updatedAt))
-    .slice(0, WAITING_ALERTS_LIMIT);
+    .sort(
+      (a, b) =>
+        ALERT_SEVERITY[a.notification.severity] - ALERT_SEVERITY[b.notification.severity] ||
+        b.notification.updatedAt.localeCompare(a.notification.updatedAt),
+    )
+    .slice(0, limit);
+}
+
+const ALERT_SEVERITY: Record<NotificationSeverity, number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+};
+
+export function isUnreadAlert(notification: Notification, nowMs: number): boolean {
+  return (
+    notification.threadId === null &&
+    notification.readAt === null &&
+    notificationTab(notification, nowMs) === "inbox"
+  );
 }
 
 /** The row's accessible name: what it counts and that it opens a list. */

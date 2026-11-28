@@ -131,6 +131,27 @@ const notification = (id: string, partial: Partial<Notification> = {}): Notifica
 describe("selectWaitingAlerts", () => {
   const now = Date.parse("2026-01-02T00:00:00.000Z");
 
+  it("puts urgent alerts first and keeps newest alerts first within a severity", () => {
+    const groups = [
+      {
+        environmentId: ENV,
+        items: [
+          notification("newer-warning", { updatedAt: "2026-01-01T03:00:00.000Z" }),
+          notification("older-urgent", { severity: "critical" }),
+          notification("newer-urgent", {
+            severity: "critical",
+            updatedAt: "2026-01-01T01:00:00.000Z",
+          }),
+        ],
+      },
+    ];
+    expect(selectWaitingAlerts(groups, now).map(({ notification }) => notification.id)).toEqual([
+      "newer-urgent",
+      "older-urgent",
+      "newer-warning",
+    ]);
+  });
+
   it("keeps unread inbox alerts no thread owns, newest first", () => {
     const alerts = selectWaitingAlerts(
       [

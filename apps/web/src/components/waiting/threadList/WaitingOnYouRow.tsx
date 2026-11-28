@@ -21,8 +21,9 @@ import { toastManager } from "../../ui/toast";
 import { WaitingAnswerIcon, WAITING_KIND_ICON } from "../waitingKindIcon";
 import { WAITING_KIND_LABEL, trackedAnswerCountLabel } from "../waitingStrip.logic";
 import { registerWaitingListOpener } from "./waitingListCommand";
-import { useWaitingOnYou } from "./waitingOnYou";
+import { useAlertInboxes, useWaitingOnYou } from "./waitingOnYou";
 import {
+  isUnreadAlert,
   selectWaitingAlerts,
   waitingListNote,
   waitingRowLabel,
@@ -169,25 +170,52 @@ export function openWaitingView() {
 }
 
 export function WaitingOnYouCount({ mark }: ViewCountProps) {
-  const { threads, inboxes } = useWaitingOnYou();
-  const now = Date.parse(`${useNowMinute()}Z`);
-  if (selectWaitingAlerts(inboxes, now).length > 0) {
-    return (
-      <ViewCount mark={mark} alert>
-        Alerts
-      </ViewCount>
-    );
-  }
+  const { threads } = useWaitingOnYou();
   return threads.waiting.length > 0 ? (
     <ViewCount mark={mark}>{threads.waiting.length}</ViewCount>
   ) : null;
 }
 
 export function WaitingOnYouView() {
-  const { threads, inboxes, unread, machines } = useWaitingOnYou();
+  const { threads, machines } = useWaitingOnYou();
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
-      <WaitingList threads={threads} inboxes={inboxes} unread={unread} machines={machines} />
+      <WaitingList threads={threads} inboxes={[]} unread={0} machines={machines} />
+    </div>
+  );
+}
+
+export function AlertsCount({ mark }: ViewCountProps) {
+  const inboxes = useAlertInboxes();
+  const now = Date.parse(`${useNowMinute()}Z`);
+  return inboxes.some(({ items }) =>
+    items.some((notification) => isUnreadAlert(notification, now)),
+  ) ? (
+    <ViewCount mark={mark} alert>
+      Unread alerts
+    </ViewCount>
+  ) : null;
+}
+
+export function AlertsView() {
+  const inboxes = useAlertInboxes();
+  const now = Date.parse(`${useNowMinute()}Z`);
+  const alerts = selectWaitingAlerts(inboxes, now, Infinity);
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-sm" onKeyDown={moveFocus}>
+      {alerts.length > 0 ? (
+        <WaitingAlerts
+          alerts={alerts}
+          onOpen={({ environmentId, notification }) =>
+            openInboxView({ environmentId, id: notification.id })
+          }
+          showHeading={false}
+        />
+      ) : (
+        <p className="px-2 text-muted-foreground">
+          Unread alerts such as failing status checks and automations appear here.
+        </p>
+      )}
     </div>
   );
 }
@@ -295,31 +323,35 @@ function WaitingList({
 function WaitingAlerts({
   alerts,
   onOpen,
+  showHeading = true,
 }: {
   alerts: ReadonlyArray<WaitingAlert>;
   onOpen: (alert: WaitingAlert) => void;
+  showHeading?: boolean;
 }) {
-  return alerts.length > 0 ? (
-    <Section title="Alerts">
-      {alerts.map((alert) => (
-        <li key={`${alert.environmentId}:${alert.notification.id}`}>
-          <button
-            type="button"
-            data-waiting-list-item=""
-            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            onClick={() => onOpen(alert)}
-          >
-            <span className="min-w-0 flex-1 break-words">{alert.notification.title}</span>
-            {alert.notification.severity === "info" ? null : (
-              <Badge variant={SEVERITY_BADGE[alert.notification.severity]} size="sm">
-                {alert.notification.severity}
-              </Badge>
-            )}
-          </button>
-        </li>
-      ))}
-    </Section>
-  ) : null;
+  if (alerts.length === 0) return null;
+  const rows = alerts.map((alert) => (
+    <li key={`${alert.environmentId}:${alert.notification.id}`}>
+      <button
+        type="button"
+        data-waiting-list-item=""
+        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        onClick={() => onOpen(alert)}
+      >
+        <span className="min-w-0 flex-1 break-words">{alert.notification.title}</span>
+        {alert.notification.severity === "info" ? null : (
+          <Badge variant={SEVERITY_BADGE[alert.notification.severity]} size="sm">
+            {alert.notification.severity}
+          </Badge>
+        )}
+      </button>
+    </li>
+  ));
+  return showHeading ? (
+    <Section title="Alerts">{rows}</Section>
+  ) : (
+    <ul aria-label="Alerts">{rows}</ul>
+  );
 }
 
 function Section({

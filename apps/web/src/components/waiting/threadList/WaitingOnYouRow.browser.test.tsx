@@ -1,4 +1,4 @@
-import type { EnvironmentId, NotificationId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, Notification, NotificationId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -9,9 +9,15 @@ import { useToolSidebarStore } from "../../../toolSidebarStore";
 import { openInbox } from "../../inbox/openInbox";
 import { SidebarProvider } from "../../ui/sidebar";
 import { openWaitingList } from "./waitingListCommand";
-import { useWaitingOnYou } from "./waitingOnYou";
+import { useAlertInboxes, useWaitingOnYou } from "./waitingOnYou";
 import type { WaitingThread } from "./waitingThreads.logic";
-import { WaitingOnYouCount, WaitingOnYouRow, WaitingOnYouView } from "./WaitingOnYouRow";
+import {
+  AlertsCount,
+  AlertsView,
+  WaitingOnYouCount,
+  WaitingOnYouRow,
+  WaitingOnYouView,
+} from "./WaitingOnYouRow";
 
 const entry = (id: string, title: string): WaitingThread => ({
   key: `env-1:${id}`,
@@ -23,6 +29,7 @@ const entry = (id: string, title: string): WaitingThread => ({
 });
 
 vi.mock(import("./waitingOnYou"), () => ({
+  useAlertInboxes: vi.fn(() => []),
   useWaitingOnYou: vi.fn(() => ({
     threads: {
       waiting: [entry("t1", "Retry toast"), entry("t2", "Webhook backoff")],
@@ -99,54 +106,61 @@ it("replaces the wide thread-list row with a side panel entry point", async () =
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "waiting" });
 });
 
-it("counts waiting threads and switches to the destructive mark when an alert is present", async () => {
-  const state = useWaitingOnYou();
+it("marks unread alerts separately from the waiting thread count", async () => {
   await using normal = await render(
-    <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />,
+    <>
+      <AlertsCount target={{ threadRef: null, draft: null }} mark="badge" />
+      <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />
+    </>,
   );
   await expect.element(normal.getByText("2")).toBeVisible();
+  await expect.element(normal.getByText("Unread alerts")).not.toBeInTheDocument();
 
-  await vi.mocked(useWaitingOnYou).withImplementation(
-    () => ({
-      ...state,
-      inboxes: [
-        {
-          environmentId: "env-1" as EnvironmentId,
-          unreadCount: 1,
-          items: [
-            {
-              id: "alert" as NotificationId,
-              createdAt: "2026-01-01T00:00:00.000Z",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-              severity: "warning",
-              title: "Build is failing",
-              source: { kind: "status-source", sourceId: "ci" },
-              threadId: null,
-              projectId: null,
-              readAt: null,
-              dismissedAt: null,
-              snoozedUntil: null,
-              repeatCount: 0,
-            },
-          ],
+  const notification: Notification = {
+    id: "alert" as NotificationId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    severity: "warning",
+    title: "Build is failing",
+    source: { kind: "status-source", sourceId: "ci" },
+    threadId: null,
+    projectId: null,
+    readAt: null,
+    dismissedAt: null,
+    snoozedUntil: null,
+    repeatCount: 0,
+  };
+  const inboxes = [
+    { environmentId: "env-1" as EnvironmentId, unreadCount: 1, items: [notification] },
+  ];
+  const waiting = useWaitingOnYou();
+  await vi.mocked(useAlertInboxes).withImplementation(
+    () => inboxes,
+    () =>
+      vi.mocked(useWaitingOnYou).withImplementation(
+        () => ({ ...waiting, inboxes, unread: 1 }),
+        async () => {
+          await using withAlert = await render(
+            <SidebarProvider defaultOpen>
+              <AlertsCount target={{ threadRef: null, draft: null }} mark="badge" />
+              <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />
+              <div aria-label="Waiting list" role="group">
+                <WaitingOnYouView />
+              </div>
+              <AlertsView />
+            </SidebarProvider>,
+          );
+          expect(withAlert.container.querySelector("[data-view-mark]")).toHaveClass(
+            "bg-destructive",
+          );
+          await expect.element(withAlert.getByText("2", { exact: true })).toBeVisible();
+          const waitingList = withAlert.getByRole("group", { name: "Waiting list" });
+          await expect.element(waitingList.getByText("Build is failing")).not.toBeInTheDocument();
+          expect(withAlert.getByText("Build is failing").elements()).toHaveLength(1);
+          await userEvent.click(withAlert.getByRole("button", { name: /Build is failing/ }));
+          expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
         },
-      ],
-    }),
-    async () => {
-      await using withAlert = await render(
-        <SidebarProvider defaultOpen>
-          <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />
-          <WaitingOnYouView />
-        </SidebarProvider>,
-      );
-      expect(withAlert.container.querySelector("[data-view-mark]")).toHaveClass("bg-destructive");
-      await expect.element(withAlert.getByText("2", { exact: true })).not.toBeInTheDocument();
-      expect(withAlert.getByRole("region").elements()[0]?.getAttribute("aria-label")).toBe(
-        "Alerts",
-      );
-      await userEvent.click(withAlert.getByRole("button", { name: /Build is failing/ }));
-      expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
-    },
+      ),
   );
 });
 

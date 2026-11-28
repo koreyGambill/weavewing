@@ -5,6 +5,8 @@ import { createElement, type ComponentType, type ReactNode } from "react";
 
 import {
   WaitingOnYouView,
+  AlertsCount,
+  AlertsView,
   WaitingOnYouCount,
 } from "../components/waiting/threadList/WaitingOnYouRow";
 import { CalendarTool } from "../components/CalendarTool";
@@ -143,11 +145,21 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
     "details",
     "What the thread is and runs on: workspace, branch, scripts and automations, the Xwing environments it uses, and what the agent loaded and spent.",
   ),
+  alerts: {
+    id: "alerts",
+    title: VIEW_TITLES.alerts,
+    icon: VIEW_ICONS.alerts,
+    about: "Unread alerts that belong to no thread.",
+    scope: "global",
+    minWidthPx: 280,
+    PickerCount: AlertsCount,
+    render: () => createElement(AlertsView),
+  },
   waiting: {
     id: "waiting",
     title: VIEW_TITLES.waiting,
     icon: VIEW_ICONS.waiting,
-    about: "Threads and alerts that need your attention.",
+    about: "Threads with questions, tasks or changes to check.",
     scope: "global",
     minWidthPx: 280,
     PickerCount: WaitingOnYouCount,

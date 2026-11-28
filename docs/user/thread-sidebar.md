@@ -149,17 +149,17 @@ page.
 While the left sidebar is hidden, its toggle shows when something needs you, such as
 an unanswered question or an unread alert.
 
-**Waiting on you** is the first view on the right. Its icon counts threads with
-a question, a change to check or a task waiting for you. A red dot takes the
-place of the count when there are unread alerts that belong to no thread, such as
-a failing status source. These alerts come first in the view. Choose one to open
-it in the Inbox, or choose **Open Inbox** to see all notifications. The threads
-below show what each one needs and, when you have multiple machines connected,
-where it runs. **Waiting on the agent** lists threads where you are discussing
-something with the agent.
+**Alerts** is the first view on the right. A red dot marks unread notifications
+that belong to no thread, such as a failing status source. Alerts are listed by
+severity, then newest first. Choose one to open its details in the Inbox.
 
-On narrow screens, tap **Waiting on you** in the thread list to open the same
-list as a sheet. **Show what is waiting on me** in the command palette opens it
+**Waiting on you** is next. Its icon counts threads with a question, a change to
+check or a task waiting for you. The list shows what each thread needs and, when
+you have multiple machines connected, where it runs. **Waiting on the agent**
+lists threads where you are discussing something with the agent.
+
+On narrow screens, tap **Waiting on you** in the thread list to open a sheet
+with both alerts and waiting threads. **Show what is waiting on me** in the command palette opens it
 too. You can bind a shortcut under **Settings → Keybindings**. Arrow keys move
 through the list and Escape closes the panel or sheet. Turning off
 **Waiting-on-you cards** hides the narrow-screen row and the palette command.

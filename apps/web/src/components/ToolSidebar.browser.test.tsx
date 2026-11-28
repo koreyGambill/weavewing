@@ -1007,26 +1007,26 @@ it("toggles the strip separately from the floating panel", async () => {
   await expect.element(panel).not.toBeInTheDocument();
 });
 
-it("opens the first strip tool at full width and as a tile", async () => {
+it("puts Alerts first and opens it at full width and as a tile", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("waiting", 1)], 1280);
   await using _app = stack;
   const toolbar = screen.getByRole("toolbar", { name: "Side panel views" });
   const waiting = toolbar.getByRole("button", { name: "Waiting on you", exact: true });
-  expect(toolbar.getByRole("button").elements()[0]).toBe(waiting.element());
+  const alerts = toolbar.getByRole("button", { name: "Alerts", exact: true });
+  expect(toolbar.getByRole("button").elements().slice(0, 2)).toEqual([
+    alerts.element(),
+    waiting.element(),
+  ]);
   expect(document.querySelector("[data-waiting-on-you-row]")).toBeNull();
-  await userEvent.click(waiting);
+  await userEvent.click(alerts);
   const panel = screen.getByRole("complementary", { name: "Side panel" });
-  await expect
-    .element(panel.getByRole("heading", { name: "Waiting on you", level: 2 }))
-    .toBeVisible();
+  await expect.element(panel.getByRole("heading", { name: "Alerts", level: 2 })).toBeVisible();
   const top = panel.element().getBoundingClientRect().top;
   await userEvent.click(panel.getByRole("button", { name: "Maximize side panel" }));
   const expanded = panel.element().getBoundingClientRect();
   expect(expanded.left).toBe(0);
   expect(expanded.top).toBe(top);
   await userEvent.click(panel.getByRole("button", { name: "Open as tile" }));
-  await expect
-    .element(screen.getByRole("tab", { name: "Waiting on you", exact: true }))
-    .toBeVisible();
+  await expect.element(screen.getByRole("tab", { name: "Alerts", exact: true })).toBeVisible();
   await expect.element(panel).not.toBeInTheDocument();
 });

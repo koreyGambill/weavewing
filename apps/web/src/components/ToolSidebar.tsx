@@ -790,13 +790,14 @@ function SideAreaStrip() {
     select: (state) => resolveThreadRouteRef(state.matches.at(-1)?.params ?? {}),
   });
   const visible = PANEL_VIEW_DEFINITIONS.filter((entry) => !hidden.includes(entry.id));
+  const priority = visible.filter((entry) => entry.id === "alerts" || entry.id === "waiting");
   const groups = [
-    { id: "waiting", divider: false, entries: visible.filter((entry) => entry.id === "waiting") },
+    { id: "priority", divider: false, entries: priority },
     { id: "thread", divider: false, entries: visible.filter((entry) => entry.scope === "thread") },
     {
       id: "global",
       divider: true,
-      entries: visible.filter((entry) => entry.scope === "global" && entry.id !== "waiting"),
+      entries: visible.filter((entry) => entry.scope === "global" && !priority.includes(entry)),
     },
   ];
   return (

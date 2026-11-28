@@ -2045,6 +2045,16 @@ function OpenCommandPaletteDialog(props: {
   }
   actionItems.push({
     kind: "action",
+    value: "action:alerts",
+    title: "Open alerts",
+    searchTerms: ["alerts", "urgent", "unread", "notifications"],
+    icon: <BellIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      useToolSidebarStore.getState().dispatch({ type: "show", view: "alerts" });
+    },
+  });
+  actionItems.push({
+    kind: "action",
     value: "action:inbox",
     title: "Open inbox",
     searchTerms: ["inbox", "notifications", "alerts", "snoozed", "dismissed"],

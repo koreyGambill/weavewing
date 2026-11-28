@@ -31,6 +31,7 @@ export const VIEW_TITLES: { readonly [Id in ViewId]: string } = {
   activity: "Activity",
   details: "Details",
   automations: "Automations",
+  alerts: "Alerts",
   waiting: "Waiting on you",
   inbox: "Inbox",
   calendar: "Calendar",
@@ -277,9 +278,9 @@ export function storedViewId(view: ViewId, section: ViewSectionId | null = null)
   }
 }
 
-/** Older builds open Inbox when they read a panel saved on Waiting on you. */
+/** Older builds open Inbox for views introduced after their panel IDs. */
 export function storedSideAreaView(view: ViewId, section: ViewSectionId | null) {
-  return view === "waiting"
+  return view === "waiting" || view === "alerts"
     ? { view: "inbox", selectedView: view }
     : { view: storedViewId(view, section) };
 }
