@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, NotificationId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -9,8 +9,9 @@ import { useToolSidebarStore } from "../../../toolSidebarStore";
 import { openInbox } from "../../inbox/openInbox";
 import { SidebarProvider } from "../../ui/sidebar";
 import { openWaitingList } from "./waitingListCommand";
+import { useWaitingOnYou } from "./waitingOnYou";
 import type { WaitingThread } from "./waitingThreads.logic";
-import { WaitingOnYouRow } from "./WaitingOnYouRow";
+import { WaitingOnYouCount, WaitingOnYouRow, WaitingOnYouView } from "./WaitingOnYouRow";
 
 const entry = (id: string, title: string): WaitingThread => ({
   key: `env-1:${id}`,
@@ -22,7 +23,7 @@ const entry = (id: string, title: string): WaitingThread => ({
 });
 
 vi.mock(import("./waitingOnYou"), () => ({
-  useWaitingOnYou: () => ({
+  useWaitingOnYou: vi.fn(() => ({
     threads: {
       waiting: [entry("t1", "Retry toast"), entry("t2", "Webhook backoff")],
       onAgent: [{ ...entry("t3", "Release notes"), counts: [], discussing: 1 }],
@@ -33,7 +34,7 @@ vi.mock(import("./waitingOnYou"), () => ({
     machines: null,
     visible: true,
     enabledCount: 1,
-  }),
+  })),
 }));
 
 it("loads without the cards and chat markdown, so the always-mounted row stays light", () => {
@@ -42,7 +43,7 @@ it("loads without the cards and chat markdown, so the always-mounted row stays l
 });
 
 it("opens from the keyboard, moves with arrows, and hands focus back to the row on Escape", async () => {
-  await page.viewport(1280, 800);
+  await page.viewport(390, 844);
   await using screen = await render(
     <SidebarProvider defaultOpen>
       <WaitingOnYouRow />
@@ -74,7 +75,7 @@ it("opens from the keyboard, moves with arrows, and hands focus back to the row 
 });
 
 it("opens the Inbox view in the side panel from the list", async () => {
-  await page.viewport(1280, 800);
+  await page.viewport(390, 844);
   useToolSidebarStore.getState().dispatch({ type: "close" });
   await using screen = await render(
     <SidebarProvider defaultOpen>
@@ -86,18 +87,67 @@ it("opens the Inbox view in the side panel from the list", async () => {
   expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
 });
 
-it("opens the Inbox instead of a list anchored to a row the thread list hides", async () => {
+it("replaces the wide thread-list row with a side panel entry point", async () => {
   await page.viewport(1280, 800);
   await using screen = await render(
     <SidebarProvider defaultOpen>
-      {/* A rail view covering the thread list hides it the same way. */}
-      <div hidden>
-        <WaitingOnYouRow />
-      </div>
+      <WaitingOnYouRow />
     </SidebarProvider>,
   );
-  expect(openWaitingList()).toBe(false);
-  expect(screen.container.querySelector("[data-waiting-list-item]")).toBeNull();
+  expect(screen.container.querySelector("[data-waiting-on-you-row]")).toBeNull();
+  expect(openWaitingList()).toBe(true);
+  expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "waiting" });
+});
+
+it("counts waiting threads and switches to the destructive mark when an alert is present", async () => {
+  const state = useWaitingOnYou();
+  await using normal = await render(
+    <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />,
+  );
+  await expect.element(normal.getByText("2")).toBeVisible();
+
+  await vi.mocked(useWaitingOnYou).withImplementation(
+    () => ({
+      ...state,
+      inboxes: [
+        {
+          environmentId: "env-1" as EnvironmentId,
+          unreadCount: 1,
+          items: [
+            {
+              id: "alert" as NotificationId,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              severity: "warning",
+              title: "Build is failing",
+              source: { kind: "status-source", sourceId: "ci" },
+              threadId: null,
+              projectId: null,
+              readAt: null,
+              dismissedAt: null,
+              snoozedUntil: null,
+              repeatCount: 0,
+            },
+          ],
+        },
+      ],
+    }),
+    async () => {
+      await using withAlert = await render(
+        <SidebarProvider defaultOpen>
+          <WaitingOnYouCount target={{ threadRef: null, draft: null }} mark="badge" />
+          <WaitingOnYouView />
+        </SidebarProvider>,
+      );
+      expect(withAlert.container.querySelector("[data-view-mark]")).toHaveClass("bg-destructive");
+      await expect.element(withAlert.getByText("2", { exact: true })).not.toBeInTheDocument();
+      expect(withAlert.getByRole("region").elements()[0]?.getAttribute("aria-label")).toBe(
+        "Alerts",
+      );
+      await userEvent.click(withAlert.getByRole("button", { name: /Build is failing/ }));
+      expect(useToolSidebarStore.getState()).toMatchObject({ open: true, view: "inbox" });
+    },
+  );
 });
 
 it("opens the side panel's Inbox at every width", async () => {

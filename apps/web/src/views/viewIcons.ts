@@ -9,6 +9,7 @@ import {
   IdCardIcon,
   LinkIcon,
   ListChecksIcon,
+  UserRoundIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -23,6 +24,7 @@ export const VIEW_ICONS: { readonly [Id in ViewId]: LucideIcon } = {
   activity: ChartGanttIcon,
   details: IdCardIcon,
   automations: CalendarClockIcon,
+  waiting: UserRoundIcon,
   inbox: BellIcon,
   calendar: CalendarIcon,
   status: ActivityIcon,

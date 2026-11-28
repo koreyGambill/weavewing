@@ -3,6 +3,10 @@ import type { DraftId } from "../composerDraftStore";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ComponentType, type ReactNode } from "react";
 
+import {
+  WaitingOnYouView,
+  WaitingOnYouCount,
+} from "../components/waiting/threadList/WaitingOnYouRow";
 import { CalendarTool } from "../components/CalendarTool";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import {
@@ -139,6 +143,16 @@ const DEFINITIONS: { readonly [Id in RegisteredViewId]: ViewDefinition & { reado
     "details",
     "What the thread is and runs on: workspace, branch, scripts and automations, the Xwing environments it uses, and what the agent loaded and spent.",
   ),
+  waiting: {
+    id: "waiting",
+    title: VIEW_TITLES.waiting,
+    icon: VIEW_ICONS.waiting,
+    about: "Threads and alerts that need your attention.",
+    scope: "global",
+    minWidthPx: 280,
+    PickerCount: WaitingOnYouCount,
+    render: () => createElement(WaitingOnYouView),
+  },
   inbox: {
     id: "inbox",
     title: VIEW_TITLES.inbox,

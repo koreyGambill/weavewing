@@ -5,7 +5,14 @@ import * as Schema from "effect/Schema";
 const THREAD_VIEW_IDS = ["checklist", "artifacts", "links", "activity", "details"] as const;
 
 /** The views that span threads, in the picker's order. */
-const GLOBAL_VIEW_IDS = ["inbox", "evidence", "automations", "calendar", "status"] as const;
+const GLOBAL_VIEW_IDS = [
+  "waiting",
+  "inbox",
+  "evidence",
+  "automations",
+  "calendar",
+  "status",
+] as const;
 
 export type ThreadViewId = (typeof THREAD_VIEW_IDS)[number];
 export type GlobalViewId = (typeof GLOBAL_VIEW_IDS)[number];
@@ -24,6 +31,7 @@ export const VIEW_TITLES: { readonly [Id in ViewId]: string } = {
   activity: "Activity",
   details: "Details",
   automations: "Automations",
+  waiting: "Waiting on you",
   inbox: "Inbox",
   calendar: "Calendar",
   status: "Status",

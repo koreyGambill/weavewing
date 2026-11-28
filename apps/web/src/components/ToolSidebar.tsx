@@ -781,11 +781,16 @@ function SideAreaStrip() {
   const tileOwner = useRouterState({
     select: (state) => resolveThreadRouteRef(state.matches.at(-1)?.params ?? {}),
   });
-  const groups = (["thread", "global"] as const)
-    .map((scope) =>
-      PANEL_VIEW_DEFINITIONS.filter((entry) => entry.scope === scope && !hidden.includes(entry.id)),
-    )
-    .filter((entries) => entries.length > 0);
+  const visible = PANEL_VIEW_DEFINITIONS.filter((entry) => !hidden.includes(entry.id));
+  const groups = [
+    { id: "waiting", divider: false, entries: visible.filter((entry) => entry.id === "waiting") },
+    { id: "thread", divider: false, entries: visible.filter((entry) => entry.scope === "thread") },
+    {
+      id: "global",
+      divider: true,
+      entries: visible.filter((entry) => entry.scope === "global" && entry.id !== "waiting"),
+    },
+  ];
   return (
     <div
       id="side-area-strip"
@@ -796,50 +801,52 @@ function SideAreaStrip() {
       className="absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex w-11 flex-col items-center border-l bg-background py-1 [-webkit-app-region:no-drag]"
     >
       <div className="flex min-h-0 w-full flex-col items-center gap-1 overflow-y-auto py-1 [scrollbar-width:none]">
-        {groups.map((entries, index) => (
-          <Fragment key={entries[0]?.scope}>
-            {index > 0 ? <div role="separator" className="h-px w-5 shrink-0 bg-border" /> : null}
-            {entries.map((entry) => {
-              const viewThread = entry.scope === "thread" ? thread : null;
-              const draggable =
-                tileOwner !== null &&
-                canPromoteToTile(entry) &&
-                (entry.scope === "global" || viewThread !== null);
-              return (
-                <Tooltip key={entry.id}>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        data-strip-view={entry.id}
-                        aria-label={entry.title}
-                        aria-pressed={active === entry.id}
-                        size="icon-sm"
-                        variant={active === entry.id ? "secondary" : "ghost"}
-                        draggable={draggable}
-                        onClick={() => dispatch({ type: "pressStripView", view: entry.id })}
-                        onDragStart={(event) => {
-                          if (!draggable) return;
-                          event.dataTransfer.setData(VIEW_DRAG_TYPE, entry.id);
-                          event.dataTransfer.effectAllowed = "move";
-                          useViewDragStore.setState({
-                            drag: { viewId: entry.id, thread: viewThread },
-                          });
-                        }}
-                        onDragEnd={() => useViewDragStore.setState({ drag: null })}
-                      />
-                    }
-                  >
-                    <span className="relative flex">
-                      <entry.icon />
-                      <StripViewMark entry={entry} target={{ threadRef: thread, draft: null }} />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipPopup side="left">{entry.title}</TooltipPopup>
-                </Tooltip>
-              );
-            })}
-          </Fragment>
-        ))}
+        {groups
+          .filter(({ entries }) => entries.length > 0)
+          .map(({ id, divider, entries }) => (
+            <Fragment key={id}>
+              {divider ? <div role="separator" className="h-px w-5 shrink-0 bg-border" /> : null}
+              {entries.map((entry) => {
+                const viewThread = entry.scope === "thread" ? thread : null;
+                const draggable =
+                  tileOwner !== null &&
+                  canPromoteToTile(entry) &&
+                  (entry.scope === "global" || viewThread !== null);
+                return (
+                  <Tooltip key={entry.id}>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          data-strip-view={entry.id}
+                          aria-label={entry.title}
+                          aria-pressed={active === entry.id}
+                          size="icon-sm"
+                          variant={active === entry.id ? "secondary" : "ghost"}
+                          draggable={draggable}
+                          onClick={() => dispatch({ type: "pressStripView", view: entry.id })}
+                          onDragStart={(event) => {
+                            if (!draggable) return;
+                            event.dataTransfer.setData(VIEW_DRAG_TYPE, entry.id);
+                            event.dataTransfer.effectAllowed = "move";
+                            useViewDragStore.setState({
+                              drag: { viewId: entry.id, thread: viewThread },
+                            });
+                          }}
+                          onDragEnd={() => useViewDragStore.setState({ drag: null })}
+                        />
+                      }
+                    >
+                      <span className="relative flex">
+                        <entry.icon />
+                        <StripViewMark entry={entry} target={{ threadRef: thread, draft: null }} />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipPopup side="left">{entry.title}</TooltipPopup>
+                  </Tooltip>
+                );
+              })}
+            </Fragment>
+          ))}
       </div>
       <div className="mt-auto pt-1">
         <ViewPicker

@@ -1,4 +1,5 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useToolSidebarStore } from "../../../toolSidebarStore";
+import { ViewCount, type ViewCountProps } from "../../../views/ViewCount";
 import type { NotificationSeverity, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { BellIcon, UserRoundIcon } from "lucide-react";
@@ -7,20 +8,16 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { useMediaQuery } from "../../../hooks/useMediaQuery";
 import { useNowMinute } from "../../../hooks/useNowMinute";
 import { useStableCallback } from "../../../hooks/useStableCallback";
-import { shortcutLabelForCommand } from "../../../keybindings";
 import { cn } from "../../../lib/utils";
 import { registerCommands } from "../../../shortcuts/dispatcher";
-import { primaryServerKeybindingsAtom } from "../../../state/server";
 import { buildThreadRouteParams } from "../../../threadRoutes";
 import { SIDE_AREA_WIDE_MEDIA_QUERY } from "../../ToolSidebar.logic";
 import { openInboxView } from "../../inbox/openInbox";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
-import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
 import { Sheet, SheetHeader, SheetPopup, SheetTitle } from "../../ui/sheet";
 import { SidebarMenuButton, useSidebar } from "../../ui/sidebar";
 import { toastManager } from "../../ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { WaitingAnswerIcon, WAITING_KIND_ICON } from "../waitingKindIcon";
 import { WAITING_KIND_LABEL, trackedAnswerCountLabel } from "../waitingStrip.logic";
 import { registerWaitingListOpener } from "./waitingListCommand";
@@ -60,13 +57,14 @@ export function WaitingOnYouRow() {
   if (!visible && open) setOpen(false);
   const sidebar = useSidebar();
   const wide = useMediaQuery(SIDE_AREA_WIDE_MEDIA_QUERY);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const shortcut = shortcutLabelForCommand(keybindings, "waiting.show");
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
-  // Opens the list only where the row is on screen to anchor it: a rail view covering the thread
-  // list hides the row, while a collapsed desktop sidebar only slides it away and reopens.
   const show = useStableCallback((): boolean => {
+    if (wide && visible) {
+      openWaitingView();
+      return true;
+    }
     const row = triggerRef.current;
     if (!visible || row === null || !row.checkVisibility()) return false;
     if (sidebar.isMobile) {
@@ -89,7 +87,7 @@ export function WaitingOnYouRow() {
         if (action === "empty") {
           toastManager.add({ type: "info", title: "Nothing is waiting on you", timeout: 2000 });
         } else if (!show()) {
-          openInboxView();
+          openWaitingView();
         }
       },
     });
@@ -99,7 +97,7 @@ export function WaitingOnYouRow() {
     };
   }, [show, visible, enabledCount]);
 
-  if (!visible) return null;
+  if (wide || !visible) return null;
 
   const waitingCount = threads.waiting.length;
   const label = waitingRowLabel(waitingCount, unread);
@@ -111,7 +109,7 @@ export function WaitingOnYouRow() {
       aria-haspopup="dialog"
       aria-expanded={open}
       data-waiting-on-you-row
-      onClick={wide ? undefined : () => setOpen(true)}
+      onClick={() => setOpen(true)}
     >
       <UserRoundIcon />
       <span className="min-w-0 flex-1 truncate text-sidebar-foreground">Waiting on you</span>
@@ -143,48 +141,56 @@ export function WaitingOnYouRow() {
       machines={machines}
       onDone={close}
       returnFocus={() => triggerRef.current?.focus({ preventScroll: true })}
-      titled={!wide}
     />
   );
 
   return (
     <div className="pt-1">
-      {wide ? (
-        <Popover open={open} onOpenChange={setOpen}>
-          <Tooltip>
-            <TooltipTrigger render={<PopoverTrigger render={trigger} />} />
-            <TooltipPopup side="right">
-              {shortcut ? `What is waiting on you (${shortcut})` : "What is waiting on you"}
-            </TooltipPopup>
-          </Tooltip>
-          <PopoverPopup
-            side="right"
-            align="start"
-            width="md"
-            padding="compact"
-            initialFocus={firstItem}
-          >
-            {list}
-          </PopoverPopup>
-        </Popover>
-      ) : (
-        <>
-          {trigger}
-          <Sheet open={open} onOpenChange={setOpen}>
-            <SheetPopup side="bottom" initialFocus={firstItem} finalFocus={triggerRef}>
-              <SheetHeader>
-                <SheetTitle>Waiting on you</SheetTitle>
-              </SheetHeader>
-              <div className="min-h-0 overflow-y-auto px-3 pb-4">{list}</div>
-            </SheetPopup>
-          </Sheet>
-        </>
-      )}
+      {trigger}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetPopup
+          ref={sheetRef}
+          side="bottom"
+          initialFocus={() => sheetRef.current?.querySelector<HTMLElement>(ITEM) ?? true}
+          finalFocus={triggerRef}
+        >
+          <SheetHeader>
+            <SheetTitle>Waiting on you</SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 overflow-y-auto px-3 pb-4">{list}</div>
+        </SheetPopup>
+      </Sheet>
     </div>
   );
 }
 
-const firstItem = () => document.querySelector<HTMLElement>(ITEM) ?? true;
+export function openWaitingView() {
+  useToolSidebarStore.getState().dispatch({ type: "show", view: "waiting" });
+}
+
+export function WaitingOnYouCount({ mark }: ViewCountProps) {
+  const { threads, inboxes } = useWaitingOnYou();
+  const now = Date.parse(`${useNowMinute()}Z`);
+  if (selectWaitingAlerts(inboxes, now).length > 0) {
+    return (
+      <ViewCount mark={mark} alert>
+        Alerts
+      </ViewCount>
+    );
+  }
+  return threads.waiting.length > 0 ? (
+    <ViewCount mark={mark}>{threads.waiting.length}</ViewCount>
+  ) : null;
+}
+
+export function WaitingOnYouView() {
+  const { threads, inboxes, unread, machines } = useWaitingOnYou();
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
+      <WaitingList threads={threads} inboxes={inboxes} unread={unread} machines={machines} />
+    </div>
+  );
+}
 
 /** Arrow keys, Home and End move between the list's rows and its Open Inbox button. */
 function moveFocus(event: KeyboardEvent<HTMLDivElement>) {
@@ -213,16 +219,13 @@ function WaitingList({
   machines,
   onDone,
   returnFocus,
-  titled,
 }: {
   threads: WaitingThreads;
   inboxes: ReturnType<typeof useWaitingOnYou>["inboxes"];
   unread: number;
   machines: ReturnType<typeof useWaitingOnYou>["machines"];
-  onDone: () => void;
-  returnFocus: () => void;
-  /** The sheet already says "Waiting on you" in its title. */
-  titled: boolean;
+  onDone?: () => void;
+  returnFocus?: () => void;
 }) {
   const navigate = useNavigate();
   const sidebar = useSidebar();
@@ -231,15 +234,15 @@ function WaitingList({
   const note = waitingListNote(threads, alerts.length, unread);
 
   const openThread = (ref: ScopedThreadRef) => {
-    onDone();
+    onDone?.();
     if (sidebar.isMobile) sidebar.setOpenMobile(false);
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
   };
   // Focus goes back to the row first, so closing the side panel later returns it there.
   const openInbox = (alert: WaitingAlert | null) => {
-    onDone();
+    onDone?.();
     if (sidebar.isMobile) sidebar.setOpenMobile(false);
-    else returnFocus();
+    else returnFocus?.();
     openInboxView(
       alert ? { environmentId: alert.environmentId, id: alert.notification.id } : undefined,
     );
@@ -247,14 +250,9 @@ function WaitingList({
 
   return (
     <div className="flex flex-col gap-2 py-1 text-sm" onKeyDown={moveFocus}>
+      <WaitingAlerts alerts={alerts} onOpen={openInbox} />
       {threads.waiting.length > 0 ? (
-        <Section
-          title={
-            titled
-              ? `Threads · ${threads.waiting.length}`
-              : `Waiting on you · ${threads.waiting.length} ${threads.waiting.length === 1 ? "thread" : "threads"}`
-          }
-        >
+        <Section title={`Threads · ${threads.waiting.length}`}>
           {threads.waiting.map((thread) => (
             <ThreadEntry
               key={thread.key}
@@ -278,27 +276,6 @@ function WaitingList({
           ))}
         </Section>
       ) : null}
-      {alerts.length > 0 ? (
-        <Section title="Alerts">
-          {alerts.map((alert) => (
-            <li key={`${alert.environmentId}:${alert.notification.id}`}>
-              <button
-                type="button"
-                data-waiting-list-item=""
-                className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                onClick={() => openInbox(alert)}
-              >
-                <span className="min-w-0 flex-1 break-words">{alert.notification.title}</span>
-                {alert.notification.severity === "info" ? null : (
-                  <Badge variant={SEVERITY_BADGE[alert.notification.severity]} size="sm">
-                    {alert.notification.severity}
-                  </Badge>
-                )}
-              </button>
-            </li>
-          ))}
-        </Section>
-      ) : null}
       {note ? <p className="px-2 text-muted-foreground">{note}</p> : null}
       <Button
         variant="outline"
@@ -313,6 +290,36 @@ function WaitingList({
       </Button>
     </div>
   );
+}
+
+function WaitingAlerts({
+  alerts,
+  onOpen,
+}: {
+  alerts: ReadonlyArray<WaitingAlert>;
+  onOpen: (alert: WaitingAlert) => void;
+}) {
+  return alerts.length > 0 ? (
+    <Section title="Alerts">
+      {alerts.map((alert) => (
+        <li key={`${alert.environmentId}:${alert.notification.id}`}>
+          <button
+            type="button"
+            data-waiting-list-item=""
+            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            onClick={() => onOpen(alert)}
+          >
+            <span className="min-w-0 flex-1 break-words">{alert.notification.title}</span>
+            {alert.notification.severity === "info" ? null : (
+              <Badge variant={SEVERITY_BADGE[alert.notification.severity]} size="sm">
+                {alert.notification.severity}
+              </Badge>
+            )}
+          </button>
+        </li>
+      ))}
+    </Section>
+  ) : null;
 }
 
 function Section({

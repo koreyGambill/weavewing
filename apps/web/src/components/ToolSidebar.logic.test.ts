@@ -56,6 +56,7 @@ describe("side area", () => {
       "links",
       "activity",
       "details",
+      "waiting",
       "inbox",
       "evidence",
       "automations",

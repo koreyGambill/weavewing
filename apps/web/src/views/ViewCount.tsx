@@ -1,3 +1,4 @@
+import { cn } from "../lib/utils";
 import { MenuItemDetail } from "../components/ui/menu";
 import type { ViewTarget } from "./viewRegistry";
 
@@ -9,8 +10,10 @@ export interface ViewCountProps {
 export function ViewCount({
   children,
   mark,
+  alert = false,
 }: {
   children: number | string;
+  alert?: boolean;
   mark: ViewCountProps["mark"];
 }) {
   if (!mark) return <MenuItemDetail>{children}</MenuItemDetail>;
@@ -18,7 +21,10 @@ export function ViewCount({
     return (
       <span
         data-view-mark
-        className="pointer-events-none absolute -right-1 -top-1 size-2 rounded-full bg-warning ring-2 ring-background"
+        className={cn(
+          "pointer-events-none absolute -right-1 -top-1 size-2 rounded-full ring-2 ring-background",
+          alert ? "bg-destructive" : "bg-warning",
+        )}
       >
         <span className="sr-only">{children}</span>
       </span>

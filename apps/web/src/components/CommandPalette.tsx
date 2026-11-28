@@ -204,7 +204,8 @@ import { useCanTrackAnswerTarget } from "./answers/trackedAnswers-availability";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useQueuedRunEditTarget } from "./chat/useQueuedRunEdit";
 import { openTrackedAnswersSection } from "./answers/AnswersSection";
-import { openInbox, openInboxView } from "./inbox/openInbox";
+import { openInbox } from "./inbox/openInbox";
+import { openWaitingView } from "./waiting/threadList/WaitingOnYouRow";
 import { openWaitingList } from "./waiting/threadList/waitingListCommand";
 import { useWaitingOnYou } from "./waiting/threadList/waitingOnYou";
 import {
@@ -2038,8 +2039,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <UserRoundIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "waiting.show",
       run: async () => {
-        // Without a thread list on screen, the Inbox is where the same things wait.
-        if (!openWaitingList()) openInboxView();
+        if (!openWaitingList()) openWaitingView();
       },
     });
   }
