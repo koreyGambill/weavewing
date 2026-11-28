@@ -129,7 +129,8 @@ import {
   savedLayoutTree,
   toSavedTileNode,
 } from "../../savedTileLayouts";
-import { SaveTileLayoutDialog } from "./TileLayoutDialog";
+import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
+import { SaveTileLayoutDialog, TileLayoutsMenu } from "./TileLayoutsMenu";
 import { moveViewToSidePanel, placeDroppedView } from "./viewTileActions";
 import { useViewDragStore } from "../../views/viewDragStore";
 import { isViewArea, viewIdFromArea, viewSurface } from "../../views/viewTiles.logic";
@@ -1033,28 +1034,18 @@ export function ThreadTileWorkspace(props: {
     const layout = tileLayouts.layouts.find((entry) => entry.id === layoutId);
     if (!layout) return;
     if (kind === "apply") applySavedLayout(layout);
-    else if (kind === "replace") saveLayoutAs(layout.id);
     else if (kind === "projectDefault") tileLayouts.setProjectDefault(layout.id);
     else tileLayouts.setGlobalDefault(layout.id);
   });
   const saveLayoutFromMenu = useEffectEvent(() => saveLayoutAs());
-  const setProjectLayoutDefault = useEffectEvent((id: null | undefined) =>
-    tileLayouts.setProjectDefault(id),
-  );
-  const clearGlobalLayoutDefault = useEffectEvent(() => tileLayouts.setGlobalDefault(null));
   const layoutIds = tileLayouts.layouts.map((layout) => layout.id).join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the palette's saved-layout actions for this mounted thread
   useEffect(() => {
     if (props.terminalsOnly) return;
     const disposers = [
       registerMenuAction("workspace.tile.layout.save", () => saveLayoutFromMenu()),
-      registerMenuAction("workspace.tile.layout.inheritProject", () =>
-        setProjectLayoutDefault(undefined),
-      ),
-      registerMenuAction("workspace.tile.layout.clearProject", () => setProjectLayoutDefault(null)),
-      registerMenuAction("workspace.tile.layout.clearGlobal", () => clearGlobalLayoutDefault()),
       ...(layoutIds ? layoutIds.split("\n") : []).flatMap((layoutId) =>
-        ["apply", "replace", "projectDefault", "globalDefault"].map((kind) =>
+        ["apply", "projectDefault", "globalDefault"].map((kind) =>
           registerMenuAction(`workspace.tile.layout.${kind}:${layoutId}`, () =>
             runLayoutAction(kind, layoutId),
           ),
@@ -1212,6 +1203,17 @@ export function ThreadTileWorkspace(props: {
       : undefined;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
+      {props.terminalsOnly ? null : (
+        <WorkspaceTitlebarControls>
+          <TileLayoutsMenu
+            api={tileLayouts}
+            hasProject={tileLayouts.projectId !== null}
+            onSaveAs={() => saveLayoutAs()}
+            onReplace={saveLayoutAs}
+            onApply={applySavedLayout}
+          />
+        </WorkspaceTitlebarControls>
+      )}
       <div className="relative shrink-0">{props.header}</div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div

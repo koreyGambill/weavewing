@@ -1,3 +1,4 @@
+import { BackgroundThreadContext } from "./backgroundThread";
 import { useState } from "react";
 import { WorkspaceTitlebarControlsHost } from "../WorkspaceTitlebar";
 import { dispatchMenuAction } from "../../shortcuts/dispatcher";
@@ -22,7 +23,6 @@ import {
   useRightPanelStore,
 } from "../../rightPanelStore";
 import { getTileGroups, isNewTab, newTabId, TILE_MIN_WIDTH_PX } from "../../threadTileLayout";
-import { tileLayoutPaletteItems } from "./tilePaletteItems";
 import { ThreadTileWorkspace } from "./ThreadTileWorkspace";
 
 const tabTitles = vi.hoisted(() => new Map<string, string>());
@@ -892,36 +892,32 @@ it("leaves Escape in a maximized terminal even when the shortcut context is stal
   expect(layout().maximizedGroupId).toBe("terminal-group");
 });
 
-it("keeps layout actions in the palette and out of the title bar", async () => {
+it("opens layout actions from the title bar and saves the current workspace", async () => {
   const target = DEFAULT_TILE_LAYOUTS[0]!;
   await using fixture = await setup(false, false, false, [target]);
   const { screen } = fixture;
   const controls = document.querySelector('[aria-label="Title bar controls"]')!;
-  expect(controls.querySelector('button[aria-label="Layouts"]')).toBeNull();
-  const items = tileLayoutPaletteItems("", [target], true);
-  expect(items.map(({ title }) => title)).toEqual(
-    expect.arrayContaining([
-      "Save Tile Layout As…",
-      `Replace Tile Layout: ${target.name}`,
-      `Apply Tile Layout: ${target.name}`,
-      `Use Tile Layout for New Threads in This Project: ${target.name}`,
-      `Use Tile Layout for All New Threads: ${target.name}`,
-      "Use Global Default Tile Layout for This Project",
-      "Clear Default Tile Layout for This Project",
-      "Clear Default Tile Layout for All Projects",
-      "Open Links and Previews in Focused Tile",
-      "Open Web Links in the System Browser",
-      "Open Links and Previews in Tile 1",
-      "Open Links and Previews in Tile 2",
-    ]),
-  );
-  const run = (title: string) => items.find((item) => item.title === title)!.run();
-  await run("Save Tile Layout As…");
+  expect(controls.querySelector('button[aria-label="Layouts"]')).not.toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+  await page.viewport(390, 800);
+  await expect
+    .element(screen.getByRole("button", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("menu", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await page.viewport(1100, 800);
+  await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "Save layout as…", exact: true }));
   await expect
     .element(screen.getByRole("dialog", { name: "Save layout", exact: true }))
     .toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-  const replaceLayout = () => run(`Replace Tile Layout: ${target.name}`);
+  const replaceLayout = async () => {
+    await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Replace layout", exact: true }));
+    await userEvent.click(screen.getByRole("menuitem", { name: target.name, exact: true }));
+  };
   await replaceLayout();
   const confirmation = screen.getByRole("dialog", { name: "Replace layout", exact: true });
   await expect
@@ -936,6 +932,17 @@ it("keeps layout actions in the palette and out of the title bar", async () => {
     expect.objectContaining({ kind: expect.any(String) }),
     target.id,
   );
+
+  await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }).first());
+  await expect
+    .element(screen.getByRole("menuitem", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await screen.rerender(
+    <BackgroundThreadContext value={true}>{fixture.workspace}</BackgroundThreadContext>,
+  );
+  await expect
+    .element(screen.getByRole("button", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
 });
 
 it("runs leader commands from terminal focus and keeps keyboard resize active until Enter", async () => {
