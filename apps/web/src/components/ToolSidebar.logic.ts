@@ -6,6 +6,7 @@ const THREAD_VIEW_IDS = ["checklist", "artifacts", "links", "activity", "details
 
 /** The views that span threads, in the picker's order. */
 const GLOBAL_VIEW_IDS = [
+  "alerts",
   "waiting",
   "inbox",
   "evidence",
