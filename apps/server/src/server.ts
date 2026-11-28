@@ -1006,7 +1006,13 @@ const layerMakeServer = Layer.unwrap(
     const config = yield* ServerConfig.ServerConfig;
     // Before anything opens the database: one server per T3 home.
     recordStartupTiming("ownership.start");
-    const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
+    const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath, {
+      wslDesktop:
+        config.mode === "desktop" &&
+        config.desktopBootstrapSecret !== undefined &&
+        (yield* HostProcess.Platform) === "linux" &&
+        (yield* HostProcess.Environment).WSL_DISTRO_NAME !== undefined,
+    });
     recordStartupTiming("ownership.end");
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);

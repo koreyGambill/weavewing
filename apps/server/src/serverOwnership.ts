@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Runtime from "effect/Runtime";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import {
@@ -80,11 +81,12 @@ const isSqliteBusy = (cause: unknown) =>
 
 // Pre-lock servers publish only runtime state; require start-time proof of PID reuse before treating it as stale.
 const legacyOwnerIsLive = Effect.fn("legacyOwnerIsLive")(function* (
-  state: PersistedServerRuntimeState,
+  state: Pick<PersistedServerRuntimeState, "pid" | "startedAt">,
+  unknownIsLive = true,
 ) {
   if (!isProcessAlive(state.pid)) return false;
   const recordedAt = Date.parse(state.startedAt);
-  if (!Number.isFinite(recordedAt)) return true;
+  if (!Number.isFinite(recordedAt)) return unknownIsLive;
   const platform = yield* HostProcess.Platform;
   const runner = yield* ProcessRunner.ProcessRunner;
   const result = yield* runner
@@ -98,6 +100,7 @@ const legacyOwnerIsLive = Effect.fn("legacyOwnerIsLive")(function* (
     Option.isSome(result) && result.value.code === 0 ? result.value.stdout : undefined,
     recordedAt,
     platform,
+    unknownIsLive,
   );
 });
 
@@ -218,8 +221,9 @@ export const holdServerOwnershipLock = Effect.fn("holdServerOwnershipLock")(func
 });
 
 /** Hold an exclusive lock on the state directory until the scope closes. */
-export const acquireServerOwnership = Effect.fn("acquireServerOwnership")(function* (
+const acquireOwnership = Effect.fn("acquireOwnership")(function* (
   statePath: string,
+  waitForRelease = false,
 ) {
   const stateDir = NodePath.dirname(statePath);
   const random = yield* SecureRandom.SecureRandom;
@@ -227,16 +231,27 @@ export const acquireServerOwnership = Effect.fn("acquireServerOwnership")(functi
     .uuidV4()
     .pipe(Effect.mapError((cause) => new ServerOwnershipError({ stateDir, cause })));
   const lockPath = ownershipLockPath(stateDir);
-  const lock = yield* Effect.acquireRelease(openOwnershipLock(stateDir), ({ db }) =>
-    readPersistedServerRuntimeState(statePath).pipe(
-      Effect.flatMap((state) =>
-        Option.isSome(state) && state.value.ownerId === ownerId
-          ? clearPersistedServerRuntimeState(statePath)
-          : Effect.void,
+  const openLock = openOwnershipLock(stateDir);
+  const lock = yield* Effect.acquireRelease(
+    waitForRelease
+      ? openLock.pipe(
+          Effect.retry({
+            while: (error) => error._tag === "ServerAlreadyRunningError",
+            schedule: Schedule.spaced("250 millis"),
+            times: 60,
+          }),
+        )
+      : openLock,
+    ({ db }) =>
+      readPersistedServerRuntimeState(statePath).pipe(
+        Effect.flatMap((state) =>
+          Option.isSome(state) && state.value.ownerId === ownerId
+            ? clearPersistedServerRuntimeState(statePath)
+            : Effect.void,
+        ),
+        Effect.ignore({ log: true }),
+        Effect.ensuring(Effect.sync(() => db.close())),
       ),
-      Effect.ignore({ log: true }),
-      Effect.ensuring(Effect.sync(() => db.close())),
-    ),
   );
 
   const previous = yield* readPersistedServerRuntimeState(statePath).pipe(
@@ -291,4 +306,115 @@ export const acquireServerOwnership = Effect.fn("acquireServerOwnership")(functi
     publish: (state: PersistedServerRuntimeState) =>
       persistServerRuntimeState({ path: statePath, state: { ...state, ownerId } }),
   };
+});
+
+export const acquireServerOwnership = Effect.fn("acquireServerOwnership")(function* (
+  statePath: string,
+  options?: { readonly wslDesktop: boolean },
+) {
+  const stateDir = NodePath.dirname(statePath);
+  if (!options?.wslDesktop || NodePath.basename(stateDir) !== "userdata") {
+    return yield* acquireOwnership(statePath);
+  }
+
+  const baseDir = NodePath.dirname(stateDir);
+  const launchDir = NodePath.join(baseDir, "ssh-launch");
+  const launchLock = NodePath.join(launchDir, ".launch.lock");
+  const takeLaunchLock = Effect.try({
+    try: () => {
+      NodeFS.mkdirSync(launchDir, { recursive: true });
+      NodeFS.writeFileSync(launchLock, String(process.pid) + "\n", { flag: "wx" });
+    },
+    catch: (cause) => new ServerOwnershipError({ stateDir, cause }),
+  });
+  // The SSH launcher must see the new SQLite owner before it can start another server.
+  return yield* Effect.acquireUseRelease(
+    takeLaunchLock.pipe(
+      Effect.retry({
+        while: ({ cause }) => cause instanceof Error && "code" in cause && cause.code === "EEXIST",
+        schedule: Schedule.spaced("250 millis"),
+        times: 60,
+      }),
+      Effect.option,
+    ),
+    (launchLocked) =>
+      acquireOwnership(statePath).pipe(
+        Effect.catchTags({
+          ServerAlreadyRunningError: Effect.fn("recoverSshOwner")(function* (error) {
+            if (Option.isNone(launchLocked)) return yield* error;
+            const runtime = yield* readPersistedServerRuntimeState(statePath).pipe(
+              Effect.orElseSucceed(() => Option.none()),
+            );
+            if (
+              Option.isNone(runtime) ||
+              !runtime.value.ownerId ||
+              runtime.value.serviceManaged ||
+              !Number.isSafeInteger(runtime.value.pid) ||
+              runtime.value.pid <= 1 ||
+              runtime.value.pid === process.pid
+            ) {
+              return yield* error;
+            }
+
+            const { pid, port } = runtime.value;
+            const fs = yield* FileSystem.FileSystem;
+            const read = (path: string) =>
+              fs.readFileString(path).pipe(Effect.orElseSucceed(() => ""));
+            const entries = yield* fs.readDirectory(launchDir).pipe(Effect.orElseSucceed(() => []));
+            const registered = yield* Effect.findFirst(entries, (entry) =>
+              Effect.gen(function* () {
+                const record = NodePath.join(launchDir, entry);
+                const pidFile = NodePath.join(record, "pid");
+                if (
+                  (yield* read(NodePath.join(record, "managed"))).trim() !== "managed" ||
+                  (yield* read(pidFile)).trim() !== String(pid) ||
+                  (yield* read(NodePath.join(record, "port"))).trim() !== String(port)
+                )
+                  return false;
+                const info = yield* fs.stat(pidFile).pipe(Effect.option);
+                const writtenAt = Option.flatMap(info, (stat) => stat.mtime);
+                return (
+                  Option.isSome(writtenAt) &&
+                  (yield* legacyOwnerIsLive(
+                    { pid, startedAt: writtenAt.value.toISOString() },
+                    false,
+                  ))
+                );
+              }),
+            );
+            if (Option.isNone(registered)) {
+              return yield* error;
+            }
+            const argv = (yield* read("/proc/" + pid + "/cmdline")).split("\0");
+            const serveArgs = [
+              "serve",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              String(port),
+              "--base-dir",
+              baseDir,
+            ];
+            if (argv.slice(-serveArgs.length - 1).join("\0") !== serveArgs.join("\0") + "\0") {
+              return yield* error;
+            }
+
+            yield* Effect.logInfo("Handing the WSL server from the SSH launcher to the desktop.", {
+              pid,
+            });
+            yield* Effect.try({
+              try: () => process.kill(pid, "SIGTERM"),
+              catch: () => error,
+            });
+            return yield* acquireOwnership(statePath, true);
+          }),
+        }),
+      ),
+    (launchLocked) =>
+      Option.isSome(launchLocked)
+        ? FileSystem.FileSystem.use((fs) => fs.remove(launchLock, { force: true })).pipe(
+            Effect.ignore({ log: true }),
+          )
+        : Effect.void,
+  );
 });

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Injects a real file replacement during the native SQLite transaction.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
@@ -168,6 +169,90 @@ describe("server ownership", () => {
       assert.equal(attempts.filter((result) => result._tag === "Success").length, 1);
       const refused = attempts.find((result) => result._tag === "Failure");
       assert.equal(refused?.failure._tag, "ServerAlreadyRunningError");
+    }).pipe(Effect.provide(layerOwnership)),
+  );
+
+  it.live("hands a WSL desktop the home held by its SSH-launched server", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      if ((yield* HostProcess.Platform) !== "linux") return;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-wsl-owner-" });
+      const baseDir = path.join(root, ".t3");
+      const stateDir = path.join(baseDir, "userdata");
+      const statePath = path.join(stateDir, "server-runtime.json");
+      const launchRoot = path.join(baseDir, "ssh-launch");
+      const launchDir = path.join(launchRoot, "connection");
+      yield* fs.makeDirectory(stateDir, { recursive: true });
+      yield* fs.makeDirectory(launchDir, { recursive: true });
+
+      const child = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          NodeChildProcess.spawn(
+            process.execPath,
+            [
+              "-e",
+              `
+              const fs = require("node:fs");
+              const { DatabaseSync } = require("node:sqlite");
+              const baseDir = process.argv.at(-1);
+              const db = new DatabaseSync(baseDir + "/userdata/server-owner.sqlite");
+              db.exec("BEGIN EXCLUSIVE");
+              process.once("SIGTERM", () => {
+                const launcher = fs.readFileSync(baseDir + "/ssh-launch/.launch.lock", "utf8");
+                db.close();
+                process.exit(launcher.trim() === String(process.ppid) ? 0 : 1);
+              });
+              process.stdout.write("ready");
+              process.stdin.resume();
+            `,
+              "--",
+              "serve",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              "3773",
+              "--base-dir",
+              baseDir,
+            ],
+            { stdio: ["pipe", "pipe", "pipe"] },
+          ),
+        ),
+        (child) =>
+          Effect.sync(() => {
+            child.kill();
+          }),
+      );
+      const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+      yield* Effect.promise(() =>
+        Promise.race([
+          new Promise<void>((resolve) => child.stdout.once("data", () => resolve())),
+          exited.then(() => {
+            throw new Error("SSH server fixture exited before taking the lock");
+          }),
+        ]),
+      );
+      const state = yield* makeState;
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: { ...state, pid: child.pid!, ownerId: "ssh-owner" },
+      });
+      const pidFile = path.join(launchDir, "pid");
+      yield* fs.writeFileString(pidFile, String(child.pid));
+      yield* fs.writeFileString(path.join(launchDir, "port"), "3773");
+      yield* fs.writeFileString(path.join(launchDir, "managed"), "managed");
+      yield* fs.utimes(pidFile, 1, 1);
+      const refused = yield* ServerOwnership.acquireServerOwnership(statePath, {
+        wslDesktop: true,
+      }).pipe(Effect.result);
+      assert.equal(refused._tag === "Failure" && refused.failure._tag, "ServerAlreadyRunningError");
+      assert.isNull(child.exitCode);
+      yield* fs.writeFileString(pidFile, String(child.pid));
+
+      yield* ServerOwnership.acquireServerOwnership(statePath, { wslDesktop: true });
+      const code = yield* Effect.promise(() => exited);
+      assert.equal(code, 0);
+      assert.isFalse(yield* fs.exists(path.join(launchRoot, ".launch.lock")));
     }).pipe(Effect.provide(layerOwnership)),
   );
 

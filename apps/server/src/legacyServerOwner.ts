@@ -21,9 +21,10 @@ export const legacyOwnerStartedBeforeRecord = (
   output: string | undefined,
   recordedAt: number,
   platform: NodeJS.Platform,
+  unknownIsLive = true,
 ): boolean => {
-  if (output === undefined) return true;
+  if (output === undefined) return unknownIsLive;
   const trimmed = output.trim();
   const startedAt = Date.parse(platform === "win32" ? trimmed : `${trimmed} UTC`);
-  return !Number.isFinite(startedAt) || startedAt <= recordedAt + 1_000;
+  return Number.isFinite(startedAt) ? startedAt <= recordedAt + 1_000 : unknownIsLive;
 };
